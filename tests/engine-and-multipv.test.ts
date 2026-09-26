@@ -680,7 +680,7 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   assert.strictEqual(fullTuning.skillLevel, 21, 'Full strength must set Skill_Level 21');
   assert.strictEqual(fullTuning.targetElo, 3500);
 
-  // Human Mode at 2500 Elo (with recommended depth 14 ply)
+  // Human Mode at 2500 Elo (with fast responsive recommended depth 8–11 ply)
   const human2500Tuning = getPatriciaTuning({
     ...DEFAULT_SETTINGS,
     activeEngineId: 'patricia',
@@ -691,7 +691,7 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   assert.strictEqual(human2500Tuning.isHuman, true);
   assert.strictEqual(human2500Tuning.skillLevel, 17);
   assert.strictEqual(human2500Tuning.targetElo, 2500);
-  assert(human2500Tuning.recommendedDepth >= 12 && human2500Tuning.recommendedDepth <= 15);
+  assert(human2500Tuning.recommendedDepth >= 8 && human2500Tuning.recommendedDepth <= 11);
 
   // Aggressive Personality Description
   const aggDesc = getEngineStrengthDescription({
@@ -745,6 +745,83 @@ console.log('\n11. Testing Maia hanging piece & Queen safety defense (calculateH
 
   console.log(`   Threat Position Top Move: ${candidates[0]?.san} (safely escapes Queen under attack)`);
   console.log('   ✓ Hanging Queen and major piece defense verified');
+}
+
+// --------------------------------------------------------------------------
+// 12. Testing HighlightController board defense (rejecting already moved pieces)
+// --------------------------------------------------------------------------
+console.log('\n12. Testing HighlightController board defense against stale move suggestions...');
+{
+  const snapshots: RenderSnapshot[] = [];
+  const controller = new HighlightController(
+    {
+      ...DEFAULT_SETTINGS,
+      multiPv: 1,
+      controlledColor: 'auto',
+    },
+    (snapshot) => {
+      snapshots.push(snapshot);
+    }
+  );
+
+  // Position: White has moved 1. e4!
+  // Square e2 is now vacant, pawn is on e4, Black to move (turn: 'b')
+  const pieceMapAfterE4 = new Map<string, string>([
+    ['e4', 'P'],
+    ['e1', 'K'],
+    ['e8', 'k'],
+  ]);
+
+  const boardAfterE4: BoardState = {
+    fen: '4k3/8/8/8/4P3/8/8/4K3 b - - 0 1',
+    positionKey: 'pos_after_e4',
+    isFlipped: false,
+    turn: 'b',
+    playerColor: 'w',
+    controlledColor: 'auto',
+    pieceMap: pieceMapAfterE4,
+  };
+
+  controller.setBoardState(boardAfterE4);
+
+  // An old/delayed evaluation arrives suggesting e2e4 (from the previous position when e2 was a pawn)
+  const staleEvaluation: EngineEvaluation = {
+    engineInstanceId: 'patricia',
+    analysisId: 99,
+    positionKey: 'pos_after_e4',
+    fen: '4k3/8/8/8/4P3/8/8/4K3 b - - 0 1',
+    depth: 10,
+    scoreCp: 35,
+    scoreMate: null,
+    whiteScoreCp: 35,
+    whiteScoreMate: null,
+    bestMove: 'e2e4',
+    multiPvLines: [],
+    candidates: [
+      {
+        pvId: 1,
+        from: 'e2', // VACANT ON CURRENT BOARD!
+        to: 'e4',
+        depth: 10,
+        scoreCp: 35,
+        scoreMate: null,
+        pv: ['e2e4'],
+      },
+    ],
+    isCalculating: false,
+    timestamp: Date.now(),
+  };
+
+  controller.handleEvaluation(staleEvaluation);
+
+  // Verify that the stale candidate was rejected because e2 is vacant on the current board!
+  const lastSnapshot = snapshots[snapshots.length - 1];
+  assert(
+    !lastSnapshot || lastSnapshot.candidates.length === 0,
+    'Stale move e2e4 must be completely rejected because square e2 is vacant on the board'
+  );
+
+  console.log('   ✓ Stale moves for already moved pieces are strictly rejected by pieceMap defense');
 }
 
 console.log('\n=== ALL TESTS PASSED SUCCESSFULLY ===');

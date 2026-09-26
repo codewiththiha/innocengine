@@ -371,6 +371,9 @@ class PatriciaRunner implements IEngineRunner {
   private worker: Worker | null = null;
   private parser: UciParser;
   private isReady: boolean = false;
+  private isSearching: boolean = false;
+  private activeSearchAnalysisId: number = 0;
+  private activeSearchPositionKey: string = '';
   private currentFen: string = '';
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
@@ -393,6 +396,13 @@ class PatriciaRunner implements IEngineRunner {
   public init(): Promise<void> {
     return new Promise((resolve) => {
       try {
+        if (this.worker) {
+          try {
+            this.worker.terminate();
+          } catch (_) {}
+          this.worker = null;
+        }
+
         this.onStatus('loading', 'Initializing Patricia WASM...');
         const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
         this.worker = new Worker(workerUrl);
@@ -402,6 +412,7 @@ class PatriciaRunner implements IEngineRunner {
           if (!resolved) {
             resolved = true;
             this.isReady = true;
+            this.isSearching = false;
             this.onStatus('ready', 'Patricia 5.1 Ready');
             resolve();
             if (this.pendingAnalysis) {
@@ -437,6 +448,9 @@ class PatriciaRunner implements IEngineRunner {
         this.worker.postMessage('isready');
         this.worker.postMessage('setoption name Hash value 32');
         this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
+        if (this.currentSkillLevel > 0) {
+          this.worker.postMessage(`setoption name Skill_Level value ${this.currentSkillLevel}`);
+        }
       } catch (err) {
         console.error('[PatriciaRunner] Initialization failed:', err);
         this.onStatus('error', 'Failed to launch Patricia worker');
@@ -448,13 +462,30 @@ class PatriciaRunner implements IEngineRunner {
   private handleLine(line: string) {
     if (line === 'uciok' || line === 'readyok') {
       this.isReady = true;
+      this.isSearching = false;
       this.onStatus('ready', 'Patricia 5.1 Ready');
+      return;
+    }
+
+    if (line.startsWith('bestmove')) {
+      this.isSearching = false;
+    }
+
+    // STRICT STALENESS FILTER:
+    // If this line was emitted from an older analysis or a different position key,
+    // immediately drop it! This prevents previous-move suggestions from rendering on a new position.
+    if (this.activeSearchAnalysisId !== this.currentAnalysisId) {
       return;
     }
 
     const partialEval = this.parser.parseLine(line);
     if (partialEval && partialEval.bestMove) {
       if (!partialEval.isCalculating && (!partialEval.candidates || partialEval.candidates.length === 0)) {
+        return;
+      }
+
+      // Ensure the evaluated positionKey matches the active position
+      if (partialEval.positionKey && partialEval.positionKey !== this.currentPositionKey) {
         return;
       }
 
@@ -474,9 +505,9 @@ class PatriciaRunner implements IEngineRunner {
 
       const evalData: EngineEvaluation = {
         engineInstanceId: 'patricia',
-        analysisId: partialEval.analysisId || this.currentAnalysisId,
-        positionKey: partialEval.positionKey || this.currentPositionKey,
-        fen: partialEval.fen || this.currentFen,
+        analysisId: this.currentAnalysisId,
+        positionKey: this.currentPositionKey,
+        fen: this.currentFen,
         depth: partialEval.depth || 0,
         scoreCp: partialEval.scoreCp ?? null,
         scoreMate: partialEval.scoreMate ?? null,
@@ -501,17 +532,35 @@ class PatriciaRunner implements IEngineRunner {
   }
 
   public analyze(fen: string, analysisId: number, positionKey: string, options: EngineRunOptions) {
-    if (!this.worker) return;
-
-    if (!this.isReady) {
-      this.pendingAnalysis = { fen, analysisId, positionKey, options };
-      return;
-    }
-
     this.currentFen = fen;
     this.currentAnalysisId = analysisId;
     this.currentPositionKey = positionKey;
     this.senderTabId = options.senderTabId;
+
+    // INSTANT TERMINATION OF STALE SYNCHRONOUS SEARCH:
+    // Single-threaded WASM engines execute synchronous C++ loops that cannot be
+    // interrupted by postMessage('stop'). Terminating the busy worker immediately halts
+    // the old calculation in 0ms and eliminates the lagging queue backlog.
+    if (this.isSearching && this.worker) {
+      try {
+        this.worker.terminate();
+      } catch (_) {}
+      this.worker = null;
+      this.isReady = false;
+      this.isSearching = false;
+      this.pendingAnalysis = { fen, analysisId, positionKey, options };
+      this.init();
+      return;
+    }
+
+    if (!this.worker || !this.isReady) {
+      this.pendingAnalysis = { fen, analysisId, positionKey, options };
+      return;
+    }
+
+    this.activeSearchAnalysisId = analysisId;
+    this.activeSearchPositionKey = positionKey;
+    this.isSearching = true;
     this.parser.reset(fen, analysisId, positionKey);
 
     // Dynamic MultiPV
@@ -535,21 +584,27 @@ class PatriciaRunner implements IEngineRunner {
       this.currentSkillLevel = tuning.skillLevel;
     }
 
-    const targetDepth = tuning.isHuman
-      ? (options.depth || tuning.recommendedDepth)
-      : (options.depth || 16);
+    // Interactive responsive calibration: depth 7 to 10 with 350ms cap for sub-second real-time responsiveness
+    const targetDepth = tuning.recommendedDepth;
 
-    this.worker.postMessage('stop');
     this.worker.postMessage(`position fen ${fen}`);
-    this.worker.postMessage(`go depth ${targetDepth}`);
+    this.worker.postMessage(`go depth ${targetDepth} movetime 350`);
     this.onStatus('analyzing', undefined, this.senderTabId);
   }
 
   public stop() {
-    if (this.worker) {
+    if (this.isSearching && this.worker) {
+      try {
+        this.worker.terminate();
+      } catch (_) {}
+      this.worker = null;
+      this.isReady = false;
+      this.isSearching = false;
+      this.init();
+    } else if (this.worker) {
       this.worker.postMessage('stop');
-      this.onStatus('ready');
     }
+    this.onStatus('ready', 'Patricia Ready', this.senderTabId);
   }
 
   public destroy() {
@@ -561,6 +616,7 @@ class PatriciaRunner implements IEngineRunner {
       this.worker = null;
     }
     this.isReady = false;
+    this.isSearching = false;
   }
 }
 

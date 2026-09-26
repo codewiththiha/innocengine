@@ -59,7 +59,7 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
       isHuman: false,
       skillLevel: 21,
       targetElo: 3500,
-      recommendedDepth: settings.depth || 16,
+      recommendedDepth: Math.min(10, settings.depth || 10),
       personality,
       multiPv,
       cpLoss: 0,
@@ -67,8 +67,8 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
   }
 
   const { skillLevel, clampedElo, cpLoss } = mapEloToPatriciaSkill(rawElo);
-  // For 2500 Elo human-like play: depth 10–14 is ideal
-  const recommendedDepth = Math.max(8, Math.min(18, Math.round(8 + ((clampedElo - 500) / 2500) * 8)));
+  // Fast, responsive human calibration: depth 7 to 10 ensures sub-300ms analysis
+  const recommendedDepth = Math.max(7, Math.min(10, Math.round(7 + ((clampedElo - 500) / 2500) * 3)));
 
   return {
     isHuman: true,

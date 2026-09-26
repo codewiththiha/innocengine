@@ -232,12 +232,38 @@ export class HighlightController {
   }
 
   private validateCandidates(candidates: EngineCandidate[]): EngineCandidate[] {
-    // Root candidates produced by the chess engine are inherently valid moves for the position.
-    // Opponent continuation display is controlled by showOpponentMoves.
-    return candidates.map((cand) => ({
-      ...cand,
-      continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
-    }));
+    const currentBoard = this.currentBoardState;
+    const pieceMap = currentBoard?.pieceMap;
+    const turn = currentBoard?.turn;
+
+    return candidates
+      .filter((cand) => {
+        if (!cand || !cand.from || cand.from.length !== 2) return false;
+
+        // Authoritative Board Defense:
+        // Ensure the candidate piece's source square actually exists on the board
+        // and matches the current player's color. This permanently prevents delayed or
+        // out-of-sync engine evaluations from highlighting pieces that have already moved.
+        if (pieceMap && pieceMap.size > 0 && turn) {
+          const piece = pieceMap.get(cand.from);
+          if (!piece) {
+            // Source square is vacant; the piece has already moved!
+            return false;
+          }
+          const isWhitePiece = piece === piece.toUpperCase();
+          const isExpectedWhite = turn === 'w';
+          if (isWhitePiece !== isExpectedWhite) {
+            // Square holds an opponent piece; invalid move for current turn!
+            return false;
+          }
+        }
+
+        return true;
+      })
+      .map((cand) => ({
+        ...cand,
+        continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
+      }));
   }
 
   private applyOpeningBook(engineCandidates: EngineCandidate[]): EngineCandidate[] {
