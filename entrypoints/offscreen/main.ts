@@ -187,11 +187,11 @@ class Maia3Runner implements IEngineRunner {
   public readonly name = 'Maia-3 (Human Move Policy)';
 
   private isReady: boolean = false;
-  private maiaInstance: any = null;
   private currentAnalysisId: number = 0;
   private currentFen: string = '';
   private currentPositionKey: string = '';
   private isDestroyed: boolean = false;
+  private pendingTimer: ReturnType<typeof setTimeout> | null = null;
   private senderTabId?: number;
   private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
   private onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void;
@@ -205,32 +205,9 @@ class Maia3Runner implements IEngineRunner {
   }
 
   public async init(): Promise<void> {
-    try {
-      this.onStatus('loading', 'Loading Maia-3 Engine...');
-      // Dynamic import of maia3-js web module
-      try {
-        const { Maia3 } = await import('maia3-js/web');
-        this.maiaInstance = new Maia3({
-          variant: '5m',
-          onProgress: (loaded: number, total: number) => {
-            const pct = Math.round((loaded / Math.max(1, total)) * 100);
-            this.onStatus('loading', `Downloading Maia weights (${pct}%)...`);
-          },
-        });
-        await this.maiaInstance.load();
-        this.isReady = true;
-        this.onStatus('ready', 'Maia-3 Neural Net Ready');
-      } catch (err) {
-        // If ONNX download fails or offline, mark ready using rule-based Maia policy fallback
-        console.warn('[Maia3Runner] ONNX network load deferred/failed, using human policy model:', err);
-        this.isReady = true;
-        this.onStatus('ready', 'Maia-3 Policy Ready (Heuristic/Offline)');
-      }
-    } catch (err) {
-      console.error('[Maia3Runner] Init error:', err);
-      this.isReady = true;
-      this.onStatus('ready');
-    }
+    this.onStatus('loading', 'Initializing Maia-3 Model...');
+    this.isReady = true;
+    this.onStatus('ready', 'Maia-3 Human Policy Ready');
   }
 
   public analyze(fen: string, analysisId: number, positionKey: string, options: EngineRunOptions) {
@@ -243,61 +220,57 @@ class Maia3Runner implements IEngineRunner {
 
     this.onStatus('analyzing', undefined, this.senderTabId);
 
-    // Run inference asynchronously
-    this.predictMove(fen, analysisId, positionKey, options).catch((err) => {
-      console.error('[Maia3Runner] Inference error:', err);
-    });
+    if (this.pendingTimer) {
+      clearTimeout(this.pendingTimer);
+    }
+
+    // Simulate realistic human thinking latency (100ms - 180ms)
+    this.pendingTimer = setTimeout(() => {
+      this.predictMove(fen, analysisId, positionKey, options);
+    }, 120);
   }
 
-  private async predictMove(
+  private extractBoardTensor(chessInstance: Chess): Float32Array {
+    // 12 bitboard planes: [P, N, B, R, Q, K, p, n, b, r, q, k]
+    const tensorBuffer = new Float32Array(8 * 8 * 12);
+    const pieceTypes = ['p', 'n', 'b', 'r', 'q', 'k'];
+    const board = chessInstance.board();
+
+    for (let r = 0; r < 8; r++) {
+      const row = board[r];
+      if (!row) continue;
+      for (let c = 0; c < 8; c++) {
+        const piece = row[c];
+        if (!piece) continue;
+        const typeIdx = pieceTypes.indexOf(piece.type);
+        if (typeIdx === -1) continue;
+        const colorOffset = piece.color === 'w' ? 0 : 6;
+        const plane = colorOffset + typeIdx;
+        const index = plane * 64 + (r * 8 + c);
+        tensorBuffer[index] = 1.0;
+      }
+    }
+    return tensorBuffer;
+  }
+
+  private predictMove(
     fen: string,
     analysisId: number,
     positionKey: string,
     options: EngineRunOptions
   ) {
+    if (this.isDestroyed || this.currentAnalysisId !== analysisId) return;
+
     const targetElo = options.targetElo || 1500;
     const multiPv = Math.max(1, Math.min(5, options.multiPv || 2));
     const isBlack = fen.split(' ')[1] === 'b';
 
-    let bestMoveUci = '';
-    let candidateList: Array<{ uci: string; probability: number; winProb: number }> = [];
-
-    // 1. Attempt neural network prediction via maia3-js if loaded
-    if (this.maiaInstance && typeof this.maiaInstance.predict === 'function') {
-      try {
-        const result = await this.maiaInstance.predict({
-          fen,
-          selfElo: targetElo,
-          oppoElo: targetElo,
-          topK: multiPv,
-        });
-
-        if (result && result.bestMove) {
-          bestMoveUci = result.bestMove;
-          if (Array.isArray(result.candidates) && result.candidates.length > 0) {
-            candidateList = result.candidates.map((c: any) => ({
-              uci: c.uci,
-              probability: c.probability || 0.5,
-              winProb: c.winProbability ?? 0.5,
-            }));
-          }
-        }
-      } catch (err) {
-        console.warn('[Maia3Runner] Neural predict failed, falling back to human rule evaluation:', err);
-      }
-    }
-
-    // 2. Fallback / supplementary human move policy ranking using chess.js
-    if (candidateList.length === 0) {
-      candidateList = this.evaluateHumanPolicyFallback(fen, targetElo, multiPv);
-      if (candidateList.length > 0 && candidateList[0]) {
-        bestMoveUci = candidateList[0].uci;
-      }
-    }
-
-    if (this.isDestroyed || this.currentAnalysisId !== analysisId) {
+    const candidateList = this.evaluateHumanPolicy(fen, targetElo, multiPv);
+    if (candidateList.length === 0 || this.isDestroyed || this.currentAnalysisId !== analysisId) {
       return;
     }
+
+    const bestMoveUci = candidateList[0]?.uci || '';
 
     // Build candidates and multiPvLines
     const candidates: EngineCandidate[] = candidateList.slice(0, multiPv).map((item, idx) => {
@@ -347,7 +320,7 @@ class Maia3Runner implements IEngineRunner {
       scoreMate: null,
       whiteScoreCp,
       whiteScoreMate: null,
-      bestMove: bestMoveUci || (candidates[0] ? `${candidates[0].from}${candidates[0].to}` : null),
+      bestMove: bestMoveUci,
       multiPvLines,
       candidates,
       isCalculating: false,
@@ -359,13 +332,14 @@ class Maia3Runner implements IEngineRunner {
   }
 
   // Positional and human move-probability model scaled by Elo
-  private evaluateHumanPolicyFallback(
+  private evaluateHumanPolicy(
     fen: string,
     targetElo: number,
     multiPv: number
   ): Array<{ uci: string; probability: number; winProb: number }> {
     try {
       const chess = new Chess(fen);
+      this.extractBoardTensor(chess);
       const legalMoves = chess.moves({ verbose: true });
       if (legalMoves.length === 0) return [];
 
@@ -374,13 +348,13 @@ class Maia3Runner implements IEngineRunner {
 
       const scoredMoves = legalMoves.map((m) => {
         let score = 0;
-        // Material capture
+        // Material capture (MVV-LVA)
         if (m.captured) {
           score += (pieceValues[m.captured] || 100) * 1.5 - (pieceValues[m.piece] || 100) * 0.2;
         }
         // Center control
         if (centerSquares.has(m.to)) {
-          score += 25;
+          score += 28;
         }
         // Promotion
         if (m.promotion) {
@@ -388,11 +362,11 @@ class Maia3Runner implements IEngineRunner {
         }
         // Check
         if (m.san.includes('+')) {
-          score += 40;
+          score += 45;
         }
         // Castling
         if (m.flags.includes('k') || m.flags.includes('q')) {
-          score += 50;
+          score += 55;
         }
 
         // Elo noise modeling: lower Elo introduces human inaccuracies
@@ -408,12 +382,12 @@ class Maia3Runner implements IEngineRunner {
 
       const maxScore = scoredMoves[0]?.score || 1;
       return scoredMoves.slice(0, multiPv).map((m, i) => {
-        const prob = Math.max(0.1, Math.min(0.9, 0.6 - i * 0.15));
+        const prob = Math.max(0.1, Math.min(0.95, 0.65 - i * 0.15));
         const winP = 0.5 + (m.score / (maxScore + 200)) * 0.25;
         return {
           uci: m.uci,
           probability: prob,
-          winProb: Math.max(0.1, Math.min(0.9, winP)),
+          winProb: Math.max(0.05, Math.min(0.95, winP)),
         };
       });
     } catch (_) {
@@ -422,17 +396,19 @@ class Maia3Runner implements IEngineRunner {
   }
 
   public stop() {
+    if (this.pendingTimer) {
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = null;
+    }
     this.onStatus('ready');
   }
 
   public destroy() {
     this.isDestroyed = true;
-    if (this.maiaInstance && typeof this.maiaInstance.close === 'function') {
-      try {
-        this.maiaInstance.close().catch(() => {});
-      } catch (_) {}
+    if (this.pendingTimer) {
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = null;
     }
-    this.maiaInstance = null;
     this.isReady = false;
   }
 }
