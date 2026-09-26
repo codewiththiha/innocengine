@@ -252,12 +252,20 @@ export class HighlightController {
     if (!openingSettings?.enabled) return null;
     if (!this.isWithinBookDepth(this.currentBoardState.fen)) return null;
 
-    // 1. Try PGN-indexed catalog resolver first
+    // Strict Player-Turn Gating: Book recommendations are exclusively for the active player's turn!
+    // Never highlight book moves when it is the opponent's turn to move.
+    const turn = this.currentBoardState.fen.split(' ')[1] as 'w' | 'b';
+    if (this.currentBoardState.playerColor && turn !== this.currentBoardState.playerColor) {
+      return null;
+    }
+
+    // 1. Try PGN-indexed catalog resolver first with player color awareness
     const resolved = resolveSafeOpeningEntry(
       globalOpeningIndex,
       this.currentBoardState.fen,
       this.settings,
-      engineCandidates
+      engineCandidates,
+      this.currentBoardState.playerColor
     );
 
     if (resolved) {

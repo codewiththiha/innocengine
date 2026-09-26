@@ -41,6 +41,7 @@ export class BoardParser {
     // 1. Direct class or attribute on board element
     if (
       board.classList.contains('flipped') ||
+      board.classList.contains('orientation-black') ||
       board.hasAttribute('flipped') ||
       board.getAttribute('orientation') === 'black' ||
       board.getAttribute('data-orientation') === 'black'
@@ -50,11 +51,12 @@ export class BoardParser {
 
     // 2. Ancestor container classes and attributes
     const parent = board.closest(
-      '.board-layout-main, .board-container, #board-layout-chessboard, .board-layout-chessboard'
+      '.board-layout-main, .board-container, #board-layout-chessboard, .board-layout-chessboard, .round__app, cg-wrap'
     );
     if (
       parent &&
       (parent.classList.contains('flipped') ||
+        parent.classList.contains('orientation-black') ||
         parent.hasAttribute('flipped') ||
         parent.getAttribute('orientation') === 'black' ||
         parent.getAttribute('data-orientation') === 'black')
@@ -68,34 +70,23 @@ export class BoardParser {
     );
     if (coordTexts.length > 0) {
       const boardRect = board.getBoundingClientRect();
-      const midY = boardRect.top + boardRect.height / 2;
-      for (const text of Array.from(coordTexts)) {
-        const content = text.textContent?.trim();
-        if (content === '1' || content === '8') {
-          const rect = text.getBoundingClientRect();
-          if (rect.height > 0) {
-            // If coordinate '1' is in the top half, rank 1 is on top -> board is flipped
-            if (content === '1') {
-              return rect.top < midY;
-            }
-            // If coordinate '8' is in the bottom half, rank 8 is on bottom -> board is flipped
-            if (content === '8') {
-              return rect.top > midY;
+      if (boardRect.height > 0) {
+        const midY = boardRect.top + boardRect.height / 2;
+        for (const text of Array.from(coordTexts)) {
+          const content = text.textContent?.trim();
+          if (content === '1' || content === '8') {
+            const rect = text.getBoundingClientRect();
+            if (rect.height > 0) {
+              // If coordinate '1' is in the top half, rank 1 is on top -> board is flipped
+              if (content === '1') {
+                return rect.top < midY;
+              }
+              // If coordinate '8' is in the bottom half, rank 8 is on bottom -> board is flipped
+              if (content === '8') {
+                return rect.top > midY;
+              }
             }
           }
-        }
-      }
-    }
-
-    // 4. Piece layout position check: where is square-51 (e1) or square-41 (d1)?
-    const e1Piece = board.querySelector('.square-51, .square-41');
-    if (e1Piece) {
-      const boardRect = board.getBoundingClientRect();
-      const rect = e1Piece.getBoundingClientRect();
-      if (rect.height > 0 && boardRect.height > 0) {
-        // If rank 1 is near top (< 30%), board is flipped!
-        if (rect.top - boardRect.top < boardRect.height * 0.3) {
-          return true;
         }
       }
     }
@@ -104,30 +95,23 @@ export class BoardParser {
   }
 
   public static detectPlayerColor(board: HTMLElement, isFlipped: boolean): 'w' | 'b' {
-    // 1. Check bottom player container in Chess.com UI (User is always bottom player)
+    // 1. Check bottom player container in Chess.com / Lichess UI (User is always bottom player)
     const bottomPlayer = document.querySelector(
-      '.board-layout-player.bottom, .player-component.bottom, [data-test-element="player-bottom"], .board-player-bottom'
+      '.board-layout-player.bottom, .player-component.bottom, [data-test-element="player-bottom"], .board-player-bottom, .round__app .ruser-bottom'
     );
     if (bottomPlayer) {
-      if (
-        bottomPlayer.querySelector('.piece.wk, .piece-white, .user-tagline-white, .white-square') ||
-        bottomPlayer.classList.contains('white') ||
-        bottomPlayer.getAttribute('data-color') === 'w'
-      ) {
-        return 'w';
-      }
-      if (
-        bottomPlayer.querySelector('.piece.bk, .piece-black, .user-tagline-black, .black-square') ||
-        bottomPlayer.classList.contains('black') ||
-        bottomPlayer.getAttribute('data-color') === 'b'
-      ) {
-        return 'b';
-      }
+      const dataColor = bottomPlayer.getAttribute('data-color');
+      if (dataColor === 'w' || dataColor === 'white') return 'w';
+      if (dataColor === 'b' || dataColor === 'black') return 'b';
+
+      if (bottomPlayer.classList.contains('white')) return 'w';
+      if (bottomPlayer.classList.contains('black')) return 'b';
     }
 
-    // 2. Board orientation is primary indicator:
-    // If board is flipped, Black is at the bottom -> player is 'b'
-    // If not flipped, White is at the bottom -> player is 'w'
+    // 2. Board orientation is the definitive indicator:
+    // When playing on Chess.com or Lichess, the local user is always seated at the bottom.
+    // If board is flipped, Black is at the bottom -> player is Black ('b')
+    // If not flipped, White is at the bottom -> player is White ('w')
     return isFlipped ? 'b' : 'w';
   }
 

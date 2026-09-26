@@ -561,6 +561,109 @@ body {
   margin-top: 10px;
 }
 
+.opening-presets-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.presets-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.presets-scroll {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.presets-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.preset-btn {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.preset-btn:hover {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.preset-btn.clear {
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+.preset-btn.clear:hover {
+  background: #f43f5e;
+  color: #ffffff;
+}
+
+.opening-side-tabs {
+  display: flex;
+  background: #0f172a;
+  padding: 3px;
+  border-radius: 6px;
+  gap: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.side-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 6px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.side-tab:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.side-tab.active {
+  background: #1e293b;
+  color: #38bdf8;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.tab-pill {
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
 .opening-search-input {
   width: 100%;
   background: #1e293b;
@@ -749,6 +852,13 @@ body {
   color: #64748b;
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+.opening-tag.pgn-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.2);
 }
 
 @keyframes fadeInOut {

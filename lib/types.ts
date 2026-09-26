@@ -43,6 +43,8 @@ export type OpeningMode = 'off' | 'hint' | 'coexist' | 'prefer' | 'book-only' | 
 export interface OpeningConfig {
   enabled: boolean;
   repertoireId: string;
+  whiteRepertoireId?: string;
+  blackRepertoireId?: string;
   selectedOpeningIds?: string[];
   mode: OpeningMode;
   maxPlies: number;

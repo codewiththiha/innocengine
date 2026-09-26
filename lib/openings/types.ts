@@ -55,6 +55,7 @@ export interface OpeningDefinition {
 export interface BookPositionEntry {
   openingId: string;
   openingName: string;
+  side: OpeningSide;
   fen: string;
   uci: string;
   san: string;
@@ -96,6 +97,8 @@ export interface OpeningEnginePolicy {
 export interface OpeningConfig {
   enabled: boolean;
   repertoireId: string;
+  whiteRepertoireId?: string;
+  blackRepertoireId?: string;
   selectedOpeningIds?: string[];
   mode: OpeningMode;
   maxPlies: number;

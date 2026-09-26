@@ -43,10 +43,19 @@ export function categoryMatches(
 
 export function selectedOpeningMatches(
   entry: BookPositionEntry,
-  config: OpeningConfig
+  config: OpeningConfig,
+  playerColor?: 'w' | 'b'
 ): boolean {
   if (config.selectedOpeningIds && config.selectedOpeningIds.length > 0) {
     return config.selectedOpeningIds.includes(entry.openingId);
+  }
+
+  // Side-specific repertoire binding:
+  if (playerColor === 'w' && (config as any).whiteRepertoireId && (config as any).whiteRepertoireId !== 'auto') {
+    return entry.openingId === (config as any).whiteRepertoireId;
+  }
+  if (playerColor === 'b' && (config as any).blackRepertoireId && (config as any).blackRepertoireId !== 'auto') {
+    return entry.openingId === (config as any).blackRepertoireId;
   }
 
   if (config.repertoireId && config.repertoireId !== 'auto') {
@@ -114,13 +123,21 @@ export function resolveSafeOpeningEntry(
   index: OpeningIndex,
   fen: string,
   settings: EngineSettings,
-  engineCandidates: EngineCandidate[] = []
+  engineCandidates: EngineCandidate[] = [],
+  playerColor?: 'w' | 'b'
 ): ResolvedBookEntry | null {
   const config = settings.opening;
   if (!config?.enabled) return null;
 
+  const turn = fen.split(' ')[1] as 'w' | 'b';
+  const effectivePlayerColor = playerColor || turn;
+
   const entries = index.lookupFiltered(fen, (entry) => {
-    if (!selectedOpeningMatches(entry, config)) return false;
+    // 1. Repertoire side matching: ensure opening belongs to the player's color
+    if (entry.side !== 'any' && entry.side !== effectivePlayerColor) {
+      return false;
+    }
+    if (!selectedOpeningMatches(entry, config, effectivePlayerColor)) return false;
     if (!categoryMatches(entry, config)) return false;
     return true;
   });

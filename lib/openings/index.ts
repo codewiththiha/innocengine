@@ -48,6 +48,7 @@ export class OpeningIndex {
 
     sans.forEach((san, index) => {
       const beforeFen = normalizeFenForBook(chess.fen());
+      const turn = beforeFen.split(' ')[1] as 'w' | 'b';
       let move;
       try {
         move = chess.move(san);
@@ -62,24 +63,33 @@ export class OpeningIndex {
       line.push(move.san);
       const uci = `${move.from}${move.to}${move.promotion ?? ''}`;
 
-      const entry: BookPositionEntry = {
-        openingId: def.id,
-        openingName: def.name,
-        fen: beforeFen,
-        uci,
-        san: move.san,
-        ply: index + 1,
-        line: [...line],
-        risk: def.risk,
-        categories: def.categories,
-        meme: def.meme,
-        trap: def.trap,
-        priority: def.priority ?? 0,
-      };
+      // Only index recommendations for the intended side of the repertoire!
+      // White repertoires ('w') only recommend moves on White's turn ('w').
+      // Black repertoires ('b') only recommend moves on Black's turn ('b').
+      // Universal repertoires ('any') recommend moves on either turn.
+      const isRecommendationForSide = def.side === 'any' || def.side === turn;
 
-      const existing = this.byFen.get(beforeFen) ?? [];
-      existing.push(entry);
-      this.byFen.set(beforeFen, existing);
+      if (isRecommendationForSide) {
+        const entry: BookPositionEntry = {
+          openingId: def.id,
+          openingName: def.name,
+          side: def.side,
+          fen: beforeFen,
+          uci,
+          san: move.san,
+          ply: index + 1,
+          line: [...line],
+          risk: def.risk,
+          categories: def.categories,
+          meme: def.meme,
+          trap: def.trap,
+          priority: def.priority ?? 0,
+        };
+
+        const existing = this.byFen.get(beforeFen) ?? [];
+        existing.push(entry);
+        this.byFen.set(beforeFen, existing);
+      }
     });
   }
 

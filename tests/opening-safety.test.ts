@@ -259,4 +259,229 @@ console.log('\n6. Testing HighlightController Tactical Veto in book-only & prefe
   console.log('   ✓ Tactical Veto prevents book overrides in tactical danger');
 }
 
+// --------------------------------------------------------------------------
+// 7. Repertoire Side Isolation (White vs Black)
+// --------------------------------------------------------------------------
+console.log('\n7. Testing repertoire side isolation (White vs Black openings)...');
+{
+  const index = new OpeningIndex(OPENING_CATALOG);
+
+  // White start position
+  const whiteStartFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const whiteSettings = {
+    ...DEFAULT_SETTINGS,
+    opening: {
+      ...DEFAULT_SETTINGS.opening,
+      enabled: true,
+      mode: 'adaptive' as const,
+      selectedOpeningIds: [],
+    },
+  };
+
+  const whiteResolved = resolveSafeOpeningEntry(index, whiteStartFen, whiteSettings, [], 'w');
+  assert(whiteResolved !== null, 'White must receive opening recommendation at start');
+  assert.strictEqual(whiteResolved.side, 'w', 'Recommended opening at start must be for White');
+
+  // Verify no Black openings indexed at start
+  const allStartEntries = index.lookup(whiteStartFen);
+  const blackEntriesAtStart = allStartEntries.filter((e) => e.side === 'b');
+  assert.strictEqual(blackEntriesAtStart.length, 0, 'No Black openings must be indexed at White start turn');
+
+  // Black position after 1.e4
+  const chess1e4 = new Chess();
+  chess1e4.move('e4');
+  const blackTurnFen = chess1e4.fen();
+
+  const blackSettings = {
+    ...DEFAULT_SETTINGS,
+    opening: {
+      ...DEFAULT_SETTINGS.opening,
+      enabled: true,
+      mode: 'adaptive' as const,
+      selectedOpeningIds: [],
+    },
+  };
+
+  const blackResolved = resolveSafeOpeningEntry(index, blackTurnFen, blackSettings, [], 'b');
+  assert(blackResolved !== null, 'Black must receive opening response to 1.e4');
+  assert.strictEqual(blackResolved.side, 'b', 'Recommended response to 1.e4 must be for Black');
+
+  // Ensure White openings (e.g. Italian, Vienna) are NEVER recommended for Black
+  const blackReplies = index.lookup(blackTurnFen);
+  const whiteOpeningsAsBlackReply = blackReplies.filter((e) => e.side === 'w');
+  assert.strictEqual(whiteOpeningsAsBlackReply.length, 0, 'White openings must never be indexed as Black turn recommendations');
+
+  console.log('   ✓ Perfect side isolation: White openings only for White, Black defenses only for Black');
+}
+
+// --------------------------------------------------------------------------
+// 8. Opponent Turn Gating & HighlightController Role Consistency
+// --------------------------------------------------------------------------
+console.log('\n8. Testing HighlightController role consistency and opponent turn gating...');
+{
+  const snapshots: RenderSnapshot[] = [];
+  const controller = new HighlightController(
+    {
+      ...DEFAULT_SETTINGS,
+      highlightPlayerMoves: true,
+      highlightOpponentMoves: false,
+      opening: {
+        ...DEFAULT_SETTINGS.opening,
+        enabled: true,
+        mode: 'adaptive',
+      },
+      controlledColor: 'auto',
+    },
+    (snapshot) => {
+      snapshots.push(snapshot);
+    }
+  );
+
+  // Player is Black (isFlipped = true, playerColor = 'b')
+  // Turn 1: White moves first (turn = 'w' -> opponent turn)
+  const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  controller.setBoardState({
+    fen: startFen,
+    positionKey: 'pos_start',
+    isFlipped: true,
+    turn: 'w',
+    playerColor: 'b',
+    controlledColor: 'auto',
+    pieceMap: new Map(),
+  });
+
+  // Since it is White turn and player is Black, and highlightOpponentMoves is false:
+  // Controller must NOT show opening book moves for White!
+  const lastSnap = snapshots[snapshots.length - 1];
+  assert(lastSnap, 'Snapshot emitted');
+  assert.strictEqual(lastSnap.candidates.length, 0, 'Book moves must NOT be shown on opponent turn');
+
+  // Now White plays 1.e4 -> it is Black turn (turn = 'b' -> player turn!)
+  const chess1 = new Chess();
+  chess1.move('e4');
+  const fenAfterE4 = chess1.fen();
+
+  controller.setBoardState({
+    fen: fenAfterE4,
+    positionKey: 'pos_after_e4',
+    isFlipped: true,
+    turn: 'b',
+    playerColor: 'b',
+    controlledColor: 'auto',
+    pieceMap: new Map(),
+  });
+
+  const snapAfterE4 = snapshots[snapshots.length - 1];
+  assert(snapAfterE4, 'Snapshot emitted for player turn');
+  assert(snapAfterE4.candidates.length > 0, 'Player must receive candidate moves on their turn');
+  assert.strictEqual(snapAfterE4.candidates[0]?.isBookMove, true, 'Repertoire move recommended for player');
+
+  console.log('   ✓ Opponent turn book recommendations strictly gated');
+}
+
+// --------------------------------------------------------------------------
+// 9. Specific Repertoire Filtering (White: London, Black: Sicilian)
+// --------------------------------------------------------------------------
+console.log('\n9. Testing specific repertoire selection filtering...');
+{
+  const index = new OpeningIndex(OPENING_CATALOG);
+  const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+  // Configure London System specifically
+  const londonConfig = {
+    ...DEFAULT_SETTINGS,
+    opening: {
+      ...DEFAULT_SETTINGS.opening,
+      enabled: true,
+      selectedOpeningIds: ['london'],
+    },
+  };
+
+  const londonResolved = resolveSafeOpeningEntry(index, startFen, londonConfig, [], 'w');
+  assert(londonResolved, 'London System must resolve');
+  assert.strictEqual(londonResolved.openingId, 'london');
+  assert.strictEqual(londonResolved.uci, 'd2d4');
+
+  // Configure Sicilian Najdorf specifically for Black
+  const chess = new Chess();
+  chess.move('e4');
+  const afterE4Fen = chess.fen();
+
+  const sicilianConfig = {
+    ...DEFAULT_SETTINGS,
+    opening: {
+      ...DEFAULT_SETTINGS.opening,
+      enabled: true,
+      selectedOpeningIds: ['sicilian-najdorf'],
+    },
+  };
+
+  const sicilianResolved = resolveSafeOpeningEntry(index, afterE4Fen, sicilianConfig, [], 'b');
+  assert(sicilianResolved, 'Sicilian Najdorf must resolve');
+  assert.strictEqual(sicilianResolved.openingId, 'sicilian-najdorf');
+  assert.strictEqual(sicilianResolved.uci, 'c7c5');
+
+  console.log('   ✓ Explicit user repertoire selections accurately resolved');
+}
+
+// --------------------------------------------------------------------------
+// 10. Role Inversion Prevention & BoardParser Player Color Detection
+// --------------------------------------------------------------------------
+console.log('\n10. Testing BoardParser player color detection and captured piece immunity...');
+{
+  // Simulated DOM environment for Node testing
+  const mockBottomPlayer = {
+    classList: {
+      contains: (cls: string) => false,
+    },
+    getAttribute: (attr: string) => null,
+    // Captured pieces container: holds opponent pieces captured by user!
+    querySelector: (sel: string) => {
+      if (sel.includes('.piece.wk') || sel.includes('.piece-white')) {
+        return { className: 'piece wk' };
+      }
+      return null;
+    },
+  };
+
+  const originalDoc = (global as any).document;
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('.board-layout-player.bottom')) return mockBottomPlayer;
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+
+  const { BoardParser } = await import('../lib/board-parser');
+  const mockBoard = {
+    classList: { contains: () => false },
+    hasAttribute: () => false,
+    getAttribute: () => null,
+    closest: () => null,
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  } as any;
+
+  // When board is flipped (isFlipped = true), user is playing Black
+  // Even if captured pieces container has captured White pieces (.piece.wk), playerColor must be 'b'
+  const detectedColorWhenFlipped = BoardParser.detectPlayerColor(mockBoard, true);
+  assert.strictEqual(
+    detectedColorWhenFlipped,
+    'b',
+    'Player color must be Black when board is flipped, immune to captured White pieces'
+  );
+
+  // When board is not flipped (isFlipped = false), user is playing White
+  const detectedColorWhenNotFlipped = BoardParser.detectPlayerColor(mockBoard, false);
+  assert.strictEqual(
+    detectedColorWhenNotFlipped,
+    'w',
+    'Player color must be White when board is not flipped'
+  );
+
+  (global as any).document = originalDoc;
+  console.log('   ✓ Captured piece immunity: Black player never flips to White upon capturing White pieces');
+}
+
 console.log('\n=== ALL OPENING SAFETY TESTS PASSED SUCCESSFULLY ===');

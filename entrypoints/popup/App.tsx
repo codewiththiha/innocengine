@@ -1025,16 +1025,30 @@ export default function App() {
           {/* Searchable Categorized Opening Catalog */}
           <div style={{ marginTop: 12, opacity: settings.opening.enabled ? 1 : 0.45 }}>
             <div className="section-title" style={{ fontSize: 12, marginBottom: 4 }}>
-              <Sparkles size={13} /> Searchable Opening Catalog & Repertoires
+              <Sparkles size={13} /> Opening Catalog & Repertoire Builder
             </div>
             <OpeningBrowser
               openings={OPENING_CATALOG}
               selectedIds={settings.opening.selectedOpeningIds || []}
+              whiteRepertoireId={settings.opening.whiteRepertoireId || 'auto'}
+              blackRepertoireId={settings.opening.blackRepertoireId || 'auto'}
               onChange={(ids) => {
                 updateSetting('opening', {
                   ...settings.opening,
                   selectedOpeningIds: ids,
                   repertoireId: ids.length === 1 ? ids[0]! : 'auto',
+                });
+              }}
+              onWhiteRepertoireChange={(id) => {
+                updateSetting('opening', {
+                  ...settings.opening,
+                  whiteRepertoireId: id,
+                });
+              }}
+              onBlackRepertoireChange={(id) => {
+                updateSetting('opening', {
+                  ...settings.opening,
+                  blackRepertoireId: id,
                 });
               }}
             />

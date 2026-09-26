@@ -1,11 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import type { OpeningDefinition, OpeningCategory } from '../../../lib/openings/types';
-import { Search, Flame, Shield, Sparkles, Filter, X } from 'lucide-react';
+import { Search, Flame, Shield, Sparkles, Filter, X, Check, BookOpen, Swords, Zap } from 'lucide-react';
 
 interface OpeningBrowserProps {
   openings: OpeningDefinition[];
   selectedIds: string[];
+  whiteRepertoireId?: string;
+  blackRepertoireId?: string;
   onChange: (ids: string[]) => void;
+  onWhiteRepertoireChange?: (id: string) => void;
+  onBlackRepertoireChange?: (id: string) => void;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -32,10 +36,37 @@ const CATEGORY_LABELS: Record<string, string> = {
   system: 'System',
 };
 
+const PRESETS = [
+  {
+    name: '🏆 Grandmaster',
+    desc: 'Classical & Tier-1',
+    ids: ['italian', 'queens-gambit', 'sicilian-najdorf', 'kings-indian'],
+  },
+  {
+    name: '🛡️ Solid Rock',
+    desc: 'Fortress & Structure',
+    ids: ['london', 'catalan', 'caro-classical', 'slav-black'],
+  },
+  {
+    name: '⚔️ Sharp Attacks',
+    desc: 'Tactics & Sacrifices',
+    ids: ['kings-gambit-accepted', 'evans-gambit', 'sicilian-dragon', 'french-winawer'],
+  },
+  {
+    name: '🎭 Gambits',
+    desc: 'Traps & Wild lines',
+    ids: ['fried-liver', 'danish-gambit', 'stafford-gambit', 'latvian-gambit'],
+  },
+];
+
 export default function OpeningBrowser({
   openings,
   selectedIds,
+  whiteRepertoireId,
+  blackRepertoireId,
   onChange,
+  onWhiteRepertoireChange,
+  onBlackRepertoireChange,
 }: OpeningBrowserProps) {
   const [query, setQuery] = useState('');
   const [sideFilter, setSideFilter] = useState<'all' | 'w' | 'b'>('all');
@@ -43,6 +74,9 @@ export default function OpeningBrowser({
   const [maxRisk, setMaxRisk] = useState<number>(5);
   const [includeMeme, setIncludeMeme] = useState(false);
   const [includeWeird, setIncludeWeird] = useState(false);
+
+  const whiteOpenings = useMemo(() => openings.filter((o) => o.side === 'w' || o.side === 'any'), [openings]);
+  const blackOpenings = useMemo(() => openings.filter((o) => o.side === 'b' || o.side === 'any'), [openings]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -104,6 +138,12 @@ export default function OpeningBrowser({
     setActiveCategories(next);
   };
 
+  const handleApplyPreset = (presetIds: string[]) => {
+    // Only keep IDs that exist in the catalog
+    const valid = presetIds.filter((id) => openings.some((o) => o.id === id));
+    onChange(valid);
+  };
+
   const handleSelectAllFiltered = () => {
     const combined = Array.from(new Set([...selectedIds, ...filtered.map((o) => o.id)]));
     onChange(combined);
@@ -113,13 +153,83 @@ export default function OpeningBrowser({
     onChange([]);
   };
 
+  // Selected counts by side
+  const selectedWhiteCount = useMemo(
+    () => selectedIds.filter((id) => openings.some((o) => o.id === id && (o.side === 'w' || o.side === 'any'))).length,
+    [selectedIds, openings]
+  );
+  const selectedBlackCount = useMemo(
+    () => selectedIds.filter((id) => openings.some((o) => o.id === id && (o.side === 'b' || o.side === 'any'))).length,
+    [selectedIds, openings]
+  );
+
   return (
     <div className="opening-browser">
+      {/* Quick Repertoire Presets */}
+      <div className="opening-presets-bar">
+        <span className="presets-title">Quick Presets:</span>
+        <div className="presets-scroll">
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.name}
+              type="button"
+              className="preset-btn"
+              onClick={() => handleApplyPreset(preset.ids)}
+              title={preset.desc}
+            >
+              {preset.name}
+            </button>
+          ))}
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              className="preset-btn clear"
+              onClick={handleClearSelection}
+            >
+              Clear All ({selectedIds.length})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Side Tabs & Active Repertoire Counts */}
+      <div className="opening-side-tabs">
+        <button
+          type="button"
+          className={`side-tab ${sideFilter === 'all' ? 'active' : ''}`}
+          onClick={() => setSideFilter('all')}
+        >
+          All Openings ({openings.length})
+        </button>
+        <button
+          type="button"
+          className={`side-tab ${sideFilter === 'w' ? 'active' : ''}`}
+          onClick={() => setSideFilter('w')}
+        >
+          ⚪ White Repertoire ({whiteOpenings.length})
+          {selectedWhiteCount > 0 && <span className="tab-pill">{selectedWhiteCount}</span>}
+        </button>
+        <button
+          type="button"
+          className={`side-tab ${sideFilter === 'b' ? 'active' : ''}`}
+          onClick={() => setSideFilter('b')}
+        >
+          ⚫ Black Repertoire ({blackOpenings.length})
+          {selectedBlackCount > 0 && <span className="tab-pill">{selectedBlackCount}</span>}
+        </button>
+      </div>
+
       {/* Search Input */}
       <div style={{ position: 'relative' }}>
         <input
           type="text"
-          placeholder="Search 99+ openings by name, ECO (e.g. C50), or theme..."
+          placeholder={
+            sideFilter === 'w'
+              ? 'Search White openings (e.g. Italian, London, Queen’s Gambit)...'
+              : sideFilter === 'b'
+              ? 'Search Black defenses (e.g. Sicilian, Caro-Kann, King’s Indian)...'
+              : 'Search 99+ openings by name, ECO (e.g. C50), or theme...'
+          }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="opening-search-input"
@@ -144,41 +254,15 @@ export default function OpeningBrowser({
         )}
       </div>
 
-      {/* Control Strip: Side, Meme, Weird & Risk */}
+      {/* Control Strip: Meme, Weird & Risk */}
       <div className="opening-controls-bar">
-        {/* Side Selector */}
-        <div style={{ display: 'flex', gap: 3 }}>
-          <button
-            type="button"
-            className={`opening-chip ${sideFilter === 'all' ? 'active' : ''}`}
-            onClick={() => setSideFilter('all')}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            className={`opening-chip ${sideFilter === 'w' ? 'active' : ''}`}
-            onClick={() => setSideFilter('w')}
-          >
-            ⚪ White
-          </button>
-          <button
-            type="button"
-            className={`opening-chip ${sideFilter === 'b' ? 'active' : ''}`}
-            onClick={() => setSideFilter('b')}
-          >
-            ⚫ Black
-          </button>
-        </div>
-
-        {/* Toggles */}
         <label className="opening-toggle-label">
           <input
             type="checkbox"
             checked={includeMeme}
             onChange={(e) => setIncludeMeme(e.target.checked)}
           />
-          🎭 Meme
+          🎭 Memes (Bongcloud, Borg)
         </label>
 
         <label className="opening-toggle-label">
@@ -187,19 +271,19 @@ export default function OpeningBrowser({
             checked={includeWeird}
             onChange={(e) => setIncludeWeird(e.target.checked)}
           />
-          🌀 Weird
+          🌀 Weird / Offbeat
         </label>
 
         {/* Risk Limit */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#94a3b8' }}>
-          <span>Risk ≤ {maxRisk}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#94a3b8' }}>
+          <span>Max Risk: <b>{maxRisk}/5</b></span>
           <input
             type="range"
             min="1"
             max="5"
             value={maxRisk}
             onChange={(e) => setMaxRisk(Number(e.target.value))}
-            style={{ width: 44, height: 3, accentColor: '#38bdf8' }}
+            style={{ width: 50, height: 3, accentColor: '#38bdf8' }}
           />
         </div>
       </div>
@@ -224,7 +308,7 @@ export default function OpeningBrowser({
       {/* Action Strip: Count & Quick Select */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#64748b' }}>
         <span>
-          Showing <b>{filtered.length}</b> of {openings.length} openings ({selectedIds.length} active)
+          Showing <b>{filtered.length}</b> openings ({selectedIds.length} active in repertoire)
         </span>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
@@ -233,7 +317,7 @@ export default function OpeningBrowser({
             style={{ fontSize: 9, padding: '1px 6px' }}
             onClick={handleSelectAllFiltered}
           >
-            Select Shown
+            Select Shown ({filtered.length})
           </button>
           {selectedIds.length > 0 && (
             <button
@@ -272,7 +356,7 @@ export default function OpeningBrowser({
                 <div className="opening-badges-row">
                   {opening.eco && <span className="opening-badge badge-eco">{opening.eco}</span>}
                   <span className={`opening-badge badge-side-${opening.side}`}>
-                    {opening.side === 'w' ? 'White' : opening.side === 'b' ? 'Black' : 'Any'}
+                    {opening.side === 'w' ? '⚪ White' : opening.side === 'b' ? '⚫ Black' : 'Universal'}
                   </span>
                   <span className={`opening-badge badge-risk risk-${opening.risk}`}>
                     Risk {opening.risk}/5
@@ -285,7 +369,7 @@ export default function OpeningBrowser({
               )}
 
               <div className="opening-card-tags">
-                <span className="opening-tag" style={{ color: '#38bdf8' }}>{opening.pgn}</span>
+                <span className="opening-tag pgn-tag">{opening.pgn}</span>
                 {opening.categories.slice(0, 3).map((cat) => (
                   <span key={cat} className="opening-tag">
                     {cat}

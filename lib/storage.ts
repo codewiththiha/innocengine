@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   opening: {
     enabled: false,
     repertoireId: 'auto',
+    whiteRepertoireId: 'auto',
+    blackRepertoireId: 'auto',
     selectedOpeningIds: [],
     mode: 'adaptive',
     maxPlies: 14,
