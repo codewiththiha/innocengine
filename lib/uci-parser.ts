@@ -1,58 +1,22 @@
-import { Chess } from 'chess.js';
-import type { MoveLine, EngineEvaluation, EngineCandidate, UciOption, EngineCapabilities } from './types';
+import type { MoveLine, EngineEvaluation, EngineCandidate } from './types';
 
 export class UciParser {
   private currentLines: Map<number, MoveLine> = new Map();
   private currentFen: string = '';
-  private currentTurn: 'w' | 'b' = 'w';
   private maxDepthSeen: number = 0;
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
-  private currentEngineId: string = 'stockfish';
-
-  private engineName: string = 'Unknown Engine';
-  private engineAuthor: string = 'Unknown Author';
-  private optionsMap: Map<string, UciOption> = new Map();
-
-  public clearEngineMetadata(engineId: string = 'stockfish') {
-    this.currentEngineId = engineId;
-    this.engineName = 'Loading Engine...';
-    this.engineAuthor = '';
-    this.optionsMap.clear();
-    this.currentLines.clear();
-    this.maxDepthSeen = 0;
-  }
 
   public reset(fen: string, analysisId: number = 0, positionKey: string = '') {
     this.currentLines.clear();
+    this.maxDepthSeen = 0;
     this.currentFen = fen;
     this.currentAnalysisId = analysisId;
-    this.currentPositionKey = positionKey || this.extractPositionKey(fen);
-    this.maxDepthSeen = 0;
-    const tokens = fen.trim().split(/\s+/);
-    this.currentTurn = tokens.length > 1 && tokens[1] === 'b' ? 'b' : 'w';
-  }
-
-  public extractPositionKey(fen: string): string {
-    if (!fen) return '';
-    return fen.trim().split(/\s+/).slice(0, 4).join(' ');
+    this.currentPositionKey = positionKey;
   }
 
   public parseLine(line: string): Partial<EngineEvaluation> | null {
     const trimmed = line.trim();
-
-    if (trimmed.startsWith('id name ')) {
-      this.engineName = trimmed.substring(8).trim();
-      return null;
-    }
-    if (trimmed.startsWith('id author ')) {
-      this.engineAuthor = trimmed.substring(10).trim();
-      return null;
-    }
-    if (trimmed.startsWith('option name ')) {
-      this.parseOptionLine(trimmed);
-      return null;
-    }
 
     if (trimmed.startsWith('info') && trimmed.includes(' score ')) {
       return this.parseInfoLine(trimmed);
@@ -63,57 +27,6 @@ export class UciParser {
     }
 
     return null;
-  }
-
-  private parseOptionLine(line: string) {
-    const nameMatch = line.match(/^option name\s+(.+?)\s+type\s+(\w+)/);
-    if (!nameMatch || !nameMatch[1] || !nameMatch[2]) return;
-
-    const optName = nameMatch[1];
-    const optType = nameMatch[2] as 'check' | 'spin' | 'combo' | 'string' | 'button';
-
-    const defaultMatch = line.match(/\bdefault\s+([^\s]+)/);
-    const minMatch = line.match(/\bmin\s+(-?\d+)/);
-    const maxMatch = line.match(/\bmax\s+(-?\d+)/);
-
-    // Extract all var entries for combo options
-    let vars: string[] | undefined;
-    if (optType === 'combo') {
-      const varMatches = Array.from(line.matchAll(/\bvar\s+([^\s]+)/g));
-      if (varMatches.length > 0) {
-        vars = varMatches.map((m) => m[1]).filter((v): v is string => Boolean(v));
-      }
-    }
-
-    const option: UciOption = {
-      name: optName,
-      type: optType,
-      default: defaultMatch && defaultMatch[1] ? defaultMatch[1] : undefined,
-      min: minMatch && minMatch[1] ? parseInt(minMatch[1], 10) : undefined,
-      max: maxMatch && maxMatch[1] ? parseInt(maxMatch[1], 10) : undefined,
-      vars,
-    };
-
-    this.optionsMap.set(optName, option);
-  }
-
-  public getCapabilities(): EngineCapabilities {
-    const optionsObj: Record<string, UciOption> = {};
-    this.optionsMap.forEach((v, k) => {
-      optionsObj[k] = v;
-    });
-
-    return {
-      id: this.currentEngineId,
-      name: this.engineName,
-      author: this.engineAuthor,
-      hasElo: this.optionsMap.has('UCI_Elo'),
-      hasLimitStrength: this.optionsMap.has('UCI_LimitStrength'),
-      hasSkillLevel: this.optionsMap.has('Skill Level'),
-      hasThreads: this.optionsMap.has('Threads'),
-      hasHash: this.optionsMap.has('Hash'),
-      options: optionsObj,
-    };
   }
 
   private parseInfoLine(line: string): Partial<EngineEvaluation> {
@@ -131,14 +44,12 @@ export class UciParser {
 
     const cpMatch = line.match(/\bscore\s+cp\s+(-?\d+)/);
     if (cpMatch && cpMatch[1]) {
-      const rawCp = parseInt(cpMatch[1], 10);
-      scoreCp = this.currentTurn === 'b' ? -rawCp : rawCp;
+      scoreCp = parseInt(cpMatch[1], 10);
     }
 
     const mateMatch = line.match(/\bscore\s+mate\s+(-?\d+)/);
     if (mateMatch && mateMatch[1]) {
-      const rawMate = parseInt(mateMatch[1], 10);
-      scoreMate = this.currentTurn === 'b' ? -rawMate : rawMate;
+      scoreMate = parseInt(mateMatch[1], 10);
     }
 
     const nodesMatch = line.match(/\bnodes\s+(\d+)/);
@@ -150,13 +61,13 @@ export class UciParser {
     const timeMatch = line.match(/\btime\s+(\d+)/);
     const timeMs = timeMatch && timeMatch[1] ? parseInt(timeMatch[1], 10) : undefined;
 
-    const pvIndex = line.indexOf(' pv ');
+    let bestMove: string = '';
     let pvMoves: string[] = [];
-    let bestMove = '';
 
+    const pvIndex = line.indexOf(' pv ');
     if (pvIndex !== -1) {
-      const pvString = line.substring(pvIndex + 4).trim();
-      pvMoves = pvString.split(/\s+/).filter((m) => m.length >= 4);
+      const pvStr = line.substring(pvIndex + 4).trim();
+      pvMoves = pvStr ? pvStr.split(/\s+/).filter(Boolean) : [];
       if (pvMoves.length > 0 && pvMoves[0]) {
         bestMove = pvMoves[0];
       }
@@ -181,7 +92,6 @@ export class UciParser {
     const candidates = this.buildCandidates(sortedLines);
 
     return {
-      engineInstanceId: this.currentEngineId,
       analysisId: this.currentAnalysisId,
       positionKey: this.currentPositionKey,
       fen: this.currentFen,
@@ -208,7 +118,6 @@ export class UciParser {
     const candidates = this.buildCandidates(sortedLines);
 
     return {
-      engineInstanceId: this.currentEngineId,
       analysisId: this.currentAnalysisId,
       positionKey: this.currentPositionKey,
       fen: this.currentFen,
@@ -228,34 +137,11 @@ export class UciParser {
       .filter((l) => l.bestMove && l.bestMove.length >= 4)
       .map((l) => {
         let continuation: { from: string; to: string } | undefined;
-
-        // Simulate second ply in PV to obtain true opponent response
-        if (this.currentFen && l.pv.length >= 2) {
-          try {
-            const sim = new Chess(this.currentFen);
-            const move1Str = l.pv[0];
-            const move2Str = l.pv[1];
-
-            if (move1Str && move1Str.length >= 4) {
-              const move1 = sim.move({
-                from: move1Str.substring(0, 2),
-                to: move1Str.substring(2, 4),
-                promotion: move1Str.length > 4 ? move1Str[4] : undefined,
-              });
-
-              if (move1 && move2Str && move2Str.length >= 4) {
-                const move2 = sim.move({
-                  from: move2Str.substring(0, 2),
-                  to: move2Str.substring(2, 4),
-                  promotion: move2Str.length > 4 ? move2Str[4] : undefined,
-                });
-
-                if (move2) {
-                  continuation = { from: move2.from, to: move2.to };
-                }
-              }
-            }
-          } catch (_) {}
+        if (l.pv.length >= 2 && l.pv[1] && l.pv[1].length >= 4) {
+          continuation = {
+            from: l.pv[1].substring(0, 2),
+            to: l.pv[1].substring(2, 4),
+          };
         }
 
         return {

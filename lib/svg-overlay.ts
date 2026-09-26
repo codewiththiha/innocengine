@@ -26,12 +26,6 @@ const PALETTES: Record<number, VariationPalette> = {
     arrow: 'rgba(168, 85, 247, 0.65)',
     markerId: 'ai-marker-pv3',
   },
-  4: {
-    fill: 'rgba(148, 163, 184, 0.12)',
-    stroke: 'rgba(148, 163, 184, 0.55)',
-    arrow: 'rgba(148, 163, 184, 0.65)',
-    markerId: 'ai-marker-opp',
-  },
 };
 
 const OPPONENT_ARROW_PALETTE = {
@@ -39,13 +33,6 @@ const OPPONENT_ARROW_PALETTE = {
   stroke: 'rgba(148, 163, 184, 0.45)',
   arrow: 'rgba(148, 163, 184, 0.65)',
   markerId: 'ai-marker-opp',
-};
-
-const BOOK_PALETTE: VariationPalette = {
-  fill: 'rgba(16, 185, 129, 0.18)',
-  stroke: 'rgba(16, 185, 129, 0.75)',
-  arrow: 'rgba(16, 185, 129, 0.85)',
-  markerId: 'ai-marker-book',
 };
 
 export class SvgOverlay {
@@ -124,20 +111,17 @@ export class SvgOverlay {
 
     svg.innerHTML = `
       <defs>
-        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(245, 158, 11, 0.85)" />
         </marker>
-        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(59, 130, 246, 0.75)" />
         </marker>
-        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.65)" />
         </marker>
         <marker id="ai-marker-opp" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.26" markerHeight="0.26" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(148, 163, 184, 0.65)" />
-        </marker>
-        <marker id="ai-marker-book" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(16, 185, 129, 0.85)" />
         </marker>
       </defs>
       <g id="ai-highlights-layer"></g>
@@ -222,7 +206,7 @@ export class SvgOverlay {
     hud.innerHTML = `
       <div style="display:flex; align-items:center; gap:6px;">
         <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#10b981;" id="ai-status-dot"></span>
-        <span style="font-weight:600; color:#e2e8f0;">ENGINE</span>
+        <span style="font-weight:600; color:#e2e8f0;">STOCKFISH</span>
         <span style="color:#64748b;" id="ai-hud-depth">d0</span>
       </div>
       <div style="display:flex; align-items:center; gap:10px;">
@@ -264,7 +248,7 @@ export class SvgOverlay {
     }
 
     const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates
-      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.continuation ? `${c.continuation.from}${c.continuation.to}` : ''}:${c.isBookMove ? 'bk' : ''}`)
+      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.continuation ? `${c.continuation.from}${c.continuation.to}` : ''}`)
       .join(';')}`;
 
     if (newKey === this.currentRenderKey) {
@@ -275,22 +259,24 @@ export class SvgOverlay {
     const hlLayer = this.svg.querySelector('#ai-highlights-layer');
     const connLayer = this.svg.querySelector('#ai-connectors-layer');
     const contLayer = this.svg.querySelector('#ai-continuations-layer');
-    if (!hlLayer || !connLayer || !contLayer) return;
+    if (!hlLayer || !connLayer) return;
 
     hlLayer.innerHTML = '';
     connLayer.innerHTML = '';
-    contLayer.innerHTML = '';
+    if (contLayer) contLayer.innerHTML = '';
 
     candidates.forEach((candidate) => {
-      const palette = candidate.isBookMove
-        ? BOOK_PALETTE
-        : PALETTES[candidate.pvId] || PALETTES[1] || BOOK_PALETTE;
-
+      const palette = PALETTES[candidate.pvId] || PALETTES[1] || {
+        fill: 'rgba(245, 158, 11, 0.18)',
+        stroke: 'rgba(245, 158, 11, 0.75)',
+        arrow: 'rgba(245, 158, 11, 0.85)',
+        markerId: 'ai-marker-pv1',
+      };
       const fromPos = this.algebraicToSvgPos(candidate.from);
       const toPos = this.algebraicToSvgPos(candidate.to);
       if (!fromPos || !toPos) return;
 
-      // Primary source square
+      // Source square
       const rectFrom = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rectFrom.setAttribute('x', fromPos.x.toString());
       rectFrom.setAttribute('y', fromPos.y.toString());
@@ -302,7 +288,7 @@ export class SvgOverlay {
       rectFrom.setAttribute('stroke-width', '0.02');
       hlLayer.appendChild(rectFrom);
 
-      // Primary destination square
+      // Destination square
       const rectTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rectTo.setAttribute('x', toPos.x.toString());
       rectTo.setAttribute('y', toPos.y.toString());
@@ -316,16 +302,14 @@ export class SvgOverlay {
 
       // Primary connector arrow
       if (this.settings.showConnectors) {
-        this.renderArrowLine(connLayer, fromPos, toPos, palette.arrow, palette.markerId, '0.026');
+        this.renderArrowLine(connLayer, fromPos, toPos, palette.arrow, palette.markerId, '0.028');
       }
 
-      // Predicted opponent continuation response
+      // Predicted opponent continuation
       if (this.settings.showOpponentMoves && candidate.continuation) {
         const oppFromPos = this.algebraicToSvgPos(candidate.continuation.from);
         const oppToPos = this.algebraicToSvgPos(candidate.continuation.to);
-
         if (oppFromPos && oppToPos) {
-          // Highlight opponent destination square with subtle dashed border
           const rectOppTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
           rectOppTo.setAttribute('x', oppToPos.x.toString());
           rectOppTo.setAttribute('y', oppToPos.y.toString());
@@ -336,17 +320,16 @@ export class SvgOverlay {
           rectOppTo.setAttribute('stroke', OPPONENT_ARROW_PALETTE.stroke);
           rectOppTo.setAttribute('stroke-width', '0.02');
           rectOppTo.setAttribute('stroke-dasharray', '0.08 0.04');
-          contLayer.appendChild(rectOppTo);
+          if (contLayer) contLayer.appendChild(rectOppTo);
 
-          // Render subtle, dashed continuation line from opponent's moving piece to target
           if (this.settings.showConnectors) {
             this.renderArrowLine(
-              contLayer,
+              contLayer || connLayer,
               oppFromPos,
               oppToPos,
               OPPONENT_ARROW_PALETTE.arrow,
               OPPONENT_ARROW_PALETTE.markerId,
-              '0.018',
+              '0.02',
               '0.04 0.02'
             );
           }

@@ -91,7 +91,7 @@ export interface MoveLine {
 }
 
 export interface EngineEvaluation {
-  engineInstanceId: string;
+  engineInstanceId?: string;
   analysisId: number;
   positionKey: string;
   fen: string;

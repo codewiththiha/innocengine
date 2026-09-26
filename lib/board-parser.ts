@@ -16,6 +16,9 @@ const PIECE_MAP: Record<string, string> = {
 };
 
 export class BoardParser {
+  private static lastPlacement: string = '';
+  private static lastTurn: 'w' | 'b' = 'w';
+
   public static findBoardElement(): HTMLElement | null {
     const selectors = [
       'wc-chess-board',
@@ -121,10 +124,26 @@ export class BoardParser {
       }
     });
 
-    const isInitialPosition = this.checkInitialPosition(grid);
-    const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board, grid);
-    const castling = this.computeCastlingRights(grid);
     const placement = this.gridToPlacement(grid);
+    const isInitialPosition = this.checkInitialPosition(grid);
+
+    let turn: 'w' | 'b';
+    if (isInitialPosition) {
+      turn = 'w';
+      this.lastTurn = 'w';
+      this.lastPlacement = placement;
+    } else if (placement === this.lastPlacement && this.lastTurn) {
+      // Piece selection or click without movement: retain existing turn!
+      // This prevents the opponent move shift bug when focusing a piece.
+      turn = this.lastTurn;
+    } else {
+      // Pieces actually moved to new squares: detect whose turn it is now
+      turn = this.detectSideToMove(board, grid);
+      this.lastTurn = turn;
+      this.lastPlacement = placement;
+    }
+
+    const castling = this.computeCastlingRights(grid);
     const positionKey = `${placement} ${turn} ${castling} -`;
     const fen = `${positionKey} 0 1`;
 
@@ -244,7 +263,8 @@ export class BoardParser {
     if (moveNodes.length > 0) {
       const lastNode = moveNodes[moveNodes.length - 1];
       if (lastNode) {
-        const isWhite = lastNode.classList.contains('white-node') ||
+        const isWhite =
+          lastNode.classList.contains('white-node') ||
           lastNode.getAttribute('data-player') === 'white' ||
           !lastNode.previousElementSibling;
         return isWhite ? 'b' : 'w';

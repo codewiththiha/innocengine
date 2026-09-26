@@ -15,9 +15,6 @@ export default defineContentScript({
     let highlightController: HighlightController | null = null;
     let currentSettings: EngineSettings;
     let lastPositionKey: string = '';
-    let lastPlacement: string = '';
-    let lastTurn: 'w' | 'b' = 'w';
-    let lastFlipped: boolean = false;
     let boardObserver: MutationObserver | null = null;
     let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
@@ -29,10 +26,10 @@ export default defineContentScript({
       engineClient.onEvaluation((evaluation) => {
         if (!overlay || !highlightController) return;
 
-        // Throttled high-frequency updates for score text and HUD
+        // Throttled high-frequency updates for evaluation score and HUD
         overlay.updateEvaluationMetadata(evaluation);
 
-        // Retained candidate highlight commits
+        // Low-frequency stabilized candidate commit for chessboard highlights
         highlightController.handleEvaluation(evaluation);
       });
 
@@ -118,15 +115,14 @@ export default defineContentScript({
       handleBoardChange();
 
       boardObserver = new MutationObserver((mutations) => {
+        // Guard against feedback loops caused by our own overlay DOM nodes
         const isSelfMutation = mutations.every((m) => {
           const target = m.target as HTMLElement;
-          return (
-            target.id?.startsWith('chess-ai-') ||
-            target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar')
-          );
+          return target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar');
         });
         if (isSelfMutation) return;
 
+        // Debounce board extraction to ensure pieces have settled
         if (pendingScanRaf !== null) {
           cancelAnimationFrame(pendingScanRaf);
         }
@@ -151,33 +147,13 @@ export default defineContentScript({
       if (!state) return;
 
       overlay.setFlipped(state.isFlipped);
-
-      // Distinguish piece selection highlights from actual board moves
-      const isSamePlacement = state.placement === lastPlacement;
-      const isSameTurn = state.turn === lastTurn;
-      const isSameOrientation = state.isFlipped === lastFlipped;
-
-      if (isSamePlacement && isSameTurn && isSameOrientation && lastPositionKey) {
-        // Selection or click without piece movement: preserve existing highlights, do not reset engine
-        return;
-      }
-
-      console.log('[AI TRACE] Board position changed:', {
-        positionKey: state.positionKey,
-        turn: state.turn,
-        isFlipped: state.isFlipped,
-      });
-
-      lastPlacement = state.placement || '';
-      lastTurn = state.turn;
-      lastFlipped = state.isFlipped;
-      lastPositionKey = state.positionKey;
-
       highlightController.setBoardState(state);
 
-      if (currentSettings.autoAnalyze) {
-        console.log('[AI TRACE] Dispatching engine analyze for FEN:', state.fen);
-        engineClient.analyze(state.fen, currentSettings);
+      if (state.positionKey !== lastPositionKey) {
+        lastPositionKey = state.positionKey;
+        if (currentSettings.autoAnalyze) {
+          engineClient.analyze(state.fen, currentSettings);
+        }
       }
     }
 
