@@ -38,18 +38,102 @@ export class BoardParser {
   }
 
   public static isBoardFlipped(board: HTMLElement): boolean {
-    if (board.classList.contains('flipped') || board.hasAttribute('flipped')) {
+    // 1. Direct class or attribute on board element
+    if (
+      board.classList.contains('flipped') ||
+      board.hasAttribute('flipped') ||
+      board.getAttribute('orientation') === 'black' ||
+      board.getAttribute('data-orientation') === 'black'
+    ) {
       return true;
     }
-    const parent = board.closest('.board-layout-main, .board-container');
-    if (parent && (parent.classList.contains('flipped') || parent.hasAttribute('flipped'))) {
+
+    // 2. Ancestor container classes and attributes
+    const parent = board.closest(
+      '.board-layout-main, .board-container, #board-layout-chessboard, .board-layout-chessboard'
+    );
+    if (
+      parent &&
+      (parent.classList.contains('flipped') ||
+        parent.hasAttribute('flipped') ||
+        parent.getAttribute('orientation') === 'black' ||
+        parent.getAttribute('data-orientation') === 'black')
+    ) {
       return true;
     }
+
+    // 3. SVG Coordinates: Check vertical position of rank '1' vs '8'
+    const coordTexts = board.querySelectorAll(
+      'svg.coordinates text, text.coordinate-light, text.coordinate-dark, .coordinates text'
+    );
+    if (coordTexts.length > 0) {
+      const boardRect = board.getBoundingClientRect();
+      const midY = boardRect.top + boardRect.height / 2;
+      for (const text of Array.from(coordTexts)) {
+        const content = text.textContent?.trim();
+        if (content === '1' || content === '8') {
+          const rect = text.getBoundingClientRect();
+          if (rect.height > 0) {
+            // If coordinate '1' is in the top half, rank 1 is on top -> board is flipped
+            if (content === '1') {
+              return rect.top < midY;
+            }
+            // If coordinate '8' is in the bottom half, rank 8 is on bottom -> board is flipped
+            if (content === '8') {
+              return rect.top > midY;
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Piece layout position check: where is square-51 (e1) or square-41 (d1)?
+    const e1Piece = board.querySelector('.square-51, .square-41');
+    if (e1Piece) {
+      const boardRect = board.getBoundingClientRect();
+      const rect = e1Piece.getBoundingClientRect();
+      if (rect.height > 0 && boardRect.height > 0) {
+        // If rank 1 is near top (< 30%), board is flipped!
+        if (rect.top - boardRect.top < boardRect.height * 0.3) {
+          return true;
+        }
+      }
+    }
+
     return false;
+  }
+
+  public static detectPlayerColor(board: HTMLElement, isFlipped: boolean): 'w' | 'b' {
+    // 1. Check bottom player container in Chess.com UI (User is always bottom player)
+    const bottomPlayer = document.querySelector(
+      '.board-layout-player.bottom, .player-component.bottom, [data-test-element="player-bottom"], .board-player-bottom'
+    );
+    if (bottomPlayer) {
+      if (
+        bottomPlayer.querySelector('.piece.wk, .piece-white, .user-tagline-white, .white-square') ||
+        bottomPlayer.classList.contains('white') ||
+        bottomPlayer.getAttribute('data-color') === 'w'
+      ) {
+        return 'w';
+      }
+      if (
+        bottomPlayer.querySelector('.piece.bk, .piece-black, .user-tagline-black, .black-square') ||
+        bottomPlayer.classList.contains('black') ||
+        bottomPlayer.getAttribute('data-color') === 'b'
+      ) {
+        return 'b';
+      }
+    }
+
+    // 2. Board orientation is primary indicator:
+    // If board is flipped, Black is at the bottom -> player is 'b'
+    // If not flipped, White is at the bottom -> player is 'w'
+    return isFlipped ? 'b' : 'w';
   }
 
   public static extractBoardState(board: HTMLElement): BoardState | null {
     const isFlipped = this.isBoardFlipped(board);
+    const playerColor = this.detectPlayerColor(board, isFlipped);
     const pieces = board.querySelectorAll<HTMLElement>('.piece:not([class*="ai-"])');
     if (!pieces || pieces.length === 0) {
       return null;
@@ -153,6 +237,7 @@ export class BoardParser {
       placement,
       isFlipped,
       turn,
+      playerColor,
       controlledColor: 'auto',
       pieceMap,
       boardElement: board,

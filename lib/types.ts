@@ -49,6 +49,7 @@ export interface EngineSettings {
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
   highlightOpponentMoves: boolean;
+  highlighterOpacity: number;
   showArrows: boolean;
   showConnectors: boolean;
   showOpponentMoves: boolean;
@@ -122,6 +123,7 @@ export interface BoardState {
   placement?: string;
   isFlipped: boolean;
   turn: 'w' | 'b';
+  playerColor: 'w' | 'b';
   controlledColor: 'auto' | 'w' | 'b';
   pieceMap: Map<string, string>;
   boardElement?: HTMLElement;

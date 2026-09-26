@@ -45,6 +45,14 @@ export default defineContentScript({
           newSettings.opening.repertoireId !== currentSettings.opening.repertoireId ||
           newSettings.opening.mode !== currentSettings.opening.mode ||
           newSettings.opening.maxPlies !== currentSettings.opening.maxPlies;
+        const visualChanged =
+          newSettings.showHighlights !== currentSettings.showHighlights ||
+          newSettings.highlightPlayerMoves !== currentSettings.highlightPlayerMoves ||
+          newSettings.highlightOpponentMoves !== currentSettings.highlightOpponentMoves ||
+          newSettings.highlighterOpacity !== currentSettings.highlighterOpacity ||
+          newSettings.showArrows !== currentSettings.showArrows ||
+          newSettings.showEvalBar !== currentSettings.showEvalBar ||
+          newSettings.showHud !== currentSettings.showHud;
 
         currentSettings = newSettings;
         if (overlay) {

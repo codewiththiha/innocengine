@@ -1,50 +1,72 @@
 import type { EngineCandidate, EngineEvaluation, EngineSettings } from './types';
 
-interface VariationPalette {
-  fill: string;
-  stroke: string;
+interface ColorDefinition {
+  primary: string;
+  sourceFill: (opacity: number) => string;
+  targetFill: (opacity: number) => string;
+  stroke: (opacity: number) => string;
   arrow: string;
   markerId: string;
 }
 
-const PALETTES: Record<number, VariationPalette> = {
+const PALETTES: Record<number, ColorDefinition> = {
   1: {
-    fill: 'rgba(245, 158, 11, 0.18)',
-    stroke: 'rgba(245, 158, 11, 0.75)',
-    arrow: 'rgba(245, 158, 11, 0.85)',
+    primary: '#f59e0b',
+    sourceFill: (op) => `rgba(245, 158, 11, ${op * 0.4})`,
+    targetFill: (op) => `rgba(245, 158, 11, ${op})`,
+    stroke: (op) => `rgba(245, 158, 11, ${Math.min(1.0, op + 0.45)})`,
+    arrow: '#f59e0b',
     markerId: 'ai-marker-pv1',
   },
   2: {
-    fill: 'rgba(59, 130, 246, 0.16)',
-    stroke: 'rgba(59, 130, 246, 0.70)',
-    arrow: 'rgba(59, 130, 246, 0.80)',
+    primary: '#3b82f6',
+    sourceFill: (op) => `rgba(59, 130, 246, ${op * 0.4})`,
+    targetFill: (op) => `rgba(59, 130, 246, ${op})`,
+    stroke: (op) => `rgba(59, 130, 246, ${Math.min(1.0, op + 0.45)})`,
+    arrow: '#3b82f6',
     markerId: 'ai-marker-pv2',
   },
   3: {
-    fill: 'rgba(168, 85, 247, 0.15)',
-    stroke: 'rgba(168, 85, 247, 0.65)',
-    arrow: 'rgba(168, 85, 247, 0.75)',
+    primary: '#8b5cf6',
+    sourceFill: (op) => `rgba(139, 92, 246, ${op * 0.4})`,
+    targetFill: (op) => `rgba(139, 92, 246, ${op})`,
+    stroke: (op) => `rgba(139, 92, 246, ${Math.min(1.0, op + 0.45)})`,
+    arrow: '#8b5cf6',
     markerId: 'ai-marker-pv3',
   },
   4: {
-    fill: 'rgba(20, 184, 166, 0.15)',
-    stroke: 'rgba(20, 184, 166, 0.65)',
-    arrow: 'rgba(20, 184, 166, 0.75)',
+    primary: '#f43f5e',
+    sourceFill: (op) => `rgba(244, 63, 94, ${op * 0.4})`,
+    targetFill: (op) => `rgba(244, 63, 94, ${op})`,
+    stroke: (op) => `rgba(244, 63, 94, ${Math.min(1.0, op + 0.45)})`,
+    arrow: '#f43f5e',
     markerId: 'ai-marker-pv4',
+  },
+  5: {
+    primary: '#06b6d4',
+    sourceFill: (op) => `rgba(6, 182, 212, ${op * 0.4})`,
+    targetFill: (op) => `rgba(6, 182, 212, ${op})`,
+    stroke: (op) => `rgba(6, 182, 212, ${Math.min(1.0, op + 0.45)})`,
+    arrow: '#06b6d4',
+    markerId: 'ai-marker-pv5',
   },
 };
 
-const BOOK_PALETTE: VariationPalette = {
-  fill: 'rgba(16, 185, 129, 0.22)',
-  stroke: 'rgba(16, 185, 129, 0.85)',
-  arrow: 'rgba(16, 185, 129, 0.95)',
+const BOOK_COLOR: ColorDefinition = {
+  primary: '#10b981',
+  sourceFill: (op) => `rgba(16, 185, 129, ${op * 0.45})`,
+  targetFill: (op) => `rgba(16, 185, 129, ${op * 1.1})`,
+  stroke: (op) => `rgba(16, 185, 129, ${Math.min(1.0, op + 0.5)})`,
+  arrow: '#10b981',
   markerId: 'ai-marker-book',
 };
 
-const OPPONENT_ARROW_PALETTE = {
-  fill: 'rgba(148, 163, 184, 0.12)',
-  stroke: 'rgba(148, 163, 184, 0.45)',
-  arrow: 'rgba(148, 163, 184, 0.65)',
+const OPPONENT_COLOR: ColorDefinition = {
+  primary: '#94a3b8',
+  sourceFill: (op) => `rgba(148, 163, 184, ${op * 0.3})`,
+  targetFill: (op) => `rgba(148, 163, 184, ${op * 0.7})`,
+  stroke: (op) => `rgba(148, 163, 184, ${op + 0.2})`,
+  arrow: '#94a3b8',
   markerId: 'ai-marker-opp',
 };
 
@@ -69,7 +91,12 @@ export class SvgOverlay {
 
   public updateSettings(settings: EngineSettings) {
     this.settings = settings;
-    if (!settings.showHighlights) {
+    const hasHighlightsEnabled =
+      (this.settings.highlightPlayerMoves ?? true) ||
+      (this.settings.highlightOpponentMoves ?? false) ||
+      this.settings.showHighlights;
+
+    if (!hasHighlightsEnabled) {
       this.clearHighlights();
     } else {
       this.currentRenderKey = '';
@@ -122,29 +149,34 @@ export class SvgOverlay {
     svg.style.pointerEvents = 'none';
     svg.style.zIndex = '20';
 
+    // Arrow markers defined with userSpaceOnUse for crisp, properly scaled arrowheads
     svg.innerHTML = `
       <defs>
-        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(245, 158, 11, 0.85)" />
+        <marker id="ai-marker-pv1" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.50" markerHeight="0.50" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#f59e0b" />
         </marker>
-        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(59, 130, 246, 0.80)" />
+        <marker id="ai-marker-pv2" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.50" markerHeight="0.50" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#3b82f6" />
         </marker>
-        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.75)" />
+        <marker id="ai-marker-pv3" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.50" markerHeight="0.50" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#8b5cf6" />
         </marker>
-        <marker id="ai-marker-pv4" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(20, 184, 166, 0.75)" />
+        <marker id="ai-marker-pv4" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.50" markerHeight="0.50" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#f43f5e" />
         </marker>
-        <marker id="ai-marker-book" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(16, 185, 129, 0.95)" />
+        <marker id="ai-marker-pv5" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.50" markerHeight="0.50" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#06b6d4" />
         </marker>
-        <marker id="ai-marker-opp" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.26" markerHeight="0.26" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(148, 163, 184, 0.65)" />
+        <marker id="ai-marker-book" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.50" markerHeight="0.50" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#10b981" />
+        </marker>
+        <marker id="ai-marker-opp" viewBox="0 0 10 10" refX="7.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="0.42" markerHeight="0.42" orient="auto-start-reverse">
+          <path d="M 1 2 L 8 5 L 1 8 L 3.5 5 z" fill="#94a3b8" />
         </marker>
       </defs>
       <g id="ai-highlights-layer"></g>
       <g id="ai-connectors-layer"></g>
+      <g id="ai-badges-layer"></g>
       <g id="ai-continuations-layer"></g>
     `;
 
@@ -207,29 +239,31 @@ export class SvgOverlay {
     const hud = document.createElement('div');
     hud.id = 'chess-ai-hud';
     hud.style.position = 'absolute';
-    hud.style.top = '-34px';
+    hud.style.bottom = '-36px';
     hud.style.left = '0';
-    hud.style.right = '0';
+    hud.style.width = '100%';
     hud.style.display = this.settings.showHud ? 'flex' : 'none';
     hud.style.alignItems = 'center';
     hud.style.justifyContent = 'space-between';
-    hud.style.padding = '4px 10px';
-    hud.style.background = 'rgba(15, 23, 42, 0.88)';
-    hud.style.borderRadius = '4px';
-    hud.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+    hud.style.padding = '5px 12px';
+    hud.style.backgroundColor = 'rgba(15, 23, 42, 0.92)';
+    hud.style.backdropFilter = 'blur(6px)';
+    hud.style.border = '1px solid rgba(255, 255, 255, 0.10)';
+    hud.style.borderRadius = '6px';
     hud.style.color = '#cbd5e1';
     hud.style.fontFamily = 'ui-monospace, monospace';
     hud.style.fontSize = '11px';
     hud.style.zIndex = '35';
 
     hud.innerHTML = `
-      <div style="display:flex; align-items:center; gap:6px;">
-        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#10b981;" id="ai-status-dot"></span>
-        <span style="font-weight:600; color:#e2e8f0;">STOCKFISH</span>
-        <span style="color:#64748b;" id="ai-hud-depth">d0</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#10b981;" id="ai-status-dot"></span>
+        <span style="font-weight:700; color:#e2e8f0; font-size:10px; letter-spacing:0.5px;" id="ai-hud-engine">ENGINE</span>
+        <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:rgba(255,255,255,0.08); color:#94a3b8;" id="ai-hud-side">YOU: WHITE</span>
+        <span style="color:#64748b; font-size:10px;" id="ai-hud-depth">d0</span>
       </div>
       <div style="display:flex; align-items:center; gap:10px;">
-        <span style="color:#94a3b8;" id="ai-hud-best">-</span>
+        <span style="color:#94a3b8; font-size:10px;" id="ai-hud-best">-</span>
         <span style="color:#38bdf8; font-weight:700;" id="ai-hud-eval">0.00</span>
       </div>
     `;
@@ -253,9 +287,11 @@ export class SvgOverlay {
     if (this.svg) {
       const hlLayer = this.svg.querySelector('#ai-highlights-layer');
       const connLayer = this.svg.querySelector('#ai-connectors-layer');
+      const badgeLayer = this.svg.querySelector('#ai-badges-layer');
       const contLayer = this.svg.querySelector('#ai-continuations-layer');
       if (hlLayer) hlLayer.innerHTML = '';
       if (connLayer) connLayer.innerHTML = '';
+      if (badgeLayer) badgeLayer.innerHTML = '';
       if (contLayer) contLayer.innerHTML = '';
     }
   }
@@ -264,15 +300,19 @@ export class SvgOverlay {
     this.activeCandidates = candidates;
     const hasHighlightsEnabled =
       (this.settings.highlightPlayerMoves ?? true) ||
-      (this.settings.highlightOpponentMoves ?? true) ||
+      (this.settings.highlightOpponentMoves ?? false) ||
       this.settings.showHighlights;
+
     if (!hasHighlightsEnabled || !this.svg) {
       this.clearHighlights();
       return;
     }
 
-    const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates
-      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.isBookMove ? 'bk' : ''}:${c.continuation ? `${c.continuation.from}${c.continuation.to}` : ''}`)
+    const op = Math.max(0.15, Math.min(0.85, this.settings.highlighterOpacity ?? 0.35));
+    const showArrows = this.settings.showArrows ?? this.settings.showConnectors ?? true;
+
+    const newKey = `${this.isFlipped ? 'F' : 'N'}_${op}_${showArrows ? 'A' : 'N'}_${candidates
+      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.isBookMove ? 'bk' : ''}`)
       .join(';')}`;
 
     if (newKey === this.currentRenderKey) {
@@ -282,64 +322,83 @@ export class SvgOverlay {
 
     const hlLayer = this.svg.querySelector('#ai-highlights-layer');
     const connLayer = this.svg.querySelector('#ai-connectors-layer');
+    const badgeLayer = this.svg.querySelector('#ai-badges-layer');
     const contLayer = this.svg.querySelector('#ai-continuations-layer');
     if (!hlLayer || !connLayer) return;
 
     hlLayer.innerHTML = '';
     connLayer.innerHTML = '';
+    if (badgeLayer) badgeLayer.innerHTML = '';
     if (contLayer) contLayer.innerHTML = '';
 
-    const showArrows = this.settings.showArrows ?? this.settings.showConnectors ?? true;
-
-    candidates.forEach((candidate) => {
-      const palette = candidate.isBookMove
-        ? BOOK_PALETTE
-        : PALETTES[candidate.pvId] || PALETTES[1] || BOOK_PALETTE;
+    candidates.forEach((candidate, idx) => {
+      const colorDef = candidate.isBookMove
+        ? BOOK_COLOR
+        : PALETTES[candidate.pvId] || PALETTES[idx + 1] || PALETTES[1] || BOOK_COLOR;
 
       const fromPos = this.algebraicToSvgPos(candidate.from);
       const toPos = this.algebraicToSvgPos(candidate.to);
       if (!fromPos || !toPos) return;
 
-      // Source square
+      // 1. Source square: Outlined ring indicating the piece to move
       const rectFrom = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rectFrom.setAttribute('x', fromPos.x.toString());
       rectFrom.setAttribute('y', fromPos.y.toString());
       rectFrom.setAttribute('width', '1');
       rectFrom.setAttribute('height', '1');
       rectFrom.setAttribute('rx', '0.08');
-      rectFrom.setAttribute('fill', palette.fill);
-      rectFrom.setAttribute('stroke', palette.stroke);
-      rectFrom.setAttribute('stroke-width', '0.02');
+      rectFrom.setAttribute('fill', colorDef.sourceFill(op));
+      rectFrom.setAttribute('stroke', colorDef.stroke(op));
+      rectFrom.setAttribute('stroke-width', '0.028');
       hlLayer.appendChild(rectFrom);
 
-      // Destination square
+      // 2. Destination square: Prominent colored target fill
       const rectTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rectTo.setAttribute('x', toPos.x.toString());
       rectTo.setAttribute('y', toPos.y.toString());
       rectTo.setAttribute('width', '1');
       rectTo.setAttribute('height', '1');
       rectTo.setAttribute('rx', '0.08');
-      rectTo.setAttribute('fill', palette.fill);
-      rectTo.setAttribute('stroke', palette.stroke);
-      rectTo.setAttribute('stroke-width', '0.02');
+      rectTo.setAttribute('fill', colorDef.targetFill(op));
+      rectTo.setAttribute('stroke', colorDef.stroke(op));
+      rectTo.setAttribute('stroke-width', '0.028');
       hlLayer.appendChild(rectTo);
 
-      // Distinguish book moves with a subtle indicator circle
-      if (candidate.isBookMove) {
-        const bookCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        bookCircle.setAttribute('cx', (toPos.x + 0.82).toString());
-        bookCircle.setAttribute('cy', (toPos.y + 0.18).toString());
-        bookCircle.setAttribute('r', '0.09');
-        bookCircle.setAttribute('fill', 'rgba(16, 185, 129, 0.95)');
-        hlLayer.appendChild(bookCircle);
+      // 3. Move Rank Badge on Destination Square (e.g. ①, ②, 📖)
+      if (badgeLayer) {
+        const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const badgeCx = toPos.x + 0.82;
+        const badgeCy = toPos.y + 0.18;
+
+        const badgeCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        badgeCircle.setAttribute('cx', badgeCx.toString());
+        badgeCircle.setAttribute('cy', badgeCy.toString());
+        badgeCircle.setAttribute('r', '0.13');
+        badgeCircle.setAttribute('fill', colorDef.primary);
+        badgeCircle.setAttribute('stroke', '#ffffff');
+        badgeCircle.setAttribute('stroke-width', '0.016');
+        badgeG.appendChild(badgeCircle);
+
+        const badgeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        badgeText.setAttribute('x', badgeCx.toString());
+        badgeText.setAttribute('y', (badgeCy + 0.045).toString());
+        badgeText.setAttribute('font-size', '0.12');
+        badgeText.setAttribute('font-weight', 'bold');
+        badgeText.setAttribute('fill', '#ffffff');
+        badgeText.setAttribute('text-anchor', 'middle');
+        badgeText.setAttribute('font-family', 'sans-serif');
+        badgeText.textContent = candidate.isBookMove ? 'B' : `${candidate.pvId || idx + 1}`;
+        badgeG.appendChild(badgeText);
+
+        badgeLayer.appendChild(badgeG);
       }
 
-      // Move arrow (controlled by single showArrows setting)
+      // 4. Directional Move Arrow pointing clearly to destination square
       if (showArrows) {
-        this.renderArrowLine(connLayer, fromPos, toPos, palette.arrow, palette.markerId, '0.028');
+        this.renderArrowLine(connLayer, fromPos, toPos, colorDef.arrow, colorDef.markerId, '0.042');
       }
 
-      // Predicted opponent continuation
+      // 5. Predicted opponent reply continuation
       if (this.settings.showOpponentMoves && candidate.continuation) {
         const oppFromPos = this.algebraicToSvgPos(candidate.continuation.from);
         const oppToPos = this.algebraicToSvgPos(candidate.continuation.to);
@@ -350,8 +409,8 @@ export class SvgOverlay {
           rectOppTo.setAttribute('width', '1');
           rectOppTo.setAttribute('height', '1');
           rectOppTo.setAttribute('rx', '0.08');
-          rectOppTo.setAttribute('fill', OPPONENT_ARROW_PALETTE.fill);
-          rectOppTo.setAttribute('stroke', OPPONENT_ARROW_PALETTE.stroke);
+          rectOppTo.setAttribute('fill', OPPONENT_COLOR.targetFill(op * 0.6));
+          rectOppTo.setAttribute('stroke', OPPONENT_COLOR.stroke(op));
           rectOppTo.setAttribute('stroke-width', '0.02');
           rectOppTo.setAttribute('stroke-dasharray', '0.08 0.04');
           if (contLayer) contLayer.appendChild(rectOppTo);
@@ -361,10 +420,10 @@ export class SvgOverlay {
               contLayer || connLayer,
               oppFromPos,
               oppToPos,
-              OPPONENT_ARROW_PALETTE.arrow,
-              OPPONENT_ARROW_PALETTE.markerId,
-              '0.02',
-              '0.04 0.02'
+              OPPONENT_COLOR.arrow,
+              OPPONENT_COLOR.markerId,
+              '0.026',
+              '0.05 0.02'
             );
           }
         }
@@ -378,7 +437,7 @@ export class SvgOverlay {
     to: { x: number; y: number },
     color: string,
     markerId: string,
-    width: string,
+    width: string = '0.042',
     dasharray?: string
   ) {
     const cx1 = from.x + 0.5;
@@ -391,8 +450,9 @@ export class SvgOverlay {
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 0.4) return;
 
-    const offsetStart = 0.22;
-    const offsetEnd = 0.28;
+    // Offset start from piece center, end right at arrowhead base
+    const offsetStart = 0.26;
+    const offsetEnd = 0.36;
     const sx = cx1 + (dx / dist) * offsetStart;
     const sy = cy1 + (dy / dist) * offsetStart;
     const ex = cx2 - (dx / dist) * offsetEnd;
@@ -466,8 +526,17 @@ export class SvgOverlay {
     const bestEl = this.hudElement.querySelector('#ai-hud-best') as HTMLElement;
     const evalEl = this.hudElement.querySelector('#ai-hud-eval') as HTMLElement;
     const dotEl = this.hudElement.querySelector('#ai-status-dot') as HTMLElement;
+    const sideEl = this.hudElement.querySelector('#ai-hud-side') as HTMLElement;
+    const engineEl = this.hudElement.querySelector('#ai-hud-engine') as HTMLElement;
 
     if (depthEl) depthEl.innerText = `d${evalData.depth || 0}`;
+    if (engineEl) engineEl.innerText = (evalData.engineInstanceId || 'SF').toUpperCase();
+
+    const playerColor = this.settings.controlledColor === 'auto'
+      ? (this.isFlipped ? 'BLACK' : 'WHITE')
+      : (this.settings.controlledColor === 'b' ? 'BLACK' : 'WHITE');
+    if (sideEl) sideEl.innerText = `YOU: ${playerColor}`;
+
     if (bestEl) {
       const bookCand = this.activeCandidates.find((c) => c.isBookMove);
       if (bookCand && bookCand.bookName) {
@@ -497,26 +566,24 @@ export class SvgOverlay {
     }
   }
 
-  private algebraicToSvgPos(square: string): { x: number; y: number } | null {
-    if (!square || square.length < 2 || !square[1]) return null;
-    const file = square.charCodeAt(0) - 97;
-    const rank = parseInt(square[1], 10) - 1;
-    if (file < 0 || file > 7 || rank < 0 || rank > 7 || isNaN(rank)) return null;
-
-    if (!this.isFlipped) {
-      return { x: file, y: 7 - rank };
-    } else {
-      return { x: 7 - file, y: rank };
-    }
-  }
-
   private formatUciMove(uci: string): string {
     if (!uci || uci.length < 4) return uci;
-    return `${uci.substring(0, 2)} → ${uci.substring(2, 4)}`;
+    return `${uci.substring(0, 2)} → ${uci.substring(2, 4)}${uci.length > 4 ? `(${uci.substring(4)})` : ''}`;
+  }
+
+  private algebraicToSvgPos(square: string): { x: number; y: number } | null {
+    if (!square || square.length < 2) return null;
+    const file = square.charCodeAt(0) - 97;
+    const rank = parseInt(square[1] || '1', 10) - 1;
+
+    if (file < 0 || file > 7 || rank < 0 || rank > 7) return null;
+
+    const x = this.isFlipped ? 7 - file : file;
+    const y = this.isFlipped ? rank : 7 - rank;
+    return { x, y };
   }
 
   public destroy() {
-    this.clearHighlights();
     if (this.svg) this.svg.remove();
     if (this.evalBarContainer) this.evalBarContainer.remove();
     if (this.hudElement) this.hudElement.remove();

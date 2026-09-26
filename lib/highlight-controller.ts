@@ -30,7 +30,11 @@ export class HighlightController {
   public updateSettings(settings: EngineSettings) {
     this.settings = settings;
     if (this.currentBoardState && this.settings.opening.enabled && this.isWithinBookDepth(this.currentBoardState.fen)) {
-      const bookEntry = OpeningBook.lookupMove(this.currentBoardState.positionKey, this.settings.opening.repertoireId);
+      const bookEntry = OpeningBook.lookupMove(
+        this.currentBoardState.positionKey,
+        this.settings.opening.repertoireId,
+        this.currentBoardState.fen
+      );
       if (bookEntry && bookEntry.move && bookEntry.move.length >= 4 && !this.latestEngineSnapshot) {
         const bookCandidate: EngineCandidate = {
           pvId: 0,
@@ -73,7 +77,7 @@ export class HighlightController {
 
       // Immediately display opening repertoire move if available for the new position
       if (this.settings.opening.enabled && this.isWithinBookDepth(boardState.fen)) {
-        const bookEntry = OpeningBook.lookupMove(boardState.positionKey, this.settings.opening.repertoireId);
+        const bookEntry = OpeningBook.lookupMove(boardState.positionKey, this.settings.opening.repertoireId, boardState.fen);
         if (bookEntry && bookEntry.move && bookEntry.move.length >= 4) {
           const bookCandidate: EngineCandidate = {
             pvId: 0,
@@ -162,16 +166,15 @@ export class HighlightController {
   private shouldShowForTurn(): boolean {
     if (!this.currentBoardState) return true;
     const turn = this.currentBoardState.turn;
-    const isFlipped = this.currentBoardState.isFlipped;
     const playerColor = this.settings.controlledColor === 'auto'
-      ? (isFlipped ? 'b' : 'w')
+      ? (this.currentBoardState.playerColor || (this.currentBoardState.isFlipped ? 'b' : 'w'))
       : this.settings.controlledColor;
     const isPlayerTurn = turn === playerColor;
 
     if (isPlayerTurn) {
       return this.settings.highlightPlayerMoves ?? this.settings.showHighlights ?? true;
     } else {
-      return this.settings.highlightOpponentMoves ?? true;
+      return this.settings.highlightOpponentMoves ?? false;
     }
   }
 
@@ -207,7 +210,11 @@ export class HighlightController {
       return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
     }
 
-    const bookEntry = OpeningBook.lookupMove(this.activePositionKey, this.settings.opening.repertoireId);
+    const bookEntry = OpeningBook.lookupMove(
+      this.activePositionKey,
+      this.settings.opening.repertoireId,
+      this.currentBoardState.fen
+    );
     if (!bookEntry || !bookEntry.move || bookEntry.move.length < 4) {
       return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
     }

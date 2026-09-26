@@ -11,10 +11,11 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   targetElo: 2000,
   showHighlights: true,
   highlightPlayerMoves: true,
-  highlightOpponentMoves: true,
+  highlightOpponentMoves: false,
+  highlighterOpacity: 0.35,
   showArrows: true,
   showConnectors: true,
-  showOpponentMoves: true,
+  showOpponentMoves: false,
   showEvalBar: true,
   showHud: true,
   autoAnalyze: true,
@@ -40,7 +41,8 @@ export async function getSettings(): Promise<EngineSettings> {
     ...DEFAULT_SETTINGS,
     ...loaded,
     highlightPlayerMoves: loaded.highlightPlayerMoves ?? loaded.showHighlights ?? true,
-    highlightOpponentMoves: loaded.highlightOpponentMoves ?? true,
+    highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
+    highlighterOpacity: loaded.highlighterOpacity ?? 0.35,
     showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
   };
 }

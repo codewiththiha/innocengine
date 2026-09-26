@@ -77,24 +77,34 @@ export default function App() {
     setInstalledEngines(list);
   };
 
-  const updateSetting = async <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
-    await saveSettings({ [key]: value });
+  const updateSettingsBatch = async (patch: Partial<EngineSettings>) => {
+    setSettings((prev) => {
+      const updated = { ...prev, ...patch };
+      saveSettings(patch);
+      return updated;
+    });
 
-    if (key === 'activeEngineId') {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(value) });
-    } else if (key === 'hashMb') {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Hash', value: Number(value) });
-    } else if (key === 'threads') {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Threads', value: Number(value) });
-    } else if (key === 'limitStrength') {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'UCI_LimitStrength', value: Boolean(value) });
-    } else if (key === 'targetElo') {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'UCI_Elo', value: Number(value) });
+    if (patch.activeEngineId) {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(patch.activeEngineId) });
+    }
+    if (patch.hashMb !== undefined) {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Hash', value: Number(patch.hashMb) });
+    }
+    if (patch.threads !== undefined) {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Threads', value: Number(patch.threads) });
+    }
+    if (patch.limitStrength !== undefined) {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'UCI_LimitStrength', value: Boolean(patch.limitStrength) });
+    }
+    if (patch.targetElo !== undefined) {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'UCI_Elo', value: Number(patch.targetElo) });
     }
 
     showSavedNotification();
+  };
+
+  const updateSetting = async <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
+    await updateSettingsBatch({ [key]: value });
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -315,8 +325,10 @@ export default function App() {
                 type="checkbox"
                 checked={settings.highlightPlayerMoves}
                 onChange={(e) => {
-                  updateSetting('highlightPlayerMoves', e.target.checked);
-                  updateSetting('showHighlights', e.target.checked || settings.highlightOpponentMoves);
+                  updateSettingsBatch({
+                    highlightPlayerMoves: e.target.checked,
+                    showHighlights: e.target.checked || settings.highlightOpponentMoves,
+                  });
                 }}
                 className="toggle-switch"
               />
@@ -328,9 +340,11 @@ export default function App() {
                 type="checkbox"
                 checked={settings.highlightOpponentMoves}
                 onChange={(e) => {
-                  updateSetting('highlightOpponentMoves', e.target.checked);
-                  updateSetting('showOpponentMoves', e.target.checked);
-                  updateSetting('showHighlights', e.target.checked || settings.highlightPlayerMoves);
+                  updateSettingsBatch({
+                    highlightOpponentMoves: e.target.checked,
+                    showOpponentMoves: e.target.checked,
+                    showHighlights: e.target.checked || settings.highlightPlayerMoves,
+                  });
                 }}
                 className="toggle-switch"
               />
@@ -342,12 +356,35 @@ export default function App() {
                 type="checkbox"
                 checked={settings.showArrows}
                 onChange={(e) => {
-                  updateSetting('showArrows', e.target.checked);
-                  updateSetting('showConnectors', e.target.checked);
+                  updateSettingsBatch({
+                    showArrows: e.target.checked,
+                    showConnectors: e.target.checked,
+                  });
                 }}
                 className="toggle-switch"
               />
             </label>
+
+            <div className="setting-item" style={{ marginTop: 12 }}>
+              <div className="setting-label-row">
+                <span className="setting-label">Highlighter Strength / Opacity</span>
+                <span className="setting-value">{Math.round((settings.highlighterOpacity ?? 0.35) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.15"
+                max="0.80"
+                step="0.05"
+                value={settings.highlighterOpacity ?? 0.35}
+                onChange={(e) => updateSetting('highlighterOpacity', parseFloat(e.target.value))}
+                className="slider"
+              />
+              <div className="slider-hints">
+                <span>Soft (20%)</span>
+                <span>Balanced (35%)</span>
+                <span>Vivid (65%+)</span>
+              </div>
+            </div>
 
             <label className="toggle-row">
               <span className="toggle-label">Evaluation Bar</span>
@@ -579,12 +616,24 @@ export default function App() {
                 updateSetting('opening', { ...settings.opening, repertoireId: e.target.value })
               }
             >
-              {REPERTOIRE_LIST.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} ({r.category})
-                </option>
-              ))}
+              <optgroup label="⚪ White Openings">
+                {REPERTOIRE_LIST.filter((r) => r.side === 'w').map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.category})
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="⚫ Black Defenses">
+                {REPERTOIRE_LIST.filter((r) => r.side === 'b').map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.category})
+                  </option>
+                ))}
+              </optgroup>
             </select>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.3 }}>
+              Repertoires automatically recommend the proper move when it is your side's turn.
+            </div>
           </div>
 
           <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
