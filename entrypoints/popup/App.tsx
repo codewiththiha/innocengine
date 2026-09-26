@@ -311,6 +311,12 @@ export default function App() {
               <span style={{ color: '#38bdf8', fontWeight: 600 }}>Maia-3 Human Engine Active:</span> Predicts moves human players make at target Elo rating rather than ruthless engine tactics.
             </div>
           )}
+
+          {settings.activeEngineId === 'maia2' && (
+            <div style={{ marginTop: 10, padding: 8, background: 'rgba(56, 189, 248, 0.08)', borderRadius: 6, border: '1px solid rgba(56, 189, 248, 0.2)', fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Maia-2 Unified Model Active:</span> NeurIPS 2024 unified human-AI chess policy modeling natural human play from 1100 to 1900 Elo.
+            </div>
+          )}
         </div>
       )}
 
@@ -448,7 +454,7 @@ export default function App() {
                 <span>Deep (24)</span>
               </div>
             </div>
-          ) : settings.activeEngineId === 'maia3' ? (
+          ) : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? (
             <div
               className="setting-item"
               style={{
@@ -462,7 +468,7 @@ export default function App() {
                 <Sparkles size={13} /> Direct Neural Policy Model
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                Maia-3 predicts human candidate moves in a single neural network inference pass. Tree-search depth is not applicable.
+                {settings.activeEngineId === 'maia2' ? 'Maia-2' : 'Maia-3'} predicts human candidate moves in a single neural network inference pass (nodes: 1). Tree-search depth is not applicable.
               </div>
             </div>
           ) : null}
@@ -504,7 +510,53 @@ export default function App() {
       {/* Tab: Strength */}
       {activeTab === 'strength' && (
         <div className="settings-section">
-          {settings.activeEngineId === 'maia3' ? (
+          {settings.activeEngineId === 'maia2' ? (
+            <>
+              <div className="section-title">
+                <ShieldAlert size={14} /> Maia-2 Human Policy Rating Checkpoint
+              </div>
+
+              <div className="setting-item" style={{ marginTop: 8 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Target Human Elo Rating</span>
+                  <span className="setting-value">{Math.max(1100, Math.min(1900, Math.round((settings.targetElo || 1500) / 100) * 100))} Elo</span>
+                </div>
+                <input
+                  type="range"
+                  min="1100"
+                  max="1900"
+                  step="100"
+                  value={Math.max(1100, Math.min(1900, Math.round((settings.targetElo || 1500) / 100) * 100))}
+                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+                <div className="slider-hints">
+                  <span>1100 (Casual)</span>
+                  <span>1300</span>
+                  <span>1500 (Club)</span>
+                  <span>1700</span>
+                  <span>1900 (Expert)</span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#38bdf8', marginBottom: 4 }}>
+                  {getEngineStrengthDescription(settings).detail}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                  {getEngineStrengthDescription(settings).subtext}
+                </div>
+              </div>
+            </>
+          ) : settings.activeEngineId === 'maia3' ? (
             <>
               <div className="section-title">
                 <ShieldAlert size={14} /> Maia-3 Human Policy Rating Checkpoint
@@ -628,10 +680,10 @@ export default function App() {
             <div className="res-card">
               <span className="res-label">Estimated Memory</span>
               <span className="res-val">
-                {settings.activeEngineId === 'maia3' ? '~12 MB' : `~${settings.hashMb + 48} MB`}
+                {(settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? '~12 MB' : `~${settings.hashMb + 48} MB`}
               </span>
               <span className="res-sub">
-                {settings.activeEngineId === 'maia3' ? 'Model Weights' : `Hash: ${settings.hashMb} MB`}
+                {(settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? 'Model Weights' : `Hash: ${settings.hashMb} MB`}
               </span>
             </div>
             <div className="res-card">
@@ -662,7 +714,7 @@ export default function App() {
                 Runs safely in a dedicated Web Worker (1 thread, 16 MB Hash). Worker thread allocation and hash size are managed without sending unsupported UCI commands that stall the engine.
               </div>
             </div>
-          ) : settings.activeEngineId === 'maia3' ? (
+          ) : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? (
             <div
               style={{
                 marginTop: 12,
@@ -673,7 +725,7 @@ export default function App() {
               }}
             >
               <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
-                Maia-3 Execution Profile
+                {settings.activeEngineId === 'maia2' ? 'Maia-2' : 'Maia-3'} Execution Profile
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
                 Direct neural policy execution in memory (~12 MB weights buffer). Instantaneous inference without tree search threads or transposition tables.

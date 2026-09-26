@@ -124,9 +124,9 @@ export class HighlightController {
     if (displayCandidates.length === 0) return;
 
     // Filter out premature 1-ply blunders (depth < 4) during initial alpha-beta expansion
-    // Note: Maia-3 operates via 1-node policy without alpha-beta search and is exempt
+    // Note: Maia models (maia2, maia3) operate via 1-node policy without alpha-beta search and are exempt
     const primaryCandidate = displayCandidates[0];
-    if (evaluation.depth < 4 && !primaryCandidate?.isBookMove && evaluation.engineInstanceId !== 'maia3') {
+    if (evaluation.depth < 4 && !primaryCandidate?.isBookMove && !evaluation.engineInstanceId?.startsWith('maia')) {
       return;
     }
 

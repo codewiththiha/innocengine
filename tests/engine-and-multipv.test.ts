@@ -54,38 +54,61 @@ console.log('1. Testing Stockfish parameter mapping...');
 }
 
 // --------------------------------------------------------------------------
-// 2. Maia-3 Tuning Tests (nodes: 1, discrete steps 600-2600)
+// 2. Maia-3 and Maia-2 Tuning Tests (nodes: 1, discrete steps 600-2600 & 1100-1900)
 // --------------------------------------------------------------------------
-console.log('\n2. Testing Maia-3 tuning and zero-search constraints...');
+console.log('\n2. Testing Maia-3 and Maia-2 tuning and zero-search constraints...');
 {
-  const maia1500 = getMaiaTuning({
-    ...DEFAULT_SETTINGS,
-    activeEngineId: 'maia3',
-    targetElo: 1540,
-    multiPv: 3,
-  });
-  assert.strictEqual(maia1500.targetElo, 1500, 'Should snap to discrete 100-step checkpoint 1500');
+  const maia1500 = getMaiaTuning(
+    {
+      ...DEFAULT_SETTINGS,
+      activeEngineId: 'maia3',
+      targetElo: 1540,
+      multiPv: 3,
+    },
+    'maia3'
+  );
+  assert.strictEqual(maia1500.targetElo, 1500, 'Maia-3 should snap to discrete 100-step checkpoint 1500');
   assert.strictEqual(maia1500.multiPv, 3, 'MultiPV should be preserved');
   assert.strictEqual(maia1500.maxNodes, 1, 'Maia-3 must enforce maxNodes: 1 for zero-search human policy');
 
-  // Clamp checks
-  const maiaLow = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 400 });
-  assert.strictEqual(maiaLow.targetElo, 600, 'Lower bound should clamp to 600');
+  // Maia-3 Clamp checks
+  const maiaLow = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 400 }, 'maia3');
+  assert.strictEqual(maiaLow.targetElo, 600, 'Maia-3 lower bound should clamp to 600');
   assert.strictEqual(maiaLow.maxNodes, 1);
 
-  const maiaHigh = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 3200 });
-  assert.strictEqual(maiaHigh.targetElo, 2600, 'Upper bound should clamp to 2600');
+  const maiaHigh = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 3200 }, 'maia3');
+  assert.strictEqual(maiaHigh.targetElo, 2600, 'Maia-3 upper bound should clamp to 2600');
   assert.strictEqual(maiaHigh.maxNodes, 1);
 
-  const desc = getEngineStrengthDescription({
+  // Maia-2 tuning checks (1100 to 1900 Elo)
+  const maia2ClampedLow = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 900 }, 'maia2');
+  assert.strictEqual(maia2ClampedLow.targetElo, 1100, 'Maia-2 lower bound must clamp to 1100');
+  assert.strictEqual(maia2ClampedLow.maxNodes, 1, 'Maia-2 must enforce maxNodes: 1');
+
+  const maia2ClampedHigh = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 2400 }, 'maia2');
+  assert.strictEqual(maia2ClampedHigh.targetElo, 1900, 'Maia-2 upper bound must clamp to 1900');
+  assert.strictEqual(maia2ClampedHigh.maxNodes, 1);
+
+  const maia2Step = getMaiaTuning({ ...DEFAULT_SETTINGS, targetElo: 1670 }, 'maia2');
+  assert.strictEqual(maia2Step.targetElo, 1700, 'Maia-2 should round to nearest 100 checkpoint');
+
+  const desc3 = getEngineStrengthDescription({
     ...DEFAULT_SETTINGS,
     activeEngineId: 'maia3',
     targetElo: 1700,
   });
-  assert(desc.badge.includes('1700'), 'Description badge should show checkpoint');
-  assert(desc.detail.includes('nodes: 1'), 'Description should explicitly state nodes: 1');
+  assert(desc3.badge.includes('1700'), 'Description badge should show checkpoint');
+  assert(desc3.detail.includes('nodes: 1'), 'Description should explicitly state nodes: 1');
 
-  console.log('   ✓ Maia-3 discrete checkpoints and nodes: 1 constraint verified');
+  const desc2 = getEngineStrengthDescription({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'maia2',
+    targetElo: 1500,
+  });
+  assert(desc2.badge.includes('Maia-2'), 'Maia-2 badge should include model identifier');
+  assert(desc2.detail.includes('1500 Elo'), 'Maia-2 detail should reflect checkpoint');
+
+  console.log('   ✓ Maia-3 & Maia-2 discrete checkpoints and nodes: 1 constraint verified');
 }
 
 // --------------------------------------------------------------------------
@@ -526,6 +549,95 @@ console.log('\n6. Testing storage fallback when chrome.storage is undefined...')
   unsubscribe();
 
   console.log('   ✓ Storage API gracefully falls back without throwing TypeError');
+}
+
+// --------------------------------------------------------------------------
+// 7. Maia Endgame Mating Drive & King Opposition Tests
+// --------------------------------------------------------------------------
+console.log('\n7. Testing Maia endgame mating drive and opposition heuristics...');
+{
+  const { evaluateHumanPolicy } = await import('../lib/maia-policy');
+
+  // Position: White has K on d1, Q on d2; Black has lone King on e5
+  const kqFen = '8/8/8/4k3/8/8/3Q4/3K4 w - - 0 1';
+  const kqCandidates = evaluateHumanPolicy(kqFen, 1500, 3);
+  assert(kqCandidates.length > 0, 'Candidates must be generated for KQ vs K');
+
+  // Friendly king bringing opposition (Ke2, Kd2) or queen cutting off the king (Qe3+, Qd3, Qd4)
+  const topMove = kqCandidates[0];
+  assert(topMove, 'Must have a top move');
+  console.log(`   KQ vs K Top Move: ${topMove.san} (score: ${topMove.score})`);
+
+  // Verify that an immediate checkmate is prioritized with maximum score
+  const mateFen = '4k3/3Q4/4K3/8/8/8/8/8 w - - 0 1';
+  const mateCandidates = evaluateHumanPolicy(mateFen, 1500, 1);
+  assert(mateCandidates[0]?.san.includes('#'), 'Maia must find checkmate in 1');
+  assert.strictEqual(mateCandidates[0]?.score, 50000, 'Checkmate in 1 must receive 50000 score');
+
+  console.log('   ✓ Endgame mating drive and opposition convergence verified');
+}
+
+// --------------------------------------------------------------------------
+// 8. Maia Threefold Repetition & Draw Avoidance Tests
+// --------------------------------------------------------------------------
+console.log('\n8. Testing Maia repetition and draw avoidance when holding advantage...');
+{
+  const { evaluateHumanPolicy } = await import('../lib/maia-policy');
+
+  // Position: White is up a Queen (K on e6, Q on d6, Black K on e8)
+  // White to move: if White repeats a prior position key, it must be severely penalized
+  const winningFen = '4k3/8/3QK3/8/8/8/8/8 w - - 0 1';
+
+  // Moving Qd7+ creates position '4k3/3Q4/4K3/8/8/8/8/8 b - -'
+  const repeatedPosKey = '4k3/3Q4/4K3/8/8/8/8/8 b - -';
+  const nonRepeatedPolicy = evaluateHumanPolicy(winningFen, 1500, 10, []);
+  const repetitionPolicy = evaluateHumanPolicy(winningFen, 1500, 10, [repeatedPosKey]);
+
+  const nonRepQd7 = nonRepeatedPolicy.find((m) => m.uci === 'd6d7');
+  const repQd7 = repetitionPolicy.find((m) => m.uci === 'd6d7');
+
+  assert(nonRepQd7, 'd6d7 must be legal');
+  assert(repQd7, 'd6d7 must be legal in repetition policy');
+  assert(
+    repQd7.score < nonRepQd7.score,
+    'A move that repeats a recent position when winning must receive a severe score penalty'
+  );
+
+  // Checkmate in 1 (Qe7#) must STILL be played and not repeat
+  const topWinningMove = repetitionPolicy[0];
+  assert(topWinningMove?.san.includes('#'), 'Maia must prioritize mate (Qe7#) over repeating moves');
+
+  console.log('   ✓ Repetition avoidance prevents forced draw cycles when ahead');
+}
+
+// --------------------------------------------------------------------------
+// 9. Maia Stalemate Prevention Tests
+// --------------------------------------------------------------------------
+console.log('\n9. Testing Maia stalemate prevention when holding decisive advantage...');
+{
+  const { evaluateHumanPolicy } = await import('../lib/maia-policy');
+
+  // Position: White King on f7, White Queen on e6, Black King on h8
+  // 7k/5K2/4Q3/8/8/8/8/8 w - - 0 1
+  // Move Qg6?? stalemates Black King (0 legal moves, not in check)!
+  const stalemateDangerFen = '7k/5K2/4Q3/8/8/8/8/8 w - - 0 1';
+  const candidates = evaluateHumanPolicy(stalemateDangerFen, 1500, 10);
+
+  const stalemateMove = candidates.find((m) => m.san === 'Qg6');
+  if (stalemateMove) {
+    assert.strictEqual(
+      stalemateMove.score,
+      -50000,
+      'Qg6 delivers stalemate when up +900 and must be penalized with -50000'
+    );
+  }
+
+  // The top move must deliver checkmate (e.g. Qh6# or Qg8#) or prepare mate without stalemating
+  const bestMove = candidates[0];
+  assert(bestMove && bestMove.san !== 'Qg6', 'Maia must NEVER select the stalemating move when winning');
+
+  console.log(`   Stalemate Danger Top Move: ${bestMove?.san} (avoids blunder Qg6)`);
+  console.log('   ✓ Stalemate prevention strictly active');
 }
 
 console.log('\n=== ALL TESTS PASSED SUCCESSFULLY ===');

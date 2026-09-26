@@ -66,12 +66,16 @@ export function getStockfishTuning(settings: EngineSettings): StockfishTuning {
 }
 
 /**
- * Resolves active Maia-3 execution parameters according to user settings.
- * Maia-3 models support discrete rating checkpoints spanning 600 to 2600.
+ * Resolves active Maia execution parameters according to user settings and active engine model.
+ * - Maia-3 models support discrete rating checkpoints spanning 600 to 2600.
+ * - Maia-2 models support discrete rating checkpoints spanning 1100 to 1900.
  * In accordance with Maia architecture, tree search lookahead must be disabled (maxNodes: 1).
  */
-export function getMaiaTuning(settings: EngineSettings): MaiaTuning {
-  const clampedElo = Math.max(600, Math.min(2600, Math.round((settings.targetElo || 1500) / 100) * 100));
+export function getMaiaTuning(settings: EngineSettings, engineId?: string): MaiaTuning {
+  const activeId = engineId || settings.activeEngineId || 'maia3';
+  const minElo = activeId === 'maia2' ? 1100 : 600;
+  const maxElo = activeId === 'maia2' ? 1900 : 2600;
+  const clampedElo = Math.max(minElo, Math.min(maxElo, Math.round((settings.targetElo || 1500) / 100) * 100));
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
   return {
     targetElo: clampedElo,
@@ -89,11 +93,20 @@ export function getEngineStrengthDescription(settings: EngineSettings): {
   subtext: string;
 } {
   if (settings.activeEngineId === 'maia3') {
-    const maia = getMaiaTuning(settings);
+    const maia = getMaiaTuning(settings, 'maia3');
     return {
-      badge: `Maia ${maia.targetElo}`,
-      detail: `Human Model Checkpoint: ${maia.targetElo} Elo • Zero-Search (nodes: 1)`,
-      subtext: `Direct neural move prediction conditioned on human games played at ~${maia.targetElo} rating. Tree search disabled to preserve human behavior.`,
+      badge: `Maia-3 (${maia.targetElo})`,
+      detail: `Maia-3 (Chessformer): ${maia.targetElo} Elo • Zero-Search (nodes: 1)`,
+      subtext: `Direct neural move prediction conditioned on human games played at ~${maia.targetElo} rating (600–2600). Tree search disabled to preserve human behavior.`,
+    };
+  }
+
+  if (settings.activeEngineId === 'maia2') {
+    const maia = getMaiaTuning(settings, 'maia2');
+    return {
+      badge: `Maia-2 (${maia.targetElo})`,
+      detail: `Maia-2 (NeurIPS 2024): ${maia.targetElo} Elo • Zero-Search (nodes: 1)`,
+      subtext: `Unified skill-aware human move prediction conditioned on human games at ~${maia.targetElo} rating (1100–1900). Tree search disabled to preserve human play.`,
     };
   }
 

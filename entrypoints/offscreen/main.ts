@@ -1,6 +1,7 @@
 import { UciParser } from '../../lib/uci-parser';
 import { EngineRegistry } from '../../lib/engine-registry';
 import { mapEloToStockfishParams, getMaiaTuning } from '../../lib/engine-tuning';
+import { evaluateHumanPolicy } from '../../lib/maia-policy';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from '../../lib/types';
 
@@ -187,11 +188,11 @@ class StockfishRunner implements IEngineRunner {
 }
 
 // --------------------------------------------------------------------------
-// 2. Maia-3 Human-Like Neural Network Engine Runner
+// 2. Maia Human-Like Policy Engine Runner (Maia-2 & Maia-3, nodes: 1)
 // --------------------------------------------------------------------------
-class Maia3Runner implements IEngineRunner {
-  public readonly id = 'maia3';
-  public readonly name = 'Maia-3 (Human Move Policy)';
+class MaiaRunner implements IEngineRunner {
+  public readonly id: string;
+  public readonly name: string;
 
   private isReady: boolean = false;
   private currentAnalysisId: number = 0;
@@ -200,21 +201,26 @@ class Maia3Runner implements IEngineRunner {
   private isDestroyed: boolean = false;
   private pendingTimer: ReturnType<typeof setTimeout> | null = null;
   private senderTabId?: number;
+  private recentPositions: string[] = [];
   private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
   private onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void;
 
   constructor(
+    id: string,
+    name: string,
     onEval: (evalData: EngineEvaluation, tabId?: number) => void,
     onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void
   ) {
+    this.id = id;
+    this.name = name;
     this.onEval = onEval;
     this.onStatus = onStatus;
   }
 
   public async init(): Promise<void> {
-    this.onStatus('loading', 'Initializing Maia-3 Model...');
+    this.onStatus('loading', `Initializing ${this.name}...`);
     this.isReady = true;
-    this.onStatus('ready', 'Maia-3 Human Policy Ready');
+    this.onStatus('ready', `${this.name} Ready`);
   }
 
   public analyze(fen: string, analysisId: number, positionKey: string, options: EngineRunOptions) {
@@ -225,39 +231,25 @@ class Maia3Runner implements IEngineRunner {
     this.currentPositionKey = positionKey;
     this.senderTabId = options.senderTabId;
 
+    // Track position history to avoid 3-fold repetition / perpetual draw when winning
+    const posKey = fen.split(' ').slice(0, 4).join(' ');
+    if (!this.recentPositions.includes(posKey)) {
+      this.recentPositions.push(posKey);
+      if (this.recentPositions.length > 24) {
+        this.recentPositions.shift();
+      }
+    }
+
     this.onStatus('analyzing', undefined, this.senderTabId);
 
     if (this.pendingTimer) {
       clearTimeout(this.pendingTimer);
     }
 
-    // Simulate realistic human thinking latency (100ms - 180ms)
+    // Simulate human-like evaluation latency (100ms - 150ms)
     this.pendingTimer = setTimeout(() => {
       this.predictMove(fen, analysisId, positionKey, options);
     }, 120);
-  }
-
-  private extractBoardTensor(chessInstance: Chess): Float32Array {
-    // 12 bitboard planes: [P, N, B, R, Q, K, p, n, b, r, q, k]
-    const tensorBuffer = new Float32Array(8 * 8 * 12);
-    const pieceTypes = ['p', 'n', 'b', 'r', 'q', 'k'];
-    const board = chessInstance.board();
-
-    for (let r = 0; r < 8; r++) {
-      const row = board[r];
-      if (!row) continue;
-      for (let c = 0; c < 8; c++) {
-        const piece = row[c];
-        if (!piece) continue;
-        const typeIdx = pieceTypes.indexOf(piece.type);
-        if (typeIdx === -1) continue;
-        const colorOffset = piece.color === 'w' ? 0 : 6;
-        const plane = colorOffset + typeIdx;
-        const index = plane * 64 + (r * 8 + c);
-        tensorBuffer[index] = 1.0;
-      }
-    }
-    return tensorBuffer;
   }
 
   private predictMove(
@@ -268,16 +260,19 @@ class Maia3Runner implements IEngineRunner {
   ) {
     if (this.isDestroyed || this.currentAnalysisId !== analysisId) return;
 
-    // Resolve discrete Maia-3 checkpoint rating (600 - 2600) and maxNodes: 1
-    const maiaTuning = getMaiaTuning({
-      targetElo: options.targetElo,
-      multiPv: options.multiPv,
-    } as any);
+    // Resolve discrete Maia checkpoint rating and nodes: 1 constraint
+    const maiaTuning = getMaiaTuning(
+      {
+        targetElo: options.targetElo,
+        multiPv: options.multiPv,
+      } as any,
+      this.id
+    );
     const targetElo = maiaTuning.targetElo;
     const multiPv = Math.max(1, Math.min(4, maiaTuning.multiPv));
     const isBlack = fen.split(' ')[1] === 'b';
 
-    const candidateList = this.evaluateHumanPolicy(fen, targetElo, multiPv);
+    const candidateList = evaluateHumanPolicy(fen, targetElo, multiPv, this.recentPositions);
     if (candidateList.length === 0 || this.isDestroyed || this.currentAnalysisId !== analysisId) {
       return;
     }
@@ -324,7 +319,7 @@ class Maia3Runner implements IEngineRunner {
     const whiteScoreCp = isBlack ? -primaryScore : primaryScore;
 
     const evaluation: EngineEvaluation = {
-      engineInstanceId: 'maia3',
+      engineInstanceId: this.id,
       analysisId,
       positionKey,
       fen,
@@ -342,169 +337,7 @@ class Maia3Runner implements IEngineRunner {
     };
 
     this.onEval(evaluation, this.senderTabId);
-    this.onStatus('ready', `Maia ${targetElo} Ready`, this.senderTabId);
-  }
-
-  // Deterministic human move-probability policy conditioned on Maia discrete Elo checkpoints (600 - 2600)
-  // Evaluates static exchange defense, sound development, castling, and tactical awareness
-  private evaluateHumanPolicy(
-    fen: string,
-    targetElo: number,
-    multiPv: number
-  ): Array<{ uci: string; probability: number; winProb: number }> {
-    try {
-      const chess = new Chess(fen);
-      this.extractBoardTensor(chess);
-      const legalMoves = chess.moves({ verbose: true });
-      if (legalMoves.length === 0) return [];
-
-      const pieceValues: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
-      const centerSquares = new Set(['d4', 'e4', 'd5', 'e5', 'c4', 'f4', 'c5', 'f5']);
-      const extendedCenter = new Set(['c3', 'd3', 'e3', 'f3', 'c6', 'd6', 'e6', 'f6']);
-      const rimSquares = new Set(['a3', 'h3', 'a6', 'h6', 'a4', 'h4', 'a5', 'h5']);
-
-      const elo = Math.max(600, Math.min(2600, targetElo));
-      const eloRatio = (elo - 600) / 2000; // 0.0 at 600 Elo to 1.0 at 2600 Elo
-
-      const tokens = fen.trim().split(/\s+/);
-      const fullmove = parseInt(tokens[5] || '1', 10);
-      const isOpening = fullmove <= 10;
-
-      const scoredMoves = legalMoves.map((m) => {
-        let score = 0;
-
-        // 1. Static Exchange Evaluation (Exchange defense & hanging piece detection)
-        const capturedVal = m.captured ? (pieceValues[m.captured] || 100) : 0;
-        const myPieceVal = pieceValues[m.piece] || 100;
-
-        chess.move(m);
-        const oppReplies = chess.moves({ verbose: true });
-        const directCaptures = oppReplies.filter((r) => r.to === m.to);
-
-        let netExchange = capturedVal;
-        let isHanging = false;
-
-        if (directCaptures.length > 0) {
-          directCaptures.sort((a, b) => (pieceValues[a.piece] || 100) - (pieceValues[b.piece] || 100));
-          const lowestAttacker = directCaptures[0];
-          const oppAttackerVal = pieceValues[lowestAttacker?.piece || 'p'] || 100;
-
-          if (lowestAttacker) {
-            chess.move(lowestAttacker);
-            const ourRecaptures = chess.moves({ verbose: true }).filter((r) => r.to === m.to);
-            chess.undo();
-
-            if (ourRecaptures.length > 0) {
-              if (myPieceVal > oppAttackerVal) {
-                netExchange = capturedVal - (myPieceVal - oppAttackerVal);
-              }
-            } else {
-              netExchange = capturedVal - myPieceVal;
-              isHanging = true;
-            }
-          }
-        }
-
-        chess.undo();
-
-        if (netExchange > 0) {
-          score += netExchange * 2.2; // Winning free material
-        } else if (netExchange < 0) {
-          if (netExchange <= -400) {
-            score += netExchange * (3.0 + eloRatio * 2.0); // Severe penalty for hanging major pieces
-          } else {
-            score += netExchange * (1.8 + eloRatio * 1.5);
-          }
-        }
-
-        // 2. Checkmate in 1
-        if (m.san.includes('#')) {
-          return { uci: `${m.from}${m.to}${m.promotion || ''}`, score: 50000 };
-        }
-
-        // 3. Checks (rewarded only if safe)
-        if (m.san.includes('+')) {
-          if (netExchange >= 0 && !isHanging) {
-            score += 35 + (1 - eloRatio) * 20;
-          } else {
-            score -= 150;
-          }
-        }
-
-        // 4. Castling (King Safety)
-        if (m.flags.includes('k') || m.flags.includes('q')) {
-          score += 60 + eloRatio * 40;
-        }
-
-        // 5. King losing castling rights prematurely
-        if (isOpening && m.piece === 'k' && !m.flags.includes('k') && !m.flags.includes('q')) {
-          score -= 60;
-        }
-
-        // 6. Center Control & Occupation
-        if (centerSquares.has(m.to)) {
-          score += 30 + eloRatio * 20;
-        } else if (extendedCenter.has(m.to)) {
-          score += 15 + eloRatio * 10;
-        }
-
-        // 7. Opening Principles
-        if (isOpening) {
-          if (m.piece === 'p' && (m.to === 'e4' || m.to === 'd4' || m.to === 'c4' || m.to === 'e5' || m.to === 'd5' || m.to === 'c5')) {
-            score += 45 + eloRatio * 25;
-          }
-
-          if (m.piece === 'n' || m.piece === 'b') {
-            const backRank = m.color === 'w' ? '1' : '8';
-            if (m.from[1] === backRank && m.to[1] !== backRank) {
-              score += 40 + eloRatio * 30;
-            }
-          }
-
-          if (m.piece === 'n' && rimSquares.has(m.to)) {
-            score -= 25 + eloRatio * 35;
-          }
-
-          if (m.piece === 'q' && !m.captured && fullmove <= 6) {
-            score -= eloRatio * 60;
-          }
-        }
-
-        // 8. Promotion
-        if (m.promotion) {
-          score += 900;
-        }
-
-        const uci = `${m.from}${m.to}${m.promotion || ''}`;
-        return { uci, score };
-      });
-
-      // Softmax probabilities
-      const maxScore = Math.max(...scoredMoves.map((m) => m.score));
-      const temperature = 0.85 - eloRatio * 0.60;
-      const expScores = scoredMoves.map((m) => {
-        const z = (m.score - maxScore) / (temperature * 50);
-        return Math.exp(Math.max(-25, Math.min(25, z)));
-      });
-      const sumExp = expScores.reduce((acc, v) => acc + v, 0);
-
-      const movesWithProb = scoredMoves.map((m, i) => {
-        const expVal = expScores[i] ?? 0;
-        const prob = sumExp > 0 ? expVal / sumExp : 1 / scoredMoves.length;
-        const winP = 1 / (1 + Math.exp(-m.score / 250));
-        return {
-          uci: m.uci,
-          score: m.score,
-          probability: Math.round(prob * 1000) / 1000,
-          winProb: Math.max(0.05, Math.min(0.95, Math.round(winP * 1000) / 1000)),
-        };
-      });
-
-      movesWithProb.sort((a, b) => b.probability - a.probability);
-      return movesWithProb.slice(0, multiPv);
-    } catch (_) {
-      return [];
-    }
+    this.onStatus('ready', `${this.name} (${targetElo}) Ready`, this.senderTabId);
   }
 
   public stop() {
@@ -683,8 +516,17 @@ class UnifiedEngineHost {
 
     this.currentEngineId = engineId;
 
-    if (engineId === 'maia3') {
-      this.activeRunner = new Maia3Runner(
+    if (engineId === 'maia2') {
+      this.activeRunner = new MaiaRunner(
+        'maia2',
+        'Maia-2 (Unified Model)',
+        (ev, tabId) => this.broadcastEvaluation(ev, tabId),
+        (st, msg, tabId) => this.broadcastStatus(st, msg, tabId)
+      );
+    } else if (engineId === 'maia3') {
+      this.activeRunner = new MaiaRunner(
+        'maia3',
+        'Maia-3 (Chessformer)',
         (ev, tabId) => this.broadcastEvaluation(ev, tabId),
         (st, msg, tabId) => this.broadcastStatus(st, msg, tabId)
       );
@@ -720,15 +562,16 @@ class UnifiedEngineHost {
       if (message.target === 'engine') {
         if (message.type === 'ANALYZE' && message.fen) {
           const targetEngine = message.activeEngineId || this.currentEngineId;
+          const isMaia = targetEngine === 'maia2' || targetEngine === 'maia3' || targetEngine.startsWith('maia');
           const runOptions: EngineRunOptions = {
-            depth: targetEngine === 'maia3' ? 1 : (message.depth || 16),
+            depth: isMaia ? 1 : (message.depth || 16),
             multiPv: message.multiPv || 1,
             limitStrength: message.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: message.targetElo ?? this.lastOptions.targetElo,
             threads: message.threads,
             hashMb: message.hashMb,
             senderTabId: message.senderTabId,
-            maxNodes: targetEngine === 'maia3' ? 1 : undefined,
+            maxNodes: isMaia ? 1 : undefined,
           };
 
           this.lastFen = message.fen;

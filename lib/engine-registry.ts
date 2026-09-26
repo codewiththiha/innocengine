@@ -15,9 +15,18 @@ export const BUILTIN_STOCKFISH: CustomEngineMeta = {
 
 export const BUILTIN_MAIA3: CustomEngineMeta = {
   id: 'maia3',
-  name: 'Maia-3 (Human Move Policy)',
+  name: 'Maia-3 (Chessformer Human Policy)',
   author: 'CSSLab / University of Toronto',
   sizeBytes: 26214400,
+  dateAdded: 0,
+  isBuiltIn: true,
+};
+
+export const BUILTIN_MAIA2: CustomEngineMeta = {
+  id: 'maia2',
+  name: 'Maia-2 (Unified Human Model)',
+  author: 'CSSLab / University of Toronto',
+  sizeBytes: 24117248,
   dateAdded: 0,
   isBuiltIn: true,
 };
@@ -54,13 +63,13 @@ export class EngineRegistry {
             dateAdded: e.dateAdded,
             isBuiltIn: false,
           }));
-          resolve([BUILTIN_STOCKFISH, BUILTIN_MAIA3, ...custom]);
+          resolve([BUILTIN_STOCKFISH, BUILTIN_MAIA3, BUILTIN_MAIA2, ...custom]);
         };
 
-        req.onerror = () => resolve([BUILTIN_STOCKFISH, BUILTIN_MAIA3]);
+        req.onerror = () => resolve([BUILTIN_STOCKFISH, BUILTIN_MAIA3, BUILTIN_MAIA2]);
       });
     } catch (_) {
-      return [BUILTIN_STOCKFISH, BUILTIN_MAIA3];
+      return [BUILTIN_STOCKFISH, BUILTIN_MAIA3, BUILTIN_MAIA2];
     }
   }
 
@@ -94,7 +103,7 @@ export class EngineRegistry {
   }
 
   public static async getEngineWasmBytes(id: string): Promise<ArrayBuffer | null> {
-    if (id === 'stockfish' || id === 'maia3') return null;
+    if (id === 'stockfish' || id === 'maia3' || id === 'maia2') return null;
 
     try {
       const db = await openDb();
@@ -119,7 +128,7 @@ export class EngineRegistry {
   }
 
   public static async deleteCustomEngine(id: string): Promise<void> {
-    if (id === 'stockfish' || id === 'maia3') return;
+    if (id === 'stockfish' || id === 'maia3' || id === 'maia2') return;
 
     const db = await openDb();
     return new Promise((resolve, reject) => {
