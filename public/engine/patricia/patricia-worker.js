@@ -24,34 +24,31 @@ function getEloSearchBounds(elo, isFullStrength) {
   if (isFullStrength) {
     return { depth: 16, maxNodes: 0, movetime: 500 };
   }
-  if (elo <= 700) {
-    return { depth: 3, maxNodes: 400, movetime: 180 };
+  if (elo <= 600) {
+    return { depth: 2, maxNodes: 200, movetime: 150 };
   }
-  if (elo <= 900) {
-    return { depth: 4, maxNodes: 1200, movetime: 220 };
+  if (elo <= 800) {
+    return { depth: 3, maxNodes: 600, movetime: 180 };
   }
-  if (elo <= 1150) {
-    return { depth: 4, maxNodes: 3000, movetime: 260 };
+  if (elo <= 1100) {
+    return { depth: 4, maxNodes: 2000, movetime: 220 };
   }
-  if (elo <= 1350) {
-    return { depth: 5, maxNodes: 7000, movetime: 300 };
+  if (elo <= 1400) {
+    return { depth: 5, maxNodes: 8000, movetime: 280 };
   }
-  if (elo <= 1550) {
-    return { depth: 6, maxNodes: 16000, movetime: 350 };
+  if (elo <= 1750) {
+    return { depth: 6, maxNodes: 25000, movetime: 340 };
   }
-  if (elo <= 1850) {
-    return { depth: 7, maxNodes: 35000, movetime: 400 };
+  if (elo <= 2100) {
+    return { depth: 8, maxNodes: 60000, movetime: 400 };
   }
-  if (elo <= 2150) {
-    return { depth: 9, maxNodes: 85000, movetime: 450 };
+  if (elo <= 2500) {
+    return { depth: 10, maxNodes: 150000, movetime: 460 };
   }
-  if (elo <= 2450) {
-    return { depth: 10, maxNodes: 180000, movetime: 500 };
+  if (elo <= 2800) {
+    return { depth: 12, maxNodes: 350000, movetime: 520 };
   }
-  if (elo <= 2700) {
-    return { depth: 12, maxNodes: 400000, movetime: 550 };
-  }
-  return { depth: 14, maxNodes: 1000000, movetime: 600 };
+  return { depth: 14, maxNodes: 800000, movetime: 600 };
 }
 
 let engineInstance = null;
@@ -123,6 +120,12 @@ async function initEngine() {
             rawLine: line,
           };
         }
+
+        // When in human rating handicap mode (<= 1500 Elo), suppress intermediate info lines
+        // so the UI does not prematurely display the 3500-Elo top line before human selection finishes
+        if (limitStrength && personality !== 'full_strength' && targetElo <= 1500) {
+          return;
+        }
       }
 
       if (line.startsWith('bestmove')) {
@@ -166,12 +169,17 @@ function handleBestMove(rawBestMoveLine) {
     const primaryScore = primaryCandidate.scoreCp ?? 0;
     const cpLoss = Math.max(0, 120 - Math.floor(targetElo / 25));
 
-    // Temperature for human blunder distribution: scales inversely with Elo
-    // ~100 at 600 Elo (frequent blunders/inaccuracies), ~19 at 2000 Elo, ~5 at 2500 Elo
-    const temperature = Math.max(3, Math.pow((3100 - targetElo) / 250, 2));
+    const eloClamped = Math.max(500, Math.min(3000, targetElo));
+    // Accuracy scaling: probability that the player identifies the top engine move
+    // 500 Elo -> 12%, 800 Elo -> 22%, 1200 Elo -> 36%, 1500 Elo -> 48%, 2000 Elo -> 65%, 2500 Elo -> 82%, 3000 Elo -> 98%
+    const bestMoveProbability = Math.min(0.98, Math.max(0.12, 0.12 + (eloClamped - 500) * (0.86 / 2500)));
 
-    // Calculate weights for each candidate
-    const candidateWeights = validCandidates.map((c) => {
+    const remainingProb = 1.0 - bestMoveProbability;
+    const temp = Math.max(25, (3100 - eloClamped) / 8);
+
+    const altWeights = [];
+    for (let i = 1; i < validCandidates.length; i++) {
+      const c = validCandidates[i];
       const rawDiff = Math.max(0, primaryScore - (c.scoreCp ?? primaryScore));
       let effectiveDiff = rawDiff;
 
@@ -181,31 +189,42 @@ function handleBestMove(rawBestMoveLine) {
       const isCheckOrMate = c.scoreMate !== null && c.scoreMate > 0;
 
       if (personality === 'aggressive') {
-        // Aggressive EAS 430,000 mode: reward piece thrusts, checks, pawn storms
+        // Aggressive EAS 430k mode: bias towards piece thrusts, checks, pawn storms
         if (isPawnAdvance || isCheckOrMate || (c.scoreCp !== null && c.scoreCp > primaryScore - 60)) {
-          effectiveDiff = Math.max(0, rawDiff - 40);
+          effectiveDiff = Math.max(0, rawDiff - 35);
         }
         if (isKingCastling && rawDiff > 0) {
-          // Delay castling if sharp attacking alternatives exist
           effectiveDiff += 25;
         }
       } else if (personality === 'solid') {
-        // Solid Positional mode: reward king safety, castling, and low-volatility lines
+        // Solid Positional mode: bias towards king safety, solid pawn structure
         if (isKingCastling) {
-          effectiveDiff = Math.max(0, rawDiff - 35);
+          effectiveDiff = Math.max(0, rawDiff - 30);
         }
-        // Penalize speculative sacrifices
         if (rawDiff > 60) {
-          effectiveDiff += 40;
+          effectiveDiff += 35;
         }
       }
 
-      return Math.exp(-effectiveDiff / temperature);
-    });
+      // At low Elo (500–800), human players frequently overlook tactical inaccuracies.
+      // We reduce the penalty for score difference so worse moves are authentically chosen with ~88% probability.
+      if (eloClamped <= 800) {
+        effectiveDiff = effectiveDiff * 0.25;
+      } else if (eloClamped <= 1400) {
+        effectiveDiff = effectiveDiff * 0.6;
+      }
+
+      altWeights.push(Math.exp(-effectiveDiff / temp));
+    }
+
+    const altSum = altWeights.reduce((sum, w) => sum + w, 0);
+    const candidateWeights = [bestMoveProbability];
+    for (let i = 0; i < altWeights.length; i++) {
+      candidateWeights.push(remainingProb * (altWeights[i] / (altSum || 1)));
+    }
 
     // Softmax sampling among candidates
-    const totalWeight = candidateWeights.reduce((sum, w) => sum + w, 0);
-    let randomVal = Math.random() * totalWeight;
+    let randomVal = Math.random();
     let chosenIndex = 0;
 
     for (let i = 0; i < candidateWeights.length; i++) {
@@ -227,12 +246,20 @@ function handleBestMove(rawBestMoveLine) {
       accumLoss += cpLoss;
     }
 
-    // If a secondary candidate was selected (human mistake or aggressive gambit),
-    // emit a modified info line promoting the chosen move to multipv 1 so UI and parsers
-    // immediately recognize it as the primary move to highlight.
-    if (chosenIndex > 0) {
+    // Reorder candidates so the chosen move is multipv 1, followed by the remaining lines
+    const reorderedCandidates = [
+      chosenCandidate,
+      ...validCandidates.filter((_, idx) => idx !== chosenIndex),
+    ];
+
+    for (let i = 0; i < Math.min(reorderedCandidates.length, currentMultiPv); i++) {
+      const cand = reorderedCandidates[i];
+      const scoreToken =
+        cand.scoreMate !== null
+          ? `score mate ${cand.scoreMate}`
+          : `score cp ${cand.scoreCp ?? 0}`;
       postOutput(
-        `info depth ${chosenCandidate.depth} seldepth ${chosenCandidate.depth + 2} multipv 1 score cp ${chosenCandidate.scoreCp ?? 0} pv ${chosenCandidate.pv.join(' ')}`
+        `info depth ${cand.depth} seldepth ${cand.depth + 2} multipv ${i + 1} ${scoreToken} pv ${cand.pv.join(' ')}`
       );
     }
 
@@ -329,6 +356,13 @@ function handleCommand(rawCmd) {
       const depthMatch = cmd.match(/\bdepth\s+(\d+)/);
       const userDepth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
       const effectiveDepth = isFull ? (userDepth > 0 ? userDepth : 16) : Math.min(bounds.depth, userDepth > 0 ? userDepth : bounds.depth);
+
+      // CRITICAL FIX: Patricia C++ human.h line 11 sets thread_info.multipv = 1 on every search!
+      // We must explicitly restore MultiPV 5 before every go command so alternate blunder/inaccuracy
+      // candidates are generated on move 2, 3, 4, etc. instead of starving to 1 line!
+      if (!isFull) {
+        engineInstance.postMessage('setoption name MultiPV value 5');
+      }
 
       // In single-threaded Patricia WASM, sending "nodes" together with "movetime" causes
       // search.h line 54 to invoke std::this_thread::sleep_for(INT32_MAX / 2) (12 days freeze).

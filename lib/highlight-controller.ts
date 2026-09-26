@@ -326,7 +326,7 @@ export class HighlightController {
 
     const opening = this.settings.opening;
     const enginePolicy = opening?.enginePolicy?.[this.settings.activeEngineId] ?? {};
-    const minEngineDepth = enginePolicy.minEngineDepth ?? opening?.safety?.minEngineDepth ?? 8;
+    const minEngineDepth = enginePolicy.minEngineDepth ?? (this.settings.activeEngineId === 'patricia' ? 2 : opening?.safety?.minEngineDepth ?? 8);
     const topEngineCandidate = engineCandidates[0];
     if (!topEngineCandidate) return true;
 

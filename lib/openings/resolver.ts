@@ -75,7 +75,7 @@ export function engineAllowsEntry(
 
   const enginePolicy = config.enginePolicy?.[settings.activeEngineId] ?? {};
   const minEngineDepth =
-    enginePolicy.minEngineDepth ?? config.safety?.minEngineDepth ?? 8;
+    enginePolicy.minEngineDepth ?? (settings.activeEngineId === 'patricia' ? 2 : config.safety?.minEngineDepth ?? 8);
   const top = engineCandidates[0];
 
   if (!top) return true;

@@ -582,8 +582,8 @@ class PatriciaRunner implements IEngineRunner {
       this.currentSkillLevel = tuning.skillLevel;
     }
 
-    const targetDepth = tuning.recommendedDepth;
-    const moveTime = tuning.isHuman ? Math.min(450, Math.max(180, targetDepth * 40)) : 500;
+    const targetDepth = tuning.isHuman ? tuning.recommendedDepth : (options.depth || 16);
+    const moveTime = tuning.isHuman ? Math.min(350, Math.max(120, targetDepth * 50)) : 500;
 
     this.worker.postMessage(`position fen ${fen}`);
     this.worker.postMessage(`go depth ${targetDepth} movetime ${moveTime}`);

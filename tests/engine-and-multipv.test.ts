@@ -713,7 +713,18 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   assert(humanDesc.badge.includes('2500'), 'Badge should show 2500 Elo');
   assert(humanDesc.detail.includes('Skill Level 17'), 'Detail should show Skill Level 17');
 
-  // Test low Elo depth throttling (600 Elo -> depth 3)
+  // Test low Elo depth throttling (500-600 Elo -> depth 2 novice horizon)
+  const low500Tuning = getPatriciaTuning({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'human',
+    patriciaElo: 500,
+    depth: 16, // User depth slider was set to 16, must be overridden by recommended depth 2
+  });
+  assert.strictEqual(low500Tuning.isHuman, true);
+  assert.strictEqual(low500Tuning.skillLevel, 1, '500 Elo should map to Skill Level 1');
+  assert.strictEqual(low500Tuning.recommendedDepth, 2, '500 Elo depth must be locked to 2 ply and override manual 16 ply');
+
   const low600Tuning = getPatriciaTuning({
     ...DEFAULT_SETTINGS,
     activeEngineId: 'patricia',
@@ -722,7 +733,18 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   });
   assert.strictEqual(low600Tuning.isHuman, true);
   assert.strictEqual(low600Tuning.skillLevel, 1, '600 Elo should map to Skill Level 1');
-  assert.strictEqual(low600Tuning.recommendedDepth, 3, '600 Elo depth must be throttled to 3 ply');
+  assert.strictEqual(low600Tuning.recommendedDepth, 2, '600 Elo depth must be throttled to 2 ply');
+
+  // Verify opening policy minEngineDepth for Patricia is 2 (never overrides depth 2 engine moves)
+  assert.strictEqual(DEFAULT_SETTINGS.opening.enginePolicy?.patricia?.minEngineDepth, 2, 'Patricia minEngineDepth must be 2');
+
+  const mid800Tuning = getPatriciaTuning({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'human',
+    patriciaElo: 800,
+  });
+  assert.strictEqual(mid800Tuning.recommendedDepth, 3, '800 Elo depth must be throttled to 3 ply');
 
   // Test intermediate Elo depth scaling (1500 Elo -> depth 6)
   const mid1500Tuning = getPatriciaTuning({
@@ -808,13 +830,13 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
     ]),
   });
 
-  // Emulate Patricia 500 Elo evaluation emitting depth 3 lines
+  // Emulate Patricia 500 Elo evaluation emitting depth 2 lines
   controller.handleEvaluation({
     engineInstanceId: 'patricia',
     analysisId: 1,
     positionKey: 'test-pos-patricia',
     fen: 'r1bqk1nr/pppp1ppp/2n5/4p3/1bB1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4',
-    depth: 3,
+    depth: 2,
     scoreCp: 50,
     scoreMate: null,
     whiteScoreCp: 50,
@@ -826,7 +848,7 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
         pvId: 1,
         from: 'c2',
         to: 'c3',
-        depth: 3,
+        depth: 2,
         scoreCp: 50,
         scoreMate: null,
         pv: ['c2c3'],
@@ -836,8 +858,8 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
     timestamp: Date.now(),
   });
 
-  assert(renderedSnapshot !== null, 'HighlightController must render evaluation at depth 3 for Patricia');
-  assert.strictEqual(renderedSnapshot.candidates.length, 1, 'Candidate must be preserved at depth 3');
+  assert(renderedSnapshot !== null, 'HighlightController must render evaluation at depth 2 for Patricia');
+  assert.strictEqual(renderedSnapshot.candidates.length, 1, 'Candidate must be preserved at depth 2');
   assert.strictEqual(`${renderedSnapshot.candidates[0].from}${renderedSnapshot.candidates[0].to}`, 'c2c3');
 
   console.log('   ✓ Patricia 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');

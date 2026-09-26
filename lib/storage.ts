@@ -59,7 +59,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
       patricia: {
         mode: 'adaptive',
         maxLossCp: 300,
-        minEngineDepth: 8,
+        minEngineDepth: 2,
         allowOffBook: true,
         allowRisky: true,
         allowMeme: false,

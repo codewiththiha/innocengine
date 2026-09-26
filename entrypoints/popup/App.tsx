@@ -5,7 +5,7 @@ import { capsFor } from '../../lib/engine-capabilities';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
 import { OPENING_CATALOG } from '../../lib/openings/catalog';
 import OpeningBrowser from './components/OpeningBrowser';
-import { getEngineStrengthDescription, mapEloToPatriciaSkill, getPatriciaTuning } from '../../lib/engine-tuning';
+import { getEngineStrengthDescription, mapEloToPatriciaSkill, getPatriciaTuning, getStockfishTuning } from '../../lib/engine-tuning';
 import type {
   EngineSettings,
   EngineEvaluation,
@@ -85,20 +85,55 @@ export default function App() {
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const resolveSynchronizedDepth = (current: EngineSettings): number => {
+    if (current.activeEngineId === 'patricia' && current.patriciaPersonality !== 'full_strength') {
+      return getPatriciaTuning(current).recommendedDepth;
+    }
+    if (current.activeEngineId === 'stockfish' && current.limitStrength) {
+      return getStockfishTuning(current).maxDepth;
+    }
+    if (current.activeEngineId === 'maia2' || current.activeEngineId === 'maia3') {
+      return 1;
+    }
+    return current.depth || 16;
+  };
+
   const updateSettingsBatch = async (patch: Partial<EngineSettings>) => {
-    setSettings((prev) => ({ ...prev, ...patch }));
+    const updated = { ...settings, ...patch };
+    const autoDepth = resolveSynchronizedDepth(updated);
+    const isAuto =
+      (updated.activeEngineId === 'patricia' && updated.patriciaPersonality !== 'full_strength') ||
+      (updated.activeEngineId === 'stockfish' && updated.limitStrength) ||
+      updated.activeEngineId === 'maia2' ||
+      updated.activeEngineId === 'maia3';
+
+    if (isAuto && updated.depth !== autoDepth) {
+      updated.depth = autoDepth;
+      patch.depth = autoDepth;
+    }
+    setSettings(updated);
 
     if (patch.activeEngineId) {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(patch.activeEngineId) });
     }
 
-    await saveSettings(patch);
+    await saveSettings({ ...patch, ...(isAuto ? { depth: autoDepth } : {}) });
     showSavedNotification();
   };
 
   const updateSetting = <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
-    // Instant local state update for 60fps slider feedback
-    setSettings((prev) => ({ ...prev, [key]: value }));
+    const updated = { ...settings, [key]: value };
+    const autoDepth = resolveSynchronizedDepth(updated);
+    const isAuto =
+      (updated.activeEngineId === 'patricia' && updated.patriciaPersonality !== 'full_strength') ||
+      (updated.activeEngineId === 'stockfish' && updated.limitStrength) ||
+      updated.activeEngineId === 'maia2' ||
+      updated.activeEngineId === 'maia3';
+
+    if (isAuto && updated.depth !== autoDepth) {
+      updated.depth = autoDepth;
+    }
+    setSettings(updated);
 
     if (key === 'activeEngineId') {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(value) });
@@ -109,7 +144,7 @@ export default function App() {
       clearTimeout(saveTimeoutRef.current);
     }
     saveTimeoutRef.current = setTimeout(async () => {
-      await saveSettings({ [key]: value });
+      await saveSettings(updated);
       showSavedNotification();
     }, 100);
   };
@@ -444,45 +479,71 @@ export default function App() {
             <Sliders size={14} /> Search Budget & Variations
           </div>
 
-          {activeCaps.hasDepth ? (
-            <div className="setting-item">
-              <div className="setting-label-row">
-                <span className="setting-label">Calculation Depth</span>
-                <span className="setting-value">{settings.depth} ply</span>
+          {/* Calculation Depth: Active & unlocked for manual tuning, or locked with auto-calibrated depth */}
+          {(() => {
+            const isPatriciaAuto = settings.activeEngineId === 'patricia' && settings.patriciaPersonality !== 'full_strength';
+            const isStockfishAuto = settings.activeEngineId === 'stockfish' && settings.limitStrength;
+            const isMaiaAuto = settings.activeEngineId === 'maia2' || settings.activeEngineId === 'maia3';
+            const isDepthAuto = isPatriciaAuto || isStockfishAuto || isMaiaAuto;
+
+            let effectiveDepth = settings.depth;
+            let autoReason = '';
+
+            if (isPatriciaAuto) {
+              const tuning = getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 });
+              effectiveDepth = tuning.recommendedDepth;
+              autoReason = `Auto-calibrated to ${effectiveDepth} ply for ${settings.patriciaElo ?? 2500} Elo handicap.`;
+            } else if (isStockfishAuto) {
+              const sfTuning = getStockfishTuning(settings);
+              effectiveDepth = sfTuning.maxDepth;
+              autoReason = `Auto-calibrated to ${effectiveDepth} ply for ${settings.targetElo ?? 2000} Elo strength limiter.`;
+            } else if (isMaiaAuto) {
+              effectiveDepth = 1;
+              autoReason = `Auto-calibrated to 1 ply (zero-search policy) for Maia neural model.`;
+            }
+
+            return (
+              <div className="setting-item">
+                <div className="setting-label-row">
+                  <span className="setting-label">Calculation Depth</span>
+                  <span
+                    className="setting-value"
+                    style={{
+                      color: isDepthAuto ? '#38bdf8' : '#e2e8f0',
+                      fontWeight: isDepthAuto ? 600 : 500,
+                    }}
+                  >
+                    {isDepthAuto ? `Auto: ${effectiveDepth} ply` : `${settings.depth} ply`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="24"
+                  step="1"
+                  value={effectiveDepth}
+                  disabled={isDepthAuto}
+                  onChange={(e) => {
+                    if (!isDepthAuto) {
+                      updateSetting('depth', parseInt(e.target.value, 10));
+                    }
+                  }}
+                  className="slider"
+                  style={isDepthAuto ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
+                />
+                <div className="slider-hints">
+                  <span>Novice (2)</span>
+                  <span>Balanced (16)</span>
+                  <span>Deep (24)</span>
+                </div>
+                {isDepthAuto && (
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.4 }}>
+                    {autoReason} Manual depth override is disabled to prevent engine overpower conflicts.
+                  </div>
+                )}
               </div>
-              <input
-                type="range"
-                min="8"
-                max="24"
-                step="1"
-                value={settings.depth}
-                onChange={(e) => updateSetting('depth', parseInt(e.target.value, 10))}
-                className="slider"
-              />
-              <div className="slider-hints">
-                <span>Fast (8)</span>
-                <span>{settings.activeEngineId === 'patricia' ? 'Human 2500 (12)' : 'Balanced (16)'}</span>
-                <span>Deep (24)</span>
-              </div>
-            </div>
-          ) : (
-            <div
-              className="setting-item"
-              style={{
-                background: 'rgba(30, 41, 59, 0.4)',
-                padding: '10px 12px',
-                borderRadius: 6,
-                border: '1px solid rgba(255,255,255,0.06)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#38bdf8' }}>
-                <Sparkles size={13} /> Direct Neural Policy Model
-              </div>
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                {activeCaps.name} predicts human candidate moves in a single neural network inference pass (nodes: 1). Tree-search depth is not applicable.
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           <div className="setting-item">
             <div className="setting-label-row">
@@ -572,7 +633,7 @@ export default function App() {
                     type="range"
                     min="500"
                     max="3000"
-                    step="50"
+                    step="100"
                     value={settings.patriciaElo ?? 2500}
                     onChange={(e) => updateSetting('patriciaElo', parseInt(e.target.value, 10))}
                     className="slider"

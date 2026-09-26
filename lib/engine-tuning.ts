@@ -68,24 +68,25 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
 
   const { skillLevel, clampedElo, cpLoss } = mapEloToPatriciaSkill(rawElo);
 
-  // Realistic human depth scaling:
-  // 500-700 Elo: depth 3
-  // 701-1000 Elo: depth 4
-  // 1001-1300 Elo: depth 5
-  // 1301-1600 Elo: depth 6
-  // 1601-2000 Elo: depth 8
-  // 2001-2400 Elo: depth 10
-  // 2401-2700 Elo: depth 12
-  // 2701+ Elo: depth 14
-  let recommendedDepth = 3;
-  if (clampedElo <= 700) recommendedDepth = 3;
-  else if (clampedElo <= 1000) recommendedDepth = 4;
-  else if (clampedElo <= 1300) recommendedDepth = 5;
-  else if (clampedElo <= 1600) recommendedDepth = 6;
-  else if (clampedElo <= 2000) recommendedDepth = 8;
-  else if (clampedElo <= 2300) recommendedDepth = 9;
-  else if (clampedElo <= 2600) recommendedDepth = 10;
-  else if (clampedElo <= 2850) recommendedDepth = 12;
+  // Realistic novice-to-master depth scaling:
+  // 500-600 Elo: depth 2 (novice 1-move tactical horizon)
+  // 650-800 Elo: depth 3 (beginner 1.5-move horizon)
+  // 850-1100 Elo: depth 4 (casual club horizon)
+  // 1150-1400 Elo: depth 5 (intermediate club)
+  // 1450-1750 Elo: depth 6 (strong club player)
+  // 1751-2100 Elo: depth 8 (expert / candidate master)
+  // 2101-2500 Elo: depth 10 (FIDE master / master)
+  // 2501-2800 Elo: depth 12 (International / Grandmaster)
+  // 2801+ Elo: depth 14 (Super-GM)
+  let recommendedDepth = 2;
+  if (clampedElo <= 600) recommendedDepth = 2;
+  else if (clampedElo <= 800) recommendedDepth = 3;
+  else if (clampedElo <= 1100) recommendedDepth = 4;
+  else if (clampedElo <= 1400) recommendedDepth = 5;
+  else if (clampedElo <= 1750) recommendedDepth = 6;
+  else if (clampedElo <= 2100) recommendedDepth = 8;
+  else if (clampedElo <= 2500) recommendedDepth = 10;
+  else if (clampedElo <= 2800) recommendedDepth = 12;
   else recommendedDepth = 14;
 
   return {
