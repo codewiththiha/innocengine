@@ -127,7 +127,44 @@ export class UciParser {
     const whiteScoreCp = primaryLine && primaryLine.scoreCp !== null ? (isBlack ? -primaryLine.scoreCp : primaryLine.scoreCp) : null;
     const whiteScoreMate = primaryLine && primaryLine.scoreMate !== null ? (isBlack ? -primaryLine.scoreMate : primaryLine.scoreMate) : null;
 
-    const candidates = this.buildCandidates(sortedLines);
+    let candidates = this.buildCandidates(sortedLines);
+
+    // CRITICAL: When the engine finishes search and emits `bestmove <uci>`, that move is the
+    // authoritative choice of the engine (e.g. human blunder selection in Patricia or Maia).
+    // If candidates[0] does not match bestMove, promote or inject bestMove as candidates[0]!
+    if (bestMove && bestMove !== '(none)' && bestMove.length >= 4) {
+      const matchIdx = candidates.findIndex(
+        (c) => c.from === bestMove.substring(0, 2) && c.to === bestMove.substring(2, 4)
+      );
+
+      if (matchIdx > 0) {
+        const [chosen] = candidates.splice(matchIdx, 1);
+        if (chosen) {
+          candidates.unshift({
+            ...chosen,
+            pvId: 1,
+          });
+          candidates.forEach((c, idx) => {
+            c.pvId = idx + 1;
+          });
+        }
+      } else if (matchIdx === -1) {
+        const chosenCandidate: EngineCandidate = {
+          pvId: 1,
+          from: bestMove.substring(0, 2),
+          to: bestMove.substring(2, 4),
+          promotion: bestMove.length > 4 ? bestMove[4] : undefined,
+          depth: this.maxDepthSeen,
+          scoreCp: null,
+          scoreMate: null,
+          pv: [bestMove],
+        };
+        candidates.unshift(chosenCandidate);
+        candidates.forEach((c, idx) => {
+          c.pvId = idx + 1;
+        });
+      }
+    }
 
     return {
       analysisId: this.currentAnalysisId,

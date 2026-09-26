@@ -713,6 +713,52 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   assert(humanDesc.badge.includes('2500'), 'Badge should show 2500 Elo');
   assert(humanDesc.detail.includes('Skill Level 17'), 'Detail should show Skill Level 17');
 
+  // Test low Elo depth throttling (600 Elo -> depth 3)
+  const low600Tuning = getPatriciaTuning({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'human',
+    patriciaElo: 600,
+  });
+  assert.strictEqual(low600Tuning.isHuman, true);
+  assert.strictEqual(low600Tuning.skillLevel, 1, '600 Elo should map to Skill Level 1');
+  assert.strictEqual(low600Tuning.recommendedDepth, 3, '600 Elo depth must be throttled to 3 ply');
+
+  // Test intermediate Elo depth scaling (1500 Elo -> depth 6)
+  const mid1500Tuning = getPatriciaTuning({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'aggressive',
+    patriciaElo: 1500,
+  });
+  assert.strictEqual(mid1500Tuning.isHuman, true);
+  assert.strictEqual(mid1500Tuning.skillLevel, 7, '1500 Elo should map to Skill Level 7');
+  assert.strictEqual(mid1500Tuning.recommendedDepth, 6, '1500 Elo depth must be 6 ply');
+
+  // Solid Personality Description
+  const solidDesc = getEngineStrengthDescription({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'solid',
+    patriciaElo: 2000,
+  });
+  assert(solidDesc.detail.includes('Solid Positional'), 'Should highlight Solid Positional style');
+
+  // Test UciParser promotion of chosen human/blunder bestmove into candidates[0]
+  const { UciParser } = await import('../lib/uci-parser');
+  const parser = new UciParser();
+  parser.reset('r1bqk1nr/pppp1ppp/2n5/4p3/1bB1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4', 1, 'test-pos');
+  parser.parseLine('info depth 6 multipv 1 score cp 100 pv c2c3 b4a5');
+  parser.parseLine('info depth 6 multipv 2 score cp 40 pv e1g1 g8f6');
+  // Engine chose the human blunder / alternate candidate e1g1
+  const finalEval = parser.parseLine('bestmove e1g1');
+  assert(finalEval && finalEval.candidates && finalEval.candidates.length > 0);
+  assert.strictEqual(
+    `${finalEval.candidates[0].from}${finalEval.candidates[0].to}`,
+    'e1g1',
+    'Authoritative bestmove e1g1 must be promoted to candidate 0 for on-board highlight'
+  );
+
   console.log('   ✓ Patricia 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');
 }
 

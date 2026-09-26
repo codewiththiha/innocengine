@@ -559,27 +559,13 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Human Strength Limiter (UCI_LimitStrength & UCI_Elo) */}
+              {/* Target Elo Rating Slider for Aggressive, Human-Like, and Solid modes */}
               {settings.patriciaPersonality !== 'full_strength' && (
                 <div className="setting-item" style={{ marginTop: 12 }}>
-                  <label className="toggle-row">
-                    <span className="toggle-label">Enable Human Mode (UCI_LimitStrength)</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.patriciaLimitStrength ?? (settings.patriciaPersonality === 'human')}
-                      onChange={(e) => updateSetting('patriciaLimitStrength', e.target.checked)}
-                      className="toggle-switch"
-                    />
-                  </label>
-                </div>
-              )}
-
-              {settings.patriciaPersonality !== 'full_strength' && (settings.patriciaLimitStrength || settings.patriciaPersonality === 'human') && (
-                <div className="setting-item" style={{ marginTop: 8 }}>
                   <div className="setting-label-row">
-                    <span className="setting-label">Target Human Elo (UCI_Elo)</span>
+                    <span className="setting-label">Target Elo Rating (UCI_Elo)</span>
                     <span className="setting-value">
-                      {mapEloToPatriciaSkill(settings.patriciaElo || 2500).clampedElo} Elo (Skill {mapEloToPatriciaSkill(settings.patriciaElo || 2500).skillLevel}/20)
+                      {mapEloToPatriciaSkill(settings.patriciaElo ?? 2500).clampedElo} Elo (Skill {mapEloToPatriciaSkill(settings.patriciaElo ?? 2500).skillLevel}/20 • Depth {getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply)
                     </span>
                   </div>
                   <input
@@ -587,21 +573,29 @@ export default function App() {
                     min="500"
                     max="3000"
                     step="50"
-                    value={settings.patriciaElo || 2500}
+                    value={settings.patriciaElo ?? 2500}
                     onChange={(e) => updateSetting('patriciaElo', parseInt(e.target.value, 10))}
                     className="slider"
                   />
                   <div className="slider-hints">
                     <span>500 (Novice)</span>
-                    <span>1500 (Club)</span>
+                    <span>1000 (Club)</span>
+                    <span>1500 (Intermediate)</span>
                     <span>2000 (Expert)</span>
                     <span>2500 (Master)</span>
                     <span>3000 (Super-GM)</span>
                   </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.4 }}>
+                    {settings.patriciaPersonality === 'aggressive'
+                      ? 'Aggressive Mode: Prioritizes tactical sacrifices, checks, and king attacks while constrained to authentic rating blunder probabilities and depth limits.'
+                      : settings.patriciaPersonality === 'solid'
+                      ? 'Solid Positional Mode: Prioritizes king safety, central pawn stability, and penalizes unsound speculative sacrifices.'
+                      : 'Human Mode: Authentic rating-calibrated blunder and mistake distribution modeled from human game statistics.'}
+                  </div>
                 </div>
               )}
 
-              {/* Fixed Depth Guide (Specifically answering Lucas Chess 2500 Elo question) */}
+              {/* Dynamic Calibration Guide */}
               <div
                 style={{
                   marginTop: 12,
@@ -612,10 +606,10 @@ export default function App() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
-                  <Sparkles size={12} /> Recommended 2500 Elo Depth Guide
+                  <Sparkles size={12} /> Dynamic Rating & Personality Calibration
                 </div>
                 <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  For authentic human-like ~2500 Elo play, set fixed depth to <b>12 ply</b> (or movetime <b>1000–1500ms</b>). This allows Patricia to calculate MultiPV 5 tactical lines without machine-like 20+ ply perfection.
+                  Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and node budgets to match the selected rating. At low Elo (500–1000), search is restricted to authentic beginner tactical horizon instead of machine-like 20+ ply perfection.
                 </div>
               </div>
 

@@ -178,7 +178,25 @@ export interface EngineTelemetry {
 }
 
 export type ExtensionMessage =
-  | { target: 'engine'; type: 'ANALYZE'; analysisId: number; positionKey: string; fen: string; depth?: number; multiPv?: number; tabId?: number }
+  | {
+      target: 'engine';
+      type: 'ANALYZE';
+      analysisId: number;
+      positionKey: string;
+      fen: string;
+      depth?: number;
+      multiPv?: number;
+      activeEngineId?: string;
+      limitStrength?: boolean;
+      targetElo?: number;
+      patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+      patriciaLimitStrength?: boolean;
+      patriciaElo?: number;
+      threads?: number;
+      hashMb?: number;
+      tabId?: number;
+      senderTabId?: number;
+    }
   | { target: 'engine'; type: 'STOP'; analysisId?: number }
   | { target: 'engine'; type: 'PING' }
   | { target: 'engine'; type: 'SWITCH_ENGINE'; engineId: string }

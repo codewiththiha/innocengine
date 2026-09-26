@@ -63,6 +63,9 @@ export class EngineClient {
         activeEngineId: settings.activeEngineId,
         limitStrength: settings.limitStrength,
         targetElo: settings.targetElo,
+        patriciaPersonality: settings.patriciaPersonality,
+        patriciaLimitStrength: settings.patriciaLimitStrength,
+        patriciaElo: settings.patriciaElo,
         threads: settings.threads,
         hashMb: settings.hashMb,
       });

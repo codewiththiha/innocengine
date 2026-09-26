@@ -50,25 +50,43 @@ export function mapEloToPatriciaSkill(targetElo: number): {
 
 export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
   const personality = settings.patriciaPersonality || 'aggressive';
-  const limitStrength = settings.patriciaLimitStrength ?? (personality === 'human');
-  const rawElo = settings.patriciaElo || 2500;
+  const limitStrength = settings.patriciaLimitStrength ?? (personality !== 'full_strength');
+  const rawElo = settings.patriciaElo ?? settings.targetElo ?? 2500;
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
 
-  if (!limitStrength && personality !== 'human') {
+  if (!limitStrength || personality === 'full_strength') {
     return {
       isHuman: false,
       skillLevel: 21,
       targetElo: 3500,
-      recommendedDepth: Math.min(10, settings.depth || 10),
-      personality,
+      recommendedDepth: Math.min(18, Math.max(12, settings.depth || 16)),
+      personality: 'full_strength',
       multiPv,
       cpLoss: 0,
     };
   }
 
   const { skillLevel, clampedElo, cpLoss } = mapEloToPatriciaSkill(rawElo);
-  // Fast, responsive human calibration: depth 7 to 10 ensures sub-300ms analysis
-  const recommendedDepth = Math.max(7, Math.min(10, Math.round(7 + ((clampedElo - 500) / 2500) * 3)));
+
+  // Realistic human depth scaling:
+  // 500-700 Elo: depth 3
+  // 701-1000 Elo: depth 4
+  // 1001-1300 Elo: depth 5
+  // 1301-1600 Elo: depth 6
+  // 1601-2000 Elo: depth 8
+  // 2001-2400 Elo: depth 10
+  // 2401-2700 Elo: depth 12
+  // 2701+ Elo: depth 14
+  let recommendedDepth = 3;
+  if (clampedElo <= 700) recommendedDepth = 3;
+  else if (clampedElo <= 1000) recommendedDepth = 4;
+  else if (clampedElo <= 1300) recommendedDepth = 5;
+  else if (clampedElo <= 1600) recommendedDepth = 6;
+  else if (clampedElo <= 2000) recommendedDepth = 8;
+  else if (clampedElo <= 2300) recommendedDepth = 9;
+  else if (clampedElo <= 2600) recommendedDepth = 10;
+  else if (clampedElo <= 2850) recommendedDepth = 12;
+  else recommendedDepth = 14;
 
   return {
     isHuman: true,
@@ -180,17 +198,28 @@ export function getEngineStrengthDescription(settings: EngineSettings): {
 
   if (settings.activeEngineId === 'patricia') {
     const patricia = getPatriciaTuning(settings);
-    if (!patricia.isHuman) {
+    if (!patricia.isHuman || patricia.personality === 'full_strength') {
       return {
         badge: 'Patricia 5.1 (CCRL ~3500+)',
         detail: 'Skill Level 21 • Full Strength (EAS 430,000 Aggressive)',
         subtext: "Adam Kulju's romantic aggressive engine at maximum tactical strength. High draw contempt and ruthless piece sacrifices.",
       };
     }
+    const modeLabel =
+      patricia.personality === 'aggressive'
+        ? 'Aggressive (EAS 430k)'
+        : patricia.personality === 'solid'
+        ? 'Solid Positional'
+        : 'Human-Like';
     return {
-      badge: `Patricia Human (${patricia.targetElo})`,
-      detail: `Skill Level ${patricia.skillLevel} / 20 (${patricia.targetElo} Elo) • cp_loss: ${patricia.cpLoss}`,
-      subtext: `Calibrated human blunder rate with MultiPV error distribution. Recommended depth: ${patricia.recommendedDepth} ply for ~${patricia.targetElo} Elo play.`,
+      badge: `Patricia ${modeLabel.split(' ')[0]} (${patricia.targetElo})`,
+      detail: `${modeLabel} • Skill Level ${patricia.skillLevel} / 20 (${patricia.targetElo} Elo) • Depth ${patricia.recommendedDepth} ply`,
+      subtext:
+        patricia.personality === 'aggressive'
+          ? `Tactical sacrifices and king attack with search scaled to ~${patricia.targetElo} Elo.`
+          : patricia.personality === 'solid'
+          ? `Positional king safety and classical solid lines calibrated to ~${patricia.targetElo} Elo.`
+          : `Calibrated human blunder rate with MultiPV error distribution for authentic ~${patricia.targetElo} Elo play.`,
     };
   }
 

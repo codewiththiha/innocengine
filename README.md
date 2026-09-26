@@ -102,13 +102,13 @@ npm run zip
 ```
 Creates `.output/chess-ai-overlay-1.0.0-chrome.zip` ready for Chrome Web Store submission or distribution.
 
-### 5. Multi-Browser Support: Mozilla Firefox
-The extension is fully compatible with Mozilla Firefox (both Manifest V2 and Manifest V3):
+### 5. Multi-Browser Support: Mozilla Firefox & Waterfox
+The extension is fully compatible with Mozilla Firefox and Waterfox (both Manifest V2 and Manifest V3):
 - **Chrome Engine Execution**: Uses `chrome.offscreen` document to bypass service worker WASM limitations.
-- **Firefox Engine Execution**: Background script directly hosts `UnifiedEngineHost` with native WebAssembly and Web Worker support (bypassing Chromium-only `chrome.offscreen`).
+- **Firefox & Waterfox Engine Execution**: Background script directly hosts `UnifiedEngineHost` with native WebAssembly and Web Worker support (bypassing Chromium-only `chrome.offscreen`).
 - **Gecko Extension ID**: Configured with `browser_specific_settings.gecko.id: "chess-ai-overlay@innocengine.dev"`.
 
-#### Firefox Build Commands:
+#### Firefox & Waterfox Build Commands:
 ```bash
 # Build Firefox extension
 npm run build:firefox
@@ -119,18 +119,44 @@ npm run build:firefox:mv3
 # Package Firefox zip and AMO sources archive
 npm run zip:firefox
 
+# Package valid-timestamp XPI archive for direct installation
+npm run xpi:firefox
+
 # Build and package both Chrome and Firefox simultaneously
 npm run build:all
 npm run zip:all
 ```
 
-#### Load Extension in Firefox:
-1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
-2. Click **Load Temporary Add-on...**.
-3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select the generated `.output/chess-ai-overlay-1.0.0-firefox.zip`.
-4. Open [Chess.com](https://www.chess.com) to start playing!
+#### Installing in Waterfox / Firefox:
 
-### 6. Load Extension in Chrome
+##### Method A: Temporary / Developer Mode (Recommended & Instant)
+1. Open Waterfox or Firefox and navigate to `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on...**.
+3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select `releases/chess-ai-overlay-1.0.0-firefox.xpi`.
+4. Open [Chess.com](https://www.chess.com) and start playing!
+
+##### Method B: Permanent Installation in Waterfox (Fixing "Cannot modify the needed file")
+If you attempt to install an unsigned `.xpi` or `.zip` directly via `about:addons` > "Install Add-on From File...", Gecko browsers will reject the staging process with a modal error (`cannot modify the needed file` or `corrupt add-on`) due to signature enforcement.
+
+To install permanently in Waterfox without signature rejection:
+1. Navigate to `about:config` in your Waterfox URL bar and accept the prompt.
+2. Search for `xpinstall.signatures.required` and toggle it to **`false`**.
+3. Search for `extensions.experiments.enabled` and toggle it to **`true`**.
+4. Open `about:addons`, click the gear icon in the top right, and choose **Install Add-on From File...**.
+5. Select `releases/chess-ai-overlay-1.0.0-firefox.xpi`. It will install permanently without the modal staging error.
+
+---
+
+### 6. Patricia 5.1 Engine & Dynamic Personality Calibration
+Patricia 5.1 is integrated with full native WebAssembly execution, supporting dynamic rating adjustment (500–3000 Elo) and distinct playstyle personalities:
+- **Aggressive (EAS 430,000 Sacrificial)**: Patricia's hallmark romantic style with high draw contempt and bonuses for piece sacrifices and king attacks. Scaled dynamically to your target rating.
+- **Human-Like**: Calibrated human blunder and mistake distribution modeled from CCRL and Lichess error rates. Throttles search depth (3–14 ply) and node budgets to match genuine human tactical vision.
+- **Solid Positional**: Focuses on king safety, central pawn control, and avoids speculative sacrifices.
+- **Full Strength (CCRL 3500+)**: Unrestricted grandmaster computation with maximum tactical depth.
+
+---
+
+### 7. Load Extension in Chrome
 1. Open Google Chrome and navigate to `chrome://extensions/`.
 2. Toggle **Developer mode** in the top-right corner.
 3. Click **Load unpacked** and select the `.output/chrome-mv3` folder.

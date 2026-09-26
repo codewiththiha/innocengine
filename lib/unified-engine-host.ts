@@ -395,6 +395,7 @@ class PatriciaRunner implements IEngineRunner {
         }
 
         this.onStatus('loading', 'Initializing Patricia WASM...');
+        this.currentSkillLevel = -1;
         const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
         this.worker = new Worker(workerUrl);
 
@@ -570,16 +571,20 @@ class PatriciaRunner implements IEngineRunner {
       multiPv: options.multiPv,
     } as any);
 
+    this.worker.postMessage(`setoption name Personality value ${tuning.personality}`);
+    this.worker.postMessage(`setoption name UCI_LimitStrength value ${tuning.isHuman}`);
+    this.worker.postMessage(`setoption name UCI_Elo value ${tuning.targetElo}`);
+
     if (this.currentSkillLevel !== tuning.skillLevel) {
       this.worker.postMessage(`setoption name Skill_Level value ${tuning.skillLevel}`);
       this.currentSkillLevel = tuning.skillLevel;
     }
 
-    // Interactive responsive calibration: depth 7 to 10 with 350ms cap for sub-second real-time responsiveness
     const targetDepth = tuning.recommendedDepth;
+    const moveTime = tuning.isHuman ? Math.min(450, Math.max(180, targetDepth * 40)) : 500;
 
     this.worker.postMessage(`position fen ${fen}`);
-    this.worker.postMessage(`go depth ${targetDepth} movetime 350`);
+    this.worker.postMessage(`go depth ${targetDepth} movetime ${moveTime}`);
     this.onStatus('analyzing', undefined, this.senderTabId);
   }
 
