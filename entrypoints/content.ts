@@ -40,9 +40,14 @@ export default defineContentScript({
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
         const depthChanged = newSettings.depth !== currentSettings.depth;
         const engineChanged = newSettings.activeEngineId !== currentSettings.activeEngineId;
+        const patriciaChanged =
+          newSettings.patriciaElo !== currentSettings.patriciaElo ||
+          newSettings.patriciaPersonality !== currentSettings.patriciaPersonality ||
+          newSettings.patriciaLimitStrength !== currentSettings.patriciaLimitStrength;
         const eloChanged =
           newSettings.limitStrength !== currentSettings.limitStrength ||
-          newSettings.targetElo !== currentSettings.targetElo;
+          newSettings.targetElo !== currentSettings.targetElo ||
+          patriciaChanged;
         const openingChanged =
           newSettings.opening.enabled !== currentSettings.opening.enabled ||
           newSettings.opening.repertoireId !== currentSettings.opening.repertoireId ||

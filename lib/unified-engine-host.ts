@@ -535,6 +535,8 @@ class PatriciaRunner implements IEngineRunner {
     // the old calculation in 0ms and eliminates the lagging queue backlog.
     if (this.isSearching && this.worker) {
       try {
+        this.worker.onerror = null;
+        this.worker.onmessage = null;
         this.worker.terminate();
       } catch (_) {}
       this.worker = null;
@@ -591,6 +593,8 @@ class PatriciaRunner implements IEngineRunner {
   public stop() {
     if (this.isSearching && this.worker) {
       try {
+        this.worker.onerror = null;
+        this.worker.onmessage = null;
         this.worker.terminate();
       } catch (_) {}
       this.worker = null;
@@ -606,6 +610,8 @@ class PatriciaRunner implements IEngineRunner {
   public destroy() {
     if (this.worker) {
       try {
+        this.worker.onerror = null;
+        this.worker.onmessage = null;
         this.worker.postMessage('quit');
         this.worker.terminate();
       } catch (_) {}

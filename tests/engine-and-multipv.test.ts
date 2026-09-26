@@ -761,6 +761,85 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
     'Authoritative bestmove e1g1 must be promoted to candidate 0 for on-board highlight'
   );
 
+  // Test smooth continuous Elo shifting without jumping from 500 directly to 800
+  const p600 = mapEloToPatriciaSkill(600);
+  assert.strictEqual(p600.clampedElo, 600, '600 Elo must be preserved continuously');
+  assert.strictEqual(p600.skillLevel, 1, '600 Elo maps to Skill Level 1');
+
+  const p700 = mapEloToPatriciaSkill(700);
+  assert.strictEqual(p700.clampedElo, 700, '700 Elo must be preserved continuously');
+  assert.strictEqual(p700.skillLevel, 2, '700 Elo is closest to Skill Level 2 (800)');
+
+  const p800 = mapEloToPatriciaSkill(800);
+  assert.strictEqual(p800.clampedElo, 800, '800 Elo must be preserved continuously');
+  assert.strictEqual(p800.skillLevel, 2, '800 Elo maps to Skill Level 2');
+
+  const p900 = mapEloToPatriciaSkill(900);
+  assert.strictEqual(p900.clampedElo, 900, '900 Elo must be preserved continuously');
+  assert.strictEqual(p900.skillLevel, 2, '900 Elo maps to Skill Level 2');
+
+  // Test HighlightController does NOT drop Patricia depth 3 evaluations (500 Elo fix)
+  const { HighlightController } = await import('../lib/highlight-controller');
+  let renderedSnapshot: any = null;
+  const controller = new HighlightController(
+    {
+      ...DEFAULT_SETTINGS,
+      activeEngineId: 'patricia',
+      patriciaElo: 500,
+      showHighlights: true,
+      highlightPlayerMoves: true,
+      opening: { enabled: false, repertoireId: 'auto', mode: 'off', maxPlies: 0 },
+    },
+    (snap) => {
+      renderedSnapshot = snap;
+    }
+  );
+
+  controller.setBoardState({
+    fen: 'r1bqk1nr/pppp1ppp/2n5/4p3/1bB1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4',
+    positionKey: 'test-pos-patricia',
+    turn: 'w',
+    isFlipped: false,
+    playerColor: 'w',
+    controlledColor: 'w',
+    pieceMap: new Map([
+      ['c2', 'P'],
+      ['e1', 'K'],
+    ]),
+  });
+
+  // Emulate Patricia 500 Elo evaluation emitting depth 3 lines
+  controller.handleEvaluation({
+    engineInstanceId: 'patricia',
+    analysisId: 1,
+    positionKey: 'test-pos-patricia',
+    fen: 'r1bqk1nr/pppp1ppp/2n5/4p3/1bB1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4',
+    depth: 3,
+    scoreCp: 50,
+    scoreMate: null,
+    whiteScoreCp: 50,
+    whiteScoreMate: null,
+    bestMove: 'c2c3',
+    multiPvLines: [],
+    candidates: [
+      {
+        pvId: 1,
+        from: 'c2',
+        to: 'c3',
+        depth: 3,
+        scoreCp: 50,
+        scoreMate: null,
+        pv: ['c2c3'],
+      },
+    ],
+    isCalculating: false,
+    timestamp: Date.now(),
+  });
+
+  assert(renderedSnapshot !== null, 'HighlightController must render evaluation at depth 3 for Patricia');
+  assert.strictEqual(renderedSnapshot.candidates.length, 1, 'Candidate must be preserved at depth 3');
+  assert.strictEqual(`${renderedSnapshot.candidates[0].from}${renderedSnapshot.candidates[0].to}`, 'c2c3');
+
   console.log('   ✓ Patricia 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');
 }
 

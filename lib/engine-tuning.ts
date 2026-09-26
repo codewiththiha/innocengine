@@ -33,16 +33,16 @@ export function mapEloToPatriciaSkill(targetElo: number): {
   clampedElo: number;
   cpLoss: number;
 } {
+  const clampedElo = Math.max(500, Math.min(3000, targetElo));
   let closestIdx = 0;
   let minDiff = Infinity;
   for (let i = 0; i < PATRICIA_SKILL_LEVELS.length; i++) {
-    const diff = Math.abs(PATRICIA_SKILL_LEVELS[i]! - targetElo);
+    const diff = Math.abs(PATRICIA_SKILL_LEVELS[i]! - clampedElo);
     if (diff < minDiff) {
       minDiff = diff;
       closestIdx = i;
     }
   }
-  const clampedElo = PATRICIA_SKILL_LEVELS[closestIdx] ?? 2500;
   const skillLevel = closestIdx + 1; // 1-based (1..20)
   const cpLoss = Math.max(0, 120 - Math.floor(clampedElo / 25));
   return { skillLevel, clampedElo, cpLoss };
