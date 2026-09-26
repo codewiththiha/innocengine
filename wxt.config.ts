@@ -13,6 +13,9 @@ export default defineConfig({
       default_title: 'Chess AI Overlay Settings',
       default_popup: 'popup.html',
     },
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+    },
     web_accessible_resources: [
       {
         resources: [
@@ -22,6 +25,7 @@ export default defineConfig({
           'engine/stockfish.js',
           'engine/stockfish.wasm',
           'engine/stockfish.wasm.js',
+          'engine/patricia/*',
           'icon/*.png',
         ],
         matches: ['*://*.chess.com/*'],

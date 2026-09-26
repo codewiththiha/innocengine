@@ -377,6 +377,7 @@ class PatriciaRunner implements IEngineRunner {
   private currentMultiPv: number = 1;
   private currentSkillLevel: number = -1;
   private senderTabId?: number;
+  private pendingAnalysis: { fen: string; analysisId: number; positionKey: string; options: EngineRunOptions } | null = null;
   private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
   private onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void;
 
@@ -389,30 +390,59 @@ class PatriciaRunner implements IEngineRunner {
     this.onStatus = onStatus;
   }
 
-  public async init(): Promise<void> {
-    try {
-      this.onStatus('loading', 'Initializing Patricia WASM...');
-      const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
-      this.worker = new Worker(workerUrl);
+  public init(): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        this.onStatus('loading', 'Initializing Patricia WASM...');
+        const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
+        this.worker = new Worker(workerUrl);
 
-      this.worker.onmessage = (event: MessageEvent) => {
-        const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
-        this.handleLine(line);
-      };
+        let resolved = false;
+        const markReady = () => {
+          if (!resolved) {
+            resolved = true;
+            this.isReady = true;
+            this.onStatus('ready', 'Patricia 5.1 Ready');
+            resolve();
+            if (this.pendingAnalysis) {
+              const pending = this.pendingAnalysis;
+              this.pendingAnalysis = null;
+              this.analyze(pending.fen, pending.analysisId, pending.positionKey, pending.options);
+            }
+          }
+        };
 
-      this.worker.onerror = (err) => {
-        console.error('[PatriciaRunner] Worker error:', err);
-        this.onStatus('error', 'Patricia worker failed');
-      };
+        const timeout = setTimeout(() => {
+          markReady();
+        }, 6000);
 
-      this.worker.postMessage('uci');
-      this.worker.postMessage('isready');
-      this.worker.postMessage('setoption name Hash value 32');
-      this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
-    } catch (err) {
-      console.error('[PatriciaRunner] Initialization failed:', err);
-      this.onStatus('error', 'Failed to launch Patricia worker');
-    }
+        this.worker.onmessage = (event: MessageEvent) => {
+          const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
+          if (line === 'uciok' || line === 'readyok') {
+            clearTimeout(timeout);
+            markReady();
+            return;
+          }
+          this.handleLine(line);
+        };
+
+        this.worker.onerror = (err) => {
+          console.error('[PatriciaRunner] Worker error:', err);
+          this.onStatus('error', 'Patricia worker failed to initialize');
+          clearTimeout(timeout);
+          markReady();
+        };
+
+        this.worker.postMessage('uci');
+        this.worker.postMessage('isready');
+        this.worker.postMessage('setoption name Hash value 32');
+        this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
+      } catch (err) {
+        console.error('[PatriciaRunner] Initialization failed:', err);
+        this.onStatus('error', 'Failed to launch Patricia worker');
+        resolve();
+      }
+    });
   }
 
   private handleLine(line: string) {
@@ -471,7 +501,12 @@ class PatriciaRunner implements IEngineRunner {
   }
 
   public analyze(fen: string, analysisId: number, positionKey: string, options: EngineRunOptions) {
-    if (!this.worker || !this.isReady) return;
+    if (!this.worker) return;
+
+    if (!this.isReady) {
+      this.pendingAnalysis = { fen, analysisId, positionKey, options };
+      return;
+    }
 
     this.currentFen = fen;
     this.currentAnalysisId = analysisId;
