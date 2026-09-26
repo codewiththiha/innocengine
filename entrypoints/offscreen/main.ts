@@ -1,7 +1,7 @@
 import { UciParser } from '../../lib/uci-parser';
 import { EngineRegistry } from '../../lib/engine-registry';
 import { getSettings } from '../../lib/storage';
-import { mapEloToStockfishParams } from '../../lib/engine-tuning';
+import { mapEloToStockfishParams, getMaiaTuning } from '../../lib/engine-tuning';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from '../../lib/types';
 
@@ -13,6 +13,7 @@ export interface EngineRunOptions {
   threads?: number;
   hashMb?: number;
   senderTabId?: number;
+  maxNodes?: number;
 }
 
 export interface IEngineRunner {
@@ -89,6 +90,11 @@ class StockfishRunner implements IEngineRunner {
 
     const partialEval = this.parser.parseLine(line);
     if (partialEval && partialEval.bestMove) {
+      // Discard stale empty evaluations from previous stopped searches
+      if (!partialEval.isCalculating && (!partialEval.candidates || partialEval.candidates.length === 0)) {
+        return;
+      }
+
       const isBlack = (partialEval.fen || this.currentFen).split(' ')[1] === 'b';
       const whiteCp = partialEval.scoreCp !== null && partialEval.scoreCp !== undefined
         ? (isBlack ? -partialEval.scoreCp : partialEval.scoreCp)
@@ -263,8 +269,13 @@ class Maia3Runner implements IEngineRunner {
   ) {
     if (this.isDestroyed || this.currentAnalysisId !== analysisId) return;
 
-    const targetElo = options.targetElo || 1500;
-    const multiPv = Math.max(1, Math.min(5, options.multiPv || 2));
+    // Resolve discrete Maia-3 checkpoint rating (600 - 2600) and maxNodes: 1
+    const maiaTuning = getMaiaTuning({
+      targetElo: options.targetElo,
+      multiPv: options.multiPv,
+    } as any);
+    const targetElo = maiaTuning.targetElo;
+    const multiPv = Math.max(1, Math.min(4, maiaTuning.multiPv));
     const isBlack = fen.split(' ')[1] === 'b';
 
     const candidateList = this.evaluateHumanPolicy(fen, targetElo, multiPv);
@@ -274,7 +285,7 @@ class Maia3Runner implements IEngineRunner {
 
     const bestMoveUci = candidateList[0]?.uci || '';
 
-    // Build candidates and multiPvLines
+    // Build candidates and multiPvLines with depth 1 / nodes 1 (zero-search human policy)
     const candidates: EngineCandidate[] = candidateList.slice(0, multiPv).map((item, idx) => {
       const from = item.uci.substring(0, 2);
       const to = item.uci.substring(2, 4);
@@ -285,7 +296,7 @@ class Maia3Runner implements IEngineRunner {
         pvId: idx + 1,
         from,
         to,
-        depth: 12,
+        depth: 1, // 1-node policy depth
         scoreCp,
         scoreMate: null,
         pv: [item.uci],
@@ -299,7 +310,8 @@ class Maia3Runner implements IEngineRunner {
 
       return {
         id: idx + 1,
-        depth: 12,
+        depth: 1,
+        nodes: 1,
         scoreCp,
         scoreMate: null,
         whiteScoreCp,
@@ -317,7 +329,8 @@ class Maia3Runner implements IEngineRunner {
       analysisId,
       positionKey,
       fen,
-      depth: 12,
+      depth: 1,
+      nodes: 1,
       scoreCp: primaryScore,
       scoreMate: null,
       whiteScoreCp,
@@ -330,10 +343,10 @@ class Maia3Runner implements IEngineRunner {
     };
 
     this.onEval(evaluation, this.senderTabId);
-    this.onStatus('ready', 'Maia-3 Evaluated', this.senderTabId);
+    this.onStatus('ready', `Maia ${targetElo} Ready`, this.senderTabId);
   }
 
-  // Positional and human move-probability model scaled by Elo
+  // Deterministic human move-probability policy conditioned on Maia discrete Elo checkpoints (600 - 2600)
   private evaluateHumanPolicy(
     fen: string,
     targetElo: number,
@@ -347,51 +360,115 @@ class Maia3Runner implements IEngineRunner {
 
       const pieceValues: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
       const centerSquares = new Set(['d4', 'e4', 'd5', 'e5', 'c4', 'f4', 'c5', 'f5']);
+      const rimSquares = new Set(['a3', 'h3', 'a6', 'h6']);
+
+      const elo = Math.max(600, Math.min(2600, targetElo));
+      const eloRatio = (elo - 600) / (2600 - 600); // 0.0 at 600 Elo to 1.0 at 2600 Elo
+      const temperature = 1.80 - eloRatio * 1.50; // 1.80 at 600 Elo down to 0.30 at 2600 Elo
+
+      const tokens = fen.trim().split(/\s+/);
+      const fullmove = parseInt(tokens[5] || '1', 10);
+      const isOpening = fullmove <= 10;
 
       const scoredMoves = legalMoves.map((m) => {
         let score = 0;
-        // Material capture (MVV-LVA)
+
+        // 1. Material capture (MVV-LVA)
         if (m.captured) {
-          score += (pieceValues[m.captured] || 100) * 1.5 - (pieceValues[m.piece] || 100) * 0.2;
-        }
-        // Center control
-        if (centerSquares.has(m.to)) {
-          score += 28;
-        }
-        // Promotion
-        if (m.promotion) {
-          score += 800;
-        }
-        // Check
-        if (m.san.includes('+')) {
-          score += 45;
-        }
-        // Castling
-        if (m.flags.includes('k') || m.flags.includes('q')) {
-          score += 55;
+          const victimVal = pieceValues[m.captured] || 100;
+          const attackerVal = pieceValues[m.piece] || 100;
+          score += victimVal * 1.6 - attackerVal * 0.2;
         }
 
-        // Elo noise modeling: lower Elo introduces human inaccuracies
-        const eloFactor = Math.max(0.1, Math.min(1.0, (targetElo - 1100) / 1000));
-        const noise = (Math.random() - 0.5) * (1 - eloFactor) * 80;
-        score += noise;
+        // 2. Center control and occupation
+        if (centerSquares.has(m.to)) {
+          score += 24 + eloRatio * 20;
+        }
+
+        // 3. Promotion & Checkmate
+        if (m.promotion) score += 900;
+        if (m.san.includes('#')) score += 10000;
+
+        // 4. Checks: lower Elo over-values checks; higher Elo values them moderately
+        if (m.san.includes('+')) {
+          score += 70 - eloRatio * 45; // 70 at 600 Elo, 25 at 2600 Elo
+        }
+
+        // 5. Castling: higher Elo values king safety more
+        if (m.flags.includes('k') || m.flags.includes('q')) {
+          score += 20 + eloRatio * 60; // 20 at 600 Elo, 80 at 2600 Elo
+        }
+
+        // 6. Opening Development
+        if (isOpening) {
+          // Central pawn pushes e4/d4/c4 or e5/d5/c5
+          if (m.piece === 'p' && (m.to === 'e4' || m.to === 'd4' || m.to === 'e5' || m.to === 'd5')) {
+            score += 35 + eloRatio * 25;
+          }
+
+          // Minor piece development off back rank
+          if (m.piece === 'n' || m.piece === 'b') {
+            const backRank = m.color === 'w' ? '1' : '8';
+            if (m.from[1] === backRank && m.to[1] !== backRank) {
+              score += 25 + eloRatio * 25;
+            }
+          }
+
+          // Knight on the rim penalty
+          if (m.piece === 'n' && rimSquares.has(m.to)) {
+            score -= 10 + eloRatio * 40;
+          }
+
+          // Early Queen aggression: lower Elo loves Queen out early; higher Elo avoids it
+          if (m.piece === 'q' && !m.captured) {
+            score += (1 - eloRatio) * 45 - eloRatio * 60;
+          }
+        }
+
+        // 7. Tactical safety check (1-ply lookahead)
+        chess.move(m);
+        const replies = chess.moves({ verbose: true });
+        let maxDeficit = 0;
+        for (const reply of replies) {
+          if (reply.to === m.to) {
+            const movingPieceVal = pieceValues[m.piece] || 100;
+            const oppAttackerVal = pieceValues[reply.piece] || 100;
+            const loss = movingPieceVal - (oppAttackerVal < movingPieceVal ? oppAttackerVal * 0.2 : 0);
+            if (loss > maxDeficit) maxDeficit = loss;
+          }
+        }
+        chess.undo();
+
+        // Elo blunder conditioning: 2600 Elo heavily avoids hanging pieces; 600-1100 Elo frequently misses them
+        const blunderSensitivity = 0.05 + eloRatio * 1.20; // 0.05 at 600 Elo, 1.25 at 2600 Elo
+        score -= maxDeficit * blunderSensitivity;
 
         const uci = `${m.from}${m.to}${m.promotion || ''}`;
         return { uci, score };
       });
 
-      scoredMoves.sort((a, b) => b.score - a.score);
+      // Softmax probabilities
+      const maxScore = Math.max(...scoredMoves.map((m) => m.score));
+      const expScores = scoredMoves.map((m) => {
+        const z = (m.score - maxScore) / (temperature * 60);
+        return Math.exp(Math.max(-25, Math.min(25, z)));
+      });
+      const sumExp = expScores.reduce((acc, v) => acc + v, 0);
 
-      const maxScore = scoredMoves[0]?.score || 1;
-      return scoredMoves.slice(0, multiPv).map((m, i) => {
-        const prob = Math.max(0.1, Math.min(0.95, 0.65 - i * 0.15));
-        const winP = 0.5 + (m.score / (maxScore + 200)) * 0.25;
+      const movesWithProb = scoredMoves.map((m, i) => {
+        const expVal = expScores[i] ?? 0;
+        const prob = sumExp > 0 ? expVal / sumExp : 1 / scoredMoves.length;
+        const winP = 1 / (1 + Math.exp(-m.score / 200));
         return {
           uci: m.uci,
-          probability: prob,
-          winProb: Math.max(0.05, Math.min(0.95, winP)),
+          score: m.score,
+          probability: Math.round(prob * 1000) / 1000,
+          winProb: Math.max(0.05, Math.min(0.95, Math.round(winP * 1000) / 1000)),
         };
       });
+
+      movesWithProb.sort((a, b) => b.probability - a.probability);
+      return movesWithProb.slice(0, multiPv);
     } catch (_) {
       return [];
     }
@@ -612,13 +689,14 @@ class UnifiedEngineHost {
         if (message.type === 'ANALYZE' && message.fen) {
           const targetEngine = message.activeEngineId || this.currentEngineId;
           const runOptions: EngineRunOptions = {
-            depth: message.depth || 16,
+            depth: targetEngine === 'maia3' ? 1 : (message.depth || 16),
             multiPv: message.multiPv || 1,
             limitStrength: message.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: message.targetElo ?? this.lastOptions.targetElo,
             threads: message.threads,
             hashMb: message.hashMb,
             senderTabId: message.senderTabId,
+            maxNodes: targetEngine === 'maia3' ? 1 : undefined,
           };
 
           this.lastFen = message.fen;

@@ -14,6 +14,8 @@ export class HighlightController {
   private settings: EngineSettings;
   private latestEngineSnapshot: EngineEvaluation | null = null;
   private committedCandidates: EngineCandidate[] = [];
+  private pendingCandidates: EngineCandidate[] = [];
+  private pendingDepth: number = 0;
   private candidatePendingSince: number = 0;
   private pendingCandidateKey: string = '';
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,6 +76,8 @@ export class HighlightController {
       this.clearPendingTimer();
       this.latestEngineSnapshot = null;
       this.pendingCandidateKey = '';
+      this.pendingCandidates = [];
+      this.pendingDepth = 0;
 
       // Immediately display opening repertoire move if available for the new position
       if (this.settings.opening.enabled && this.isWithinBookDepth(boardState.fen)) {
@@ -119,10 +123,19 @@ export class HighlightController {
     const displayCandidates = this.applyOpeningBook(validCandidates);
     if (displayCandidates.length === 0) return;
 
-    // If Stockfish completed calculation (bestmove arrived), commit atomically
+    // Filter out premature 1-ply blunders (depth < 4) during initial alpha-beta expansion
+    // Note: Maia-3 operates via 1-node policy without alpha-beta search and is exempt
+    const primaryCandidate = displayCandidates[0];
+    if (evaluation.depth < 4 && !primaryCandidate?.isBookMove && evaluation.engineInstanceId !== 'maia3') {
+      return;
+    }
+
+    // If calculation completed (bestmove arrived or maia evaluated), commit atomically
     if (!evaluation.isCalculating) {
       this.clearPendingTimer();
       this.committedCandidates = displayCandidates;
+      this.pendingCandidates = displayCandidates;
+      this.pendingDepth = evaluation.depth;
       this.renderCallback({
         candidates: displayCandidates,
         isCommitted: true,
@@ -131,40 +144,62 @@ export class HighlightController {
       return;
     }
 
-    // While searching: apply candidate stability window before updating visual preview
-    const primaryCandidate = displayCandidates[0];
     if (!primaryCandidate) return;
-
-    // Filter out premature 1-ply blunders (depth < 4) during initial alpha-beta expansion
-    if (evaluation.depth < 4 && !primaryCandidate.isBookMove && evaluation.engineInstanceId !== 'maia3') {
-      return;
-    }
 
     const primaryMoveKey = `${primaryCandidate.from}-${primaryCandidate.to}`;
     const now = Date.now();
 
-    if (primaryMoveKey !== this.pendingCandidateKey) {
+    // If no candidates are rendered yet (e.g. freshly opened position), render immediately
+    // so the user does not experience an artificial 180ms delay
+    if (this.committedCandidates.length === 0) {
       this.pendingCandidateKey = primaryMoveKey;
       this.candidatePendingSince = now;
-
-      this.clearPendingTimer();
-      this.stabilityTimer = setTimeout(() => {
-        if (this.pendingCandidateKey === primaryMoveKey) {
-          this.committedCandidates = displayCandidates;
-          this.renderCallback({
-            candidates: displayCandidates,
-            isCommitted: false,
-            depth: evaluation.depth,
-          });
-        }
-      }, this.STABILITY_WINDOW_MS);
-    } else if (now - this.candidatePendingSince >= this.STABILITY_WINDOW_MS) {
+      this.pendingCandidates = displayCandidates;
+      this.pendingDepth = evaluation.depth;
       this.committedCandidates = displayCandidates;
       this.renderCallback({
         candidates: displayCandidates,
         isCommitted: false,
         depth: evaluation.depth,
       });
+      return;
+    }
+
+    if (primaryMoveKey !== this.pendingCandidateKey) {
+      // Top move has changed: start the stability window to prevent jitter
+      this.pendingCandidateKey = primaryMoveKey;
+      this.candidatePendingSince = now;
+      this.pendingCandidates = displayCandidates;
+      this.pendingDepth = evaluation.depth;
+
+      this.clearPendingTimer();
+      this.stabilityTimer = setTimeout(() => {
+        if (this.pendingCandidateKey === primaryMoveKey && this.pendingCandidates.length > 0) {
+          this.committedCandidates = this.pendingCandidates;
+          this.renderCallback({
+            candidates: this.pendingCandidates,
+            isCommitted: false,
+            depth: this.pendingDepth,
+          });
+        }
+      }, this.STABILITY_WINDOW_MS);
+    } else {
+      // Primary move is stable: keep pending batch updated with incoming multipv lines
+      this.pendingCandidates = displayCandidates;
+      this.pendingDepth = evaluation.depth;
+
+      const windowElapsed = now - this.candidatePendingSince >= this.STABILITY_WINDOW_MS;
+      const newLinesAvailable = displayCandidates.length > this.committedCandidates.length;
+
+      // Commit immediately if stability window elapsed or additional MultiPV lines arrived
+      if (windowElapsed || newLinesAvailable) {
+        this.committedCandidates = displayCandidates;
+        this.renderCallback({
+          candidates: displayCandidates,
+          isCommitted: false,
+          depth: evaluation.depth,
+        });
+      }
     }
   }
 
@@ -299,6 +334,8 @@ export class HighlightController {
     this.latestEngineSnapshot = null;
     this.committedCandidates = [];
     this.pendingCandidateKey = '';
+    this.pendingCandidates = [];
+    this.pendingDepth = 0;
     this.broadcastCurrentState();
   }
 

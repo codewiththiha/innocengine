@@ -517,19 +517,19 @@ export default function App() {
                 </div>
                 <input
                   type="range"
-                  min="1100"
-                  max="1900"
+                  min="600"
+                  max="2600"
                   step="100"
                   value={Math.round((settings.targetElo || 1500) / 100) * 100}
                   onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
                   className="slider"
                 />
                 <div className="slider-hints">
-                  <span>1100</span>
-                  <span>1300</span>
-                  <span>1500</span>
-                  <span>1700</span>
-                  <span>1900</span>
+                  <span>600 (Novice)</span>
+                  <span>1100 (Casual)</span>
+                  <span>1500 (Club)</span>
+                  <span>1900 (Expert)</span>
+                  <span>2600 (Master)</span>
                 </div>
               </div>
 

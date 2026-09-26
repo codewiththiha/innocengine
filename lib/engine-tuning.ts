@@ -10,6 +10,7 @@ export interface StockfishTuning {
 export interface MaiaTuning {
   targetElo: number;
   multiPv: number;
+  maxNodes: number; // Force 1 node search (zero-search human policy)
 }
 
 /**
@@ -66,13 +67,16 @@ export function getStockfishTuning(settings: EngineSettings): StockfishTuning {
 
 /**
  * Resolves active Maia-3 execution parameters according to user settings.
+ * Maia-3 models support discrete rating checkpoints spanning 600 to 2600.
+ * In accordance with Maia architecture, tree search lookahead must be disabled (maxNodes: 1).
  */
 export function getMaiaTuning(settings: EngineSettings): MaiaTuning {
-  const clampedElo = Math.max(1100, Math.min(1900, Math.round((settings.targetElo || 1500) / 100) * 100));
+  const clampedElo = Math.max(600, Math.min(2600, Math.round((settings.targetElo || 1500) / 100) * 100));
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
   return {
     targetElo: clampedElo,
     multiPv,
+    maxNodes: 1, // CRITICAL: Tells caller to use 'go nodes 1' / 1-node policy
   };
 }
 
@@ -88,8 +92,8 @@ export function getEngineStrengthDescription(settings: EngineSettings): {
     const maia = getMaiaTuning(settings);
     return {
       badge: `Maia ${maia.targetElo}`,
-      detail: `Human Model Checkpoint: ${maia.targetElo} Elo`,
-      subtext: `Direct neural move prediction conditioned on human games played at ~${maia.targetElo} rating.`,
+      detail: `Human Model Checkpoint: ${maia.targetElo} Elo • Zero-Search (nodes: 1)`,
+      subtext: `Direct neural move prediction conditioned on human games played at ~${maia.targetElo} rating. Tree search disabled to preserve human behavior.`,
     };
   }
 

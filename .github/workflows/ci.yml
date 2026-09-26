@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check (TypeScript)
+        run: npm run compile
+
+      - name: Run Engine Tuning, MultiPV & Maia-3 Test Suite
+        run: npm test
+
+      - name: Build Chrome Extension (MV3)
+        run: npm run build
+
+      - name: Package Extension ZIP
+        run: npm run zip
+
+      - name: Upload Extension Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: innocengine-extension
+          path: .output/*.zip

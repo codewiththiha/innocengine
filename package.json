@@ -13,6 +13,7 @@
     "zip:firefox": "wxt zip -b firefox",
     "preview": "node preview-server.cjs",
     "compile": "tsc --noEmit",
+    "test": "tsx tests/engine-and-multipv.test.ts",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19.2.3",
     "@wxt-dev/module-react": "^1.1.5",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "web-ext": "^10.5.0",
     "wxt": "^0.21.3"
