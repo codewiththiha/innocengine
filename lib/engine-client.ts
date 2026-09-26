@@ -10,6 +10,7 @@ export function getPositionKey(fen: string): string {
 }
 
 export class EngineClient {
+  private activeEngineInstanceId: string = 'stockfish';
   private activeAnalysisId: number = 0;
   private activePositionKey: string = '';
   private currentFen: string = '';
@@ -30,12 +31,13 @@ export class EngineClient {
         if (message.type === 'EVAL_UPDATE' && message.evaluation) {
           const evalData: EngineEvaluation = message.evaluation;
 
-          // Reject stale evaluation generations or position mismatches
+          // Reject evaluations across engine switch boundaries
+          const matchesEngine = !evalData.engineInstanceId || evalData.engineInstanceId === this.activeEngineInstanceId;
           const matchesGeneration = evalData.analysisId === this.activeAnalysisId;
           const matchesPosition = evalData.positionKey === this.activePositionKey ||
             getPositionKey(evalData.fen) === this.activePositionKey;
 
-          if (matchesGeneration && matchesPosition) {
+          if (matchesEngine && matchesGeneration && matchesPosition) {
             this.onEvalCallbacks.forEach((cb) => cb(evalData));
           }
         } else if (message.type === 'ENGINE_STATUS') {
@@ -45,7 +47,12 @@ export class EngineClient {
     });
   }
 
+  public setEngineInstanceId(engineId: string) {
+    this.activeEngineInstanceId = engineId;
+  }
+
   public analyze(fen: string, settings: EngineSettings): number {
+    this.activeEngineInstanceId = settings.activeEngineId || 'stockfish';
     this.activeAnalysisId++;
     this.currentFen = fen;
     this.activePositionKey = getPositionKey(fen);

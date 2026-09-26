@@ -175,6 +175,12 @@ export default function App() {
               <span className="best-move-algebraic">{currentEval.bestMove || 'Calculating...'}</span>
             </div>
           </div>
+          <div style={{ display: 'flex', gap: 10, fontSize: 10, color: '#94a3b8', marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 4 }}>
+            <span>Raw PV: {currentEval.multiPvLines?.length || 0}</span>
+            <span>Visible: {Math.min(settings.multiPv, currentEval.candidates?.length || 0)}</span>
+            <span>Opponent: {settings.showOpponentMoves ? 'ON' : 'OFF'}</span>
+            <span>Side: {settings.controlledColor}</span>
+          </div>
         </div>
       )}
 

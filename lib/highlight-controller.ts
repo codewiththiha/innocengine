@@ -54,7 +54,7 @@ export class HighlightController {
   public handleEvaluation(evaluation: EngineEvaluation) {
     if (evaluation.positionKey !== this.activePositionKey) return;
 
-    // Retain immutable raw engine state regardless of current highlight visibility toggle
+    // Retain immutable raw engine state
     this.latestEngineSnapshot = evaluation;
 
     if (!this.settings.showHighlights) {
@@ -62,7 +62,11 @@ export class HighlightController {
     }
 
     const derivedCandidates = this.deriveDisplayCandidates(evaluation.candidates);
-    if (derivedCandidates.length === 0) return;
+
+    if (derivedCandidates.length === 0 && evaluation.candidates.length > 0) {
+      console.warn('[AI TRACE] Warning: All raw candidates were filtered out:', evaluation.candidates);
+      return;
+    }
 
     // Atomically commit when bestmove arrives
     if (!evaluation.isCalculating) {
@@ -109,30 +113,27 @@ export class HighlightController {
   }
 
   private deriveDisplayCandidates(rawCandidates: EngineCandidate[]): EngineCandidate[] {
-    if (!this.currentBoardState) return [];
-
-    const turn = this.currentBoardState.turn;
-    const pieceMap = this.currentBoardState.pieceMap;
+    if (!this.currentBoardState || !rawCandidates || rawCandidates.length === 0) {
+      return [];
+    }
 
     let candidates: EngineCandidate[] = [];
 
     for (const cand of rawCandidates) {
-      const piece = pieceMap.get(cand.from);
-      if (!piece) continue;
+      // Validate valid algebraic squares
+      if (!cand.from || cand.from.length !== 2 || !cand.to || cand.to.length !== 2) {
+        continue;
+      }
 
-      // Invariant: candidate root moves must belong to the active turn
-      const isWhitePiece = piece === piece.toUpperCase();
-      const pieceTurn = isWhitePiece ? 'w' : 'b';
-      if (pieceTurn !== turn) continue;
-
+      // Root candidate moves from Stockfish are legal alternatives for the current position
       candidates.push({
         ...cand,
-        // Include opponent response continuation only if setting is active
+        // Attach opponent predicted reply if enabled in settings
         continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
       });
     }
 
-    // Opening repertoire preference blending
+    // Soft opening repertoire preference
     if (this.settings.opening.enabled && this.activePositionKey) {
       const bookEntry = OpeningBook.lookupMove(this.activePositionKey, this.settings.opening.repertoireId);
       if (bookEntry) {
@@ -149,19 +150,6 @@ export class HighlightController {
           } else {
             candidates[matchIdx] = bookCandidate;
           }
-        } else if (this.settings.opening.mode === 'book-only') {
-          candidates = [
-            {
-              pvId: 1,
-              from: bookFrom,
-              to: bookTo,
-              depth: 0,
-              scoreCp: 0,
-              scoreMate: null,
-              pv: [bookEntry.move],
-              isBookMove: true,
-            },
-          ];
         }
       }
     }

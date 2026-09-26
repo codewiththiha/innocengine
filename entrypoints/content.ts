@@ -15,7 +15,10 @@ export default defineContentScript({
     let engineClient: EngineClient | null = null;
     let highlightController: HighlightController | null = null;
     let currentSettings: EngineSettings;
+    let lastBoardFingerprint: string = '';
     let lastPositionKey: string = '';
+    let lastFlipped: boolean = false;
+    let lastTurn: 'w' | 'b' = 'w';
     let boardObserver: MutationObserver | null = null;
     let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
@@ -45,7 +48,7 @@ export default defineContentScript({
         if (lastPositionKey && engineClient && newSettings.autoAnalyze) {
           const board = currentBoard || BoardParser.findBoardElement();
           if (board) {
-            const gameState = GameStateAdapter.extractGameState(board);
+            const gameState = GameStateAdapter.extractGameState(board, lastTurn);
             if (gameState) {
               engineClient.analyze(gameState.fen, currentSettings);
             }
@@ -59,7 +62,6 @@ export default defineContentScript({
 
     function setupPrivacyHotkey() {
       window.addEventListener('keydown', (e) => {
-        // Alt+H or Option+H toggles capture-resistant emergency visibility
         if (e.altKey && e.code === 'KeyH') {
           isHiddenByPrivacyHotkey = !isHiddenByPrivacyHotkey;
           if (overlay) {
@@ -143,10 +145,22 @@ export default defineContentScript({
     function handleBoardChange() {
       if (!currentBoard || !overlay || !engineClient || !highlightController) return;
 
-      const gameState: GameState | null = GameStateAdapter.extractGameState(currentBoard);
+      const gameState: GameState | null = GameStateAdapter.extractGameState(currentBoard, lastTurn);
       if (!gameState) return;
 
       overlay.setFlipped(gameState.isFlipped);
+
+      // Distinguish piece selection highlights from real position moves
+      const isSameFingerprint = gameState.boardFingerprint === lastBoardFingerprint;
+      const isSameOrientation = gameState.isFlipped === lastFlipped;
+
+      if (isSameFingerprint && isSameOrientation && lastPositionKey) {
+        return;
+      }
+
+      lastBoardFingerprint = gameState.boardFingerprint;
+      lastFlipped = gameState.isFlipped;
+      lastTurn = gameState.turn;
 
       const boardState: BoardState = {
         fen: gameState.fen,

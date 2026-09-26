@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   activeEngineId: 'stockfish',
   captureResistantOverlay: false,
   opening: {
-    enabled: true,
+    enabled: false,
     repertoireId: 'sicilian',
     mode: 'prefer',
     maxPlies: 12,

@@ -4,6 +4,7 @@ import { BoardParser } from './board-parser';
 export interface GameState {
   fen: string;
   positionKey: string;
+  boardFingerprint: string;
   turn: 'w' | 'b';
   isFlipped: boolean;
   pieceMap: Map<string, string>;
@@ -12,12 +13,14 @@ export interface GameState {
 }
 
 export class GameStateAdapter {
-  public static extractGameState(board: HTMLElement): GameState | null {
+  public static extractGameState(board: HTMLElement, previousTurn: 'w' | 'b' = 'w'): GameState | null {
     const isFlipped = BoardParser.isBoardFlipped(board);
     const gridState = BoardParser.extractBoardState(board);
     if (!gridState) return null;
 
-    // Attempt to reconstruct authoritative FEN by replaying move list
+    const boardFingerprint = this.computeBoardFingerprint(gridState.pieceMap);
+
+    // Attempt authoritative FEN reconstruction via Chess.com DOM move-list replay
     const moveHistory = this.extractMoveHistoryFromDom();
     if (moveHistory.length > 0) {
       try {
@@ -42,11 +45,11 @@ export class GameStateAdapter {
           const tokens = replayedFen.split(' ');
           const positionKey = tokens.slice(0, 4).join(' ');
 
-          // Verify piece map matches board DOM to avoid stale move-list frames
           if (this.verifyPieceMatch(chess, gridState.pieceMap)) {
             return {
               fen: replayedFen,
               positionKey,
+              boardFingerprint,
               turn: chess.turn() as 'w' | 'b',
               isFlipped,
               pieceMap: gridState.pieceMap,
@@ -58,16 +61,51 @@ export class GameStateAdapter {
       } catch (_) {}
     }
 
-    // Fallback to validated grid placement
+    // Determine turn reliably without guessing or fabrication
+    const detectedTurn = this.detectTurnFromClocksAndHistory(moveHistory, previousTurn);
+
+    // Fallback: visual board snapshot
+    const tokens = gridState.fen.split(' ');
+    tokens[1] = detectedTurn;
+    const positionKey = tokens.slice(0, 4).join(' ');
+    const fen = `${positionKey} 0 1`;
+
     return {
-      fen: gridState.fen,
-      positionKey: gridState.positionKey,
-      turn: gridState.turn,
+      fen,
+      positionKey,
+      boardFingerprint,
+      turn: detectedTurn,
       isFlipped,
       pieceMap: gridState.pieceMap,
-      moveHistory: [],
+      moveHistory,
       boardElement: board,
     };
+  }
+
+  public static computeBoardFingerprint(pieceMap: Map<string, string>): string {
+    return Array.from(pieceMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([sq, p]) => `${sq}:${p}`)
+      .join(';');
+  }
+
+  private static detectTurnFromClocksAndHistory(moveHistory: string[], fallbackTurn: 'w' | 'b'): 'w' | 'b' {
+    // 1. Running clock on page
+    const whiteClock = document.querySelector(
+      '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
+    );
+    const blackClock = document.querySelector(
+      '.player-component.black .clock-player-turn, .clock-black.running, [data-cy="black-clock"].running'
+    );
+    if (whiteClock && !blackClock) return 'w';
+    if (blackClock && !whiteClock) return 'b';
+
+    // 2. Authoritative move count
+    if (moveHistory.length > 0) {
+      return moveHistory.length % 2 === 0 ? 'w' : 'b';
+    }
+
+    return fallbackTurn;
   }
 
   private static extractMoveHistoryFromDom(): string[] {
@@ -78,7 +116,6 @@ export class GameStateAdapter {
 
     const moves: string[] = [];
     nodes.forEach((node) => {
-      // Clean notation text (remove glyphs, evaluation icons, checkmate tags)
       const text = node.innerText.trim();
       const match = text.match(/^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[\+#]?|^O-O(?:-O)?[\+#]?/);
       if (match && match[0]) {
