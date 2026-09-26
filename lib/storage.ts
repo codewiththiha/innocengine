@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   showHud: true,
   autoAnalyze: true,
   controlledColor: 'auto',
+  activeEngineId: 'stockfish',
+  captureResistantOverlay: false,
   opening: {
     enabled: true,
     repertoireId: 'sicilian',

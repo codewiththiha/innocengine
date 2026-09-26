@@ -1,4 +1,5 @@
 import { BoardParser } from '../lib/board-parser';
+import { GameStateAdapter, type GameState } from '../lib/game-state-adapter';
 import { SvgOverlay } from '../lib/svg-overlay';
 import { EngineClient } from '../lib/engine-client';
 import { HighlightController } from '../lib/highlight-controller';
@@ -17,6 +18,7 @@ export default defineContentScript({
     let lastPositionKey: string = '';
     let boardObserver: MutationObserver | null = null;
     let pendingScanRaf: number | null = null;
+    let isHiddenByPrivacyHotkey: boolean = false;
 
     async function init() {
       currentSettings = await getSettings();
@@ -25,10 +27,10 @@ export default defineContentScript({
       engineClient.onEvaluation((evaluation) => {
         if (!overlay || !highlightController) return;
 
-        // Throttled high-frequency updates for evaluation score and HUD
+        // Throttled high-frequency updates for score text and HUD
         overlay.updateEvaluationMetadata(evaluation);
 
-        // Low-frequency stabilized candidate commit for chessboard highlights
+        // Retained low-frequency candidate highlight commits
         highlightController.handleEvaluation(evaluation);
       });
 
@@ -43,15 +45,33 @@ export default defineContentScript({
         if (lastPositionKey && engineClient && newSettings.autoAnalyze) {
           const board = currentBoard || BoardParser.findBoardElement();
           if (board) {
-            const state = BoardParser.extractBoardState(board);
-            if (state) {
-              engineClient.analyze(state.fen, currentSettings);
+            const gameState = GameStateAdapter.extractGameState(board);
+            if (gameState) {
+              engineClient.analyze(gameState.fen, currentSettings);
             }
           }
         }
       });
 
+      setupPrivacyHotkey();
       startBoardScanner();
+    }
+
+    function setupPrivacyHotkey() {
+      window.addEventListener('keydown', (e) => {
+        // Alt+H or Option+H toggles capture-resistant emergency visibility
+        if (e.altKey && e.code === 'KeyH') {
+          isHiddenByPrivacyHotkey = !isHiddenByPrivacyHotkey;
+          if (overlay) {
+            overlay.updateSettings({
+              ...currentSettings,
+              showHighlights: !isHiddenByPrivacyHotkey && currentSettings.showHighlights,
+              showEvalBar: !isHiddenByPrivacyHotkey && currentSettings.showEvalBar,
+              showHud: !isHiddenByPrivacyHotkey && currentSettings.showHud,
+            });
+          }
+        }
+      });
     }
 
     function startBoardScanner() {
@@ -97,14 +117,12 @@ export default defineContentScript({
       handleBoardChange();
 
       boardObserver = new MutationObserver((mutations) => {
-        // Guard against feedback loops caused by our own overlay DOM nodes
         const isSelfMutation = mutations.every((m) => {
           const target = m.target as HTMLElement;
           return target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar');
         });
         if (isSelfMutation) return;
 
-        // Debounce board extraction to ensure pieces have settled
         if (pendingScanRaf !== null) {
           cancelAnimationFrame(pendingScanRaf);
         }
@@ -125,16 +143,27 @@ export default defineContentScript({
     function handleBoardChange() {
       if (!currentBoard || !overlay || !engineClient || !highlightController) return;
 
-      const state: BoardState | null = BoardParser.extractBoardState(currentBoard);
-      if (!state) return;
+      const gameState: GameState | null = GameStateAdapter.extractGameState(currentBoard);
+      if (!gameState) return;
 
-      overlay.setFlipped(state.isFlipped);
-      highlightController.setBoardState(state);
+      overlay.setFlipped(gameState.isFlipped);
 
-      if (state.positionKey !== lastPositionKey) {
-        lastPositionKey = state.positionKey;
+      const boardState: BoardState = {
+        fen: gameState.fen,
+        positionKey: gameState.positionKey,
+        isFlipped: gameState.isFlipped,
+        turn: gameState.turn,
+        controlledColor: currentSettings.controlledColor,
+        pieceMap: gameState.pieceMap,
+        boardElement: currentBoard,
+      };
+
+      highlightController.setBoardState(boardState);
+
+      if (gameState.positionKey !== lastPositionKey) {
+        lastPositionKey = gameState.positionKey;
         if (currentSettings.autoAnalyze) {
-          engineClient.analyze(state.fen, currentSettings);
+          engineClient.analyze(gameState.fen, currentSettings);
         }
       }
     }

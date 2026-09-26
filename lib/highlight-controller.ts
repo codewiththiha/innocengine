@@ -52,16 +52,19 @@ export class HighlightController {
   }
 
   public handleEvaluation(evaluation: EngineEvaluation) {
-    if (!this.settings.showHighlights) return;
     if (evaluation.positionKey !== this.activePositionKey) return;
 
-    // Preserve raw engine state immutable
+    // Retain immutable raw engine state regardless of current highlight visibility toggle
     this.latestEngineSnapshot = evaluation;
+
+    if (!this.settings.showHighlights) {
+      return;
+    }
 
     const derivedCandidates = this.deriveDisplayCandidates(evaluation.candidates);
     if (derivedCandidates.length === 0) return;
 
-    // If calculation finished (bestmove arrived), commit atomically
+    // Atomically commit when bestmove arrives
     if (!evaluation.isCalculating) {
       this.clearPendingTimer();
       this.committedDisplayCandidates = derivedCandidates;
@@ -108,11 +111,7 @@ export class HighlightController {
   private deriveDisplayCandidates(rawCandidates: EngineCandidate[]): EngineCandidate[] {
     if (!this.currentBoardState) return [];
 
-    const effectiveControlled =
-      this.settings.controlledColor === 'auto'
-        ? this.currentBoardState.controlledColor
-        : this.settings.controlledColor;
-
+    const turn = this.currentBoardState.turn;
     const pieceMap = this.currentBoardState.pieceMap;
 
     let candidates: EngineCandidate[] = [];
@@ -121,22 +120,19 @@ export class HighlightController {
       const piece = pieceMap.get(cand.from);
       if (!piece) continue;
 
+      // Invariant: candidate root moves must belong to the active turn
       const isWhitePiece = piece === piece.toUpperCase();
-      const pieceSide = isWhitePiece ? 'w' : 'b';
-      const isOpponent = pieceSide !== effectiveControlled;
-
-      // Filter opponent moves unless explicitly enabled in presentation settings
-      if (!this.settings.showOpponentMoves && isOpponent) {
-        continue;
-      }
+      const pieceTurn = isWhitePiece ? 'w' : 'b';
+      if (pieceTurn !== turn) continue;
 
       candidates.push({
         ...cand,
-        isOpponent,
+        // Include opponent response continuation only if setting is active
+        continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
       });
     }
 
-    // Soft opening repertoire blending
+    // Opening repertoire preference blending
     if (this.settings.opening.enabled && this.activePositionKey) {
       const bookEntry = OpeningBook.lookupMove(this.activePositionKey, this.settings.opening.repertoireId);
       if (bookEntry) {
@@ -164,7 +160,6 @@ export class HighlightController {
               scoreMate: null,
               pv: [bookEntry.move],
               isBookMove: true,
-              isOpponent: false,
             },
           ];
         }

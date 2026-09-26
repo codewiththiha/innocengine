@@ -1,3 +1,4 @@
+import { Chess } from 'chess.js';
 import type { MoveLine, EngineEvaluation, EngineCandidate, UciOption, EngineCapabilities } from './types';
 
 export class UciParser {
@@ -7,10 +8,20 @@ export class UciParser {
   private maxDepthSeen: number = 0;
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
+  private currentEngineId: string = 'stockfish';
 
-  private engineName: string = 'Stockfish';
-  private engineAuthor: string = 'Tord Romstad, Marco Costalba, Joona Kiiski, Gary Linscott';
+  private engineName: string = 'Unknown Engine';
+  private engineAuthor: string = 'Unknown Author';
   private optionsMap: Map<string, UciOption> = new Map();
+
+  public clearEngineMetadata(engineId: string = 'stockfish') {
+    this.currentEngineId = engineId;
+    this.engineName = 'Loading Engine...';
+    this.engineAuthor = '';
+    this.optionsMap.clear();
+    this.currentLines.clear();
+    this.maxDepthSeen = 0;
+  }
 
   public reset(fen: string, analysisId: number = 0, positionKey: string = '') {
     this.currentLines.clear();
@@ -65,12 +76,22 @@ export class UciParser {
     const minMatch = line.match(/\bmin\s+(-?\d+)/);
     const maxMatch = line.match(/\bmax\s+(-?\d+)/);
 
+    // Extract all var entries for combo options
+    let vars: string[] | undefined;
+    if (optType === 'combo') {
+      const varMatches = Array.from(line.matchAll(/\bvar\s+([^\s]+)/g));
+      if (varMatches.length > 0) {
+        vars = varMatches.map((m) => m[1]).filter((v): v is string => Boolean(v));
+      }
+    }
+
     const option: UciOption = {
       name: optName,
       type: optType,
       default: defaultMatch && defaultMatch[1] ? defaultMatch[1] : undefined,
       min: minMatch && minMatch[1] ? parseInt(minMatch[1], 10) : undefined,
       max: maxMatch && maxMatch[1] ? parseInt(maxMatch[1], 10) : undefined,
+      vars,
     };
 
     this.optionsMap.set(optName, option);
@@ -83,9 +104,11 @@ export class UciParser {
     });
 
     return {
+      id: this.currentEngineId,
       name: this.engineName,
       author: this.engineAuthor,
-      hasElo: this.optionsMap.has('UCI_Elo') || this.optionsMap.has('UCI_LimitStrength'),
+      hasElo: this.optionsMap.has('UCI_Elo'),
+      hasLimitStrength: this.optionsMap.has('UCI_LimitStrength'),
       hasSkillLevel: this.optionsMap.has('Skill Level'),
       hasThreads: this.optionsMap.has('Threads'),
       hasHash: this.optionsMap.has('Hash'),
@@ -155,20 +178,10 @@ export class UciParser {
     const sortedLines = Array.from(this.currentLines.values()).sort((a, b) => a.id - b.id);
     const primaryLine = sortedLines[0] || moveLine;
 
-    const candidates: EngineCandidate[] = sortedLines
-      .filter((l) => l.bestMove && l.bestMove.length >= 4)
-      .map((l) => ({
-        pvId: l.id,
-        from: l.bestMove.substring(0, 2),
-        to: l.bestMove.substring(2, 4),
-        promotion: l.bestMove.length > 4 ? l.bestMove[4] : undefined,
-        depth: l.depth,
-        scoreCp: l.scoreCp,
-        scoreMate: l.scoreMate,
-        pv: l.pv,
-      }));
+    const candidates = this.buildCandidates(sortedLines);
 
     return {
+      engineInstanceId: this.currentEngineId,
       analysisId: this.currentAnalysisId,
       positionKey: this.currentPositionKey,
       fen: this.currentFen,
@@ -192,20 +205,10 @@ export class UciParser {
     const sortedLines = Array.from(this.currentLines.values()).sort((a, b) => a.id - b.id);
     const primaryLine = sortedLines[0];
 
-    const candidates: EngineCandidate[] = sortedLines
-      .filter((l) => l.bestMove && l.bestMove.length >= 4)
-      .map((l) => ({
-        pvId: l.id,
-        from: l.bestMove.substring(0, 2),
-        to: l.bestMove.substring(2, 4),
-        promotion: l.bestMove.length > 4 ? l.bestMove[4] : undefined,
-        depth: l.depth,
-        scoreCp: l.scoreCp,
-        scoreMate: l.scoreMate,
-        pv: l.pv,
-      }));
+    const candidates = this.buildCandidates(sortedLines);
 
     return {
+      engineInstanceId: this.currentEngineId,
       analysisId: this.currentAnalysisId,
       positionKey: this.currentPositionKey,
       fen: this.currentFen,
@@ -218,5 +221,54 @@ export class UciParser {
       isCalculating: false,
       timestamp: Date.now(),
     };
+  }
+
+  private buildCandidates(lines: MoveLine[]): EngineCandidate[] {
+    return lines
+      .filter((l) => l.bestMove && l.bestMove.length >= 4)
+      .map((l) => {
+        let continuation: { from: string; to: string } | undefined;
+
+        // Simulate second ply in PV to obtain true opponent response
+        if (this.currentFen && l.pv.length >= 2) {
+          try {
+            const sim = new Chess(this.currentFen);
+            const move1Str = l.pv[0];
+            const move2Str = l.pv[1];
+
+            if (move1Str && move1Str.length >= 4) {
+              const move1 = sim.move({
+                from: move1Str.substring(0, 2),
+                to: move1Str.substring(2, 4),
+                promotion: move1Str.length > 4 ? move1Str[4] : undefined,
+              });
+
+              if (move1 && move2Str && move2Str.length >= 4) {
+                const move2 = sim.move({
+                  from: move2Str.substring(0, 2),
+                  to: move2Str.substring(2, 4),
+                  promotion: move2Str.length > 4 ? move2Str[4] : undefined,
+                });
+
+                if (move2) {
+                  continuation = { from: move2.from, to: move2.to };
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        return {
+          pvId: l.id,
+          from: l.bestMove.substring(0, 2),
+          to: l.bestMove.substring(2, 4),
+          promotion: l.bestMove.length > 4 ? l.bestMove[4] : undefined,
+          depth: l.depth,
+          scoreCp: l.scoreCp,
+          scoreMate: l.scoreMate,
+          pv: l.pv,
+          continuation,
+        };
+      });
   }
 }

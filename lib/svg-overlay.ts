@@ -26,12 +26,16 @@ const PALETTES: Record<number, VariationPalette> = {
     arrow: 'rgba(168, 85, 247, 0.65)',
     markerId: 'ai-marker-pv3',
   },
+  4: {
+    fill: 'rgba(148, 163, 184, 0.12)',
+    stroke: 'rgba(148, 163, 184, 0.55)',
+    arrow: 'rgba(148, 163, 184, 0.65)',
+    markerId: 'ai-marker-opp',
+  },
 };
 
-const OPPONENT_PALETTE: VariationPalette = {
-  fill: 'rgba(148, 163, 184, 0.12)',
-  stroke: 'rgba(148, 163, 184, 0.50)',
-  arrow: 'rgba(148, 163, 184, 0.60)',
+const OPPONENT_ARROW_PALETTE = {
+  arrow: 'rgba(148, 163, 184, 0.65)',
   markerId: 'ai-marker-opp',
 };
 
@@ -127,8 +131,8 @@ export class SvgOverlay {
         <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.65)" />
         </marker>
-        <marker id="ai-marker-opp" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.30" markerHeight="0.30" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(148, 163, 184, 0.60)" />
+        <marker id="ai-marker-opp" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.26" markerHeight="0.26" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(148, 163, 184, 0.65)" />
         </marker>
         <marker id="ai-marker-book" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(16, 185, 129, 0.85)" />
@@ -136,6 +140,7 @@ export class SvgOverlay {
       </defs>
       <g id="ai-highlights-layer"></g>
       <g id="ai-connectors-layer"></g>
+      <g id="ai-continuations-layer"></g>
     `;
 
     this.board.appendChild(svg);
@@ -243,8 +248,10 @@ export class SvgOverlay {
     if (this.svg) {
       const hlLayer = this.svg.querySelector('#ai-highlights-layer');
       const connLayer = this.svg.querySelector('#ai-connectors-layer');
+      const contLayer = this.svg.querySelector('#ai-continuations-layer');
       if (hlLayer) hlLayer.innerHTML = '';
       if (connLayer) connLayer.innerHTML = '';
+      if (contLayer) contLayer.innerHTML = '';
     }
   }
 
@@ -254,7 +261,10 @@ export class SvgOverlay {
       return;
     }
 
-    const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates.map((c) => `${c.pvId}:${c.from}${c.to}:${c.isOpponent ? 'opp' : 'my'}:${c.isBookMove ? 'bk' : ''}`).join(';')}`;
+    const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates
+      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.continuation ? `${c.continuation.from}${c.continuation.to}` : ''}:${c.isBookMove ? 'bk' : ''}`)
+      .join(';')}`;
+
     if (newKey === this.currentRenderKey) {
       return;
     }
@@ -262,24 +272,23 @@ export class SvgOverlay {
 
     const hlLayer = this.svg.querySelector('#ai-highlights-layer');
     const connLayer = this.svg.querySelector('#ai-connectors-layer');
-    if (!hlLayer || !connLayer) return;
+    const contLayer = this.svg.querySelector('#ai-continuations-layer');
+    if (!hlLayer || !connLayer || !contLayer) return;
 
-    // Retained rendering by key: reuse existing nodes where possible
     hlLayer.innerHTML = '';
     connLayer.innerHTML = '';
+    contLayer.innerHTML = '';
 
     candidates.forEach((candidate) => {
       const palette = candidate.isBookMove
         ? BOOK_PALETTE
-        : candidate.isOpponent
-        ? OPPONENT_PALETTE
         : PALETTES[candidate.pvId] || PALETTES[1] || BOOK_PALETTE;
 
       const fromPos = this.algebraicToSvgPos(candidate.from);
       const toPos = this.algebraicToSvgPos(candidate.to);
       if (!fromPos || !toPos) return;
 
-      // Source square
+      // Primary source square
       const rectFrom = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rectFrom.setAttribute('x', fromPos.x.toString());
       rectFrom.setAttribute('y', fromPos.y.toString());
@@ -288,13 +297,10 @@ export class SvgOverlay {
       rectFrom.setAttribute('rx', '0.08');
       rectFrom.setAttribute('fill', palette.fill);
       rectFrom.setAttribute('stroke', palette.stroke);
-      rectFrom.setAttribute('stroke-width', candidate.isOpponent ? '0.015' : '0.02');
-      if (candidate.isOpponent) {
-        rectFrom.setAttribute('stroke-dasharray', '0.04 0.02');
-      }
+      rectFrom.setAttribute('stroke-width', '0.02');
       hlLayer.appendChild(rectFrom);
 
-      // Destination square
+      // Primary destination square
       const rectTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rectTo.setAttribute('x', toPos.x.toString());
       rectTo.setAttribute('y', toPos.y.toString());
@@ -303,44 +309,74 @@ export class SvgOverlay {
       rectTo.setAttribute('rx', '0.08');
       rectTo.setAttribute('fill', palette.fill);
       rectTo.setAttribute('stroke', palette.stroke);
-      rectTo.setAttribute('stroke-width', candidate.isOpponent ? '0.015' : '0.02');
+      rectTo.setAttribute('stroke-width', '0.02');
       hlLayer.appendChild(rectTo);
 
-      // Connector arrow
+      // Primary connector arrow
       if (this.settings.showConnectors) {
-        const cx1 = fromPos.x + 0.5;
-        const cy1 = fromPos.y + 0.5;
-        const cx2 = toPos.x + 0.5;
-        const cy2 = toPos.y + 0.5;
+        this.renderArrowLine(connLayer, fromPos, toPos, palette.arrow, palette.markerId, '0.026');
+      }
 
-        const dx = cx2 - cx1;
-        const dy = cy2 - cy1;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+      // Predicted opponent continuation response
+      if (this.settings.showOpponentMoves && candidate.continuation) {
+        const oppFromPos = this.algebraicToSvgPos(candidate.continuation.from);
+        const oppToPos = this.algebraicToSvgPos(candidate.continuation.to);
 
-        if (dist > 0.4) {
-          const offsetStart = 0.22;
-          const offsetEnd = 0.28;
-          const sx = cx1 + (dx / dist) * offsetStart;
-          const sy = cy1 + (dy / dist) * offsetStart;
-          const ex = cx2 - (dx / dist) * offsetEnd;
-          const ey = cy2 - (dy / dist) * offsetEnd;
-
-          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-          line.setAttribute('x1', sx.toString());
-          line.setAttribute('y1', sy.toString());
-          line.setAttribute('x2', ex.toString());
-          line.setAttribute('y2', ey.toString());
-          line.setAttribute('stroke', palette.arrow);
-          line.setAttribute('stroke-width', candidate.isOpponent ? '0.018' : '0.026');
-          line.setAttribute('stroke-linecap', 'round');
-          if (candidate.isOpponent) {
-            line.setAttribute('stroke-dasharray', '0.04 0.02');
-          }
-          line.setAttribute('marker-end', `url(#${palette.markerId})`);
-          connLayer.appendChild(line);
+        if (oppFromPos && oppToPos) {
+          // Render subtle, dashed continuation line from opponent's moving piece to target
+          this.renderArrowLine(
+            contLayer,
+            oppFromPos,
+            oppToPos,
+            OPPONENT_ARROW_PALETTE.arrow,
+            OPPONENT_ARROW_PALETTE.markerId,
+            '0.018',
+            '0.04 0.02'
+          );
         }
       }
     });
+  }
+
+  private renderArrowLine(
+    container: Element,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    color: string,
+    markerId: string,
+    width: string,
+    dasharray?: string
+  ) {
+    const cx1 = from.x + 0.5;
+    const cy1 = from.y + 0.5;
+    const cx2 = to.x + 0.5;
+    const cy2 = to.y + 0.5;
+
+    const dx = cx2 - cx1;
+    const dy = cy2 - cy1;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 0.4) return;
+
+    const offsetStart = 0.22;
+    const offsetEnd = 0.28;
+    const sx = cx1 + (dx / dist) * offsetStart;
+    const sy = cy1 + (dy / dist) * offsetStart;
+    const ex = cx2 - (dx / dist) * offsetEnd;
+    const ey = cy2 - (dy / dist) * offsetEnd;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', sx.toString());
+    line.setAttribute('y1', sy.toString());
+    line.setAttribute('x2', ex.toString());
+    line.setAttribute('y2', ey.toString());
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', width);
+    line.setAttribute('stroke-linecap', 'round');
+    if (dasharray) {
+      line.setAttribute('stroke-dasharray', dasharray);
+    }
+    line.setAttribute('marker-end', `url(#${markerId})`);
+    container.appendChild(line);
   }
 
   public updateEvaluationMetadata(evaluation: EngineEvaluation) {

@@ -122,8 +122,7 @@ export class BoardParser {
     });
 
     const isInitialPosition = this.checkInitialPosition(grid);
-    const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board, grid);
-    const controlledColor: 'w' | 'b' = isFlipped ? 'b' : 'w';
+    const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board);
     const castling = this.computeCastlingRights(grid);
     const placement = this.gridToPlacement(grid);
     const positionKey = `${placement} ${turn} ${castling} -`;
@@ -134,7 +133,7 @@ export class BoardParser {
       positionKey,
       isFlipped,
       turn,
-      controlledColor,
+      controlledColor: 'auto',
       pieceMap,
       boardElement: board,
     };
@@ -206,7 +205,7 @@ export class BoardParser {
     return rights.length > 0 ? rights : '-';
   }
 
-  private static detectSideToMove(board: HTMLElement, grid: string[][]): 'w' | 'b' {
+  private static detectSideToMove(board: HTMLElement): 'w' | 'b' {
     // 1. Authoritative active clock turn
     const whiteClock = document.querySelector(
       '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
@@ -230,21 +229,6 @@ export class BoardParser {
         return isWhite ? 'b' : 'w';
       }
     }
-
-    // 3. Fallback: piece count parities
-    let whitePieces = 0;
-    let blackPieces = 0;
-    for (let r = 0; r < 8; r++) {
-      for (let f = 0; f < 8; f++) {
-        const p = grid[r]?.[f];
-        if (p) {
-          if (p === p.toUpperCase()) whitePieces++;
-          else blackPieces++;
-        }
-      }
-    }
-    if (whitePieces < blackPieces) return 'w';
-    if (blackPieces < whitePieces) return 'b';
 
     return 'w';
   }

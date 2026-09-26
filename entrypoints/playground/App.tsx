@@ -45,6 +45,7 @@ export default function App() {
 
   const [committedCandidates, setCommittedCandidates] = useState<EngineCandidate[]>([]);
   const [evalData, setEvalData] = useState<EngineEvaluation>({
+    engineInstanceId: 'stockfish',
     analysisId: 1,
     positionKey: '',
     fen: chess.fen(),

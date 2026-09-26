@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
+import { EngineRegistry, type BUILTIN_STOCKFISH } from '../../lib/engine-registry';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
 import type {
   EngineSettings,
   EngineEvaluation,
   EngineCapabilities,
   EngineTelemetry,
+  CustomEngineMeta,
 } from '../../lib/types';
 import {
   Sliders,
@@ -19,23 +21,31 @@ import {
   BookOpen,
   Terminal,
   ShieldAlert,
+  Server,
+  UploadCloud,
+  Lock,
 } from 'lucide-react';
 import './App.css';
 
-type SettingsTab = 'board' | 'analysis' | 'strength' | 'resources' | 'opening' | 'advanced';
+type SettingsTab = 'engine' | 'board' | 'analysis' | 'strength' | 'resources' | 'opening' | 'advanced';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('board');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('engine');
   const [settings, setSettings] = useState<EngineSettings>(DEFAULT_SETTINGS);
   const [currentEval, setCurrentEval] = useState<EngineEvaluation | null>(null);
   const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
   const [telemetry, setTelemetry] = useState<EngineTelemetry | null>(null);
+  const [installedEngines, setInstalledEngines] = useState<CustomEngineMeta[]>([]);
   const [engineStatus, setEngineStatus] = useState<'ready' | 'loading' | 'analyzing'>('ready');
   const [savedBadge, setSavedBadge] = useState<boolean>(false);
   const [optionSearch, setOptionSearch] = useState<string>('');
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     getSettings().then((s) => setSettings(s));
+    refreshEnginesList();
 
     chrome.runtime.sendMessage({ target: 'popup', type: 'GET_CURRENT_EVAL' }, (res: any) => {
       if (res) {
@@ -62,13 +72,19 @@ export default function App() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
+  const refreshEnginesList = async () => {
+    const list = await EngineRegistry.getInstalledEngines();
+    setInstalledEngines(list);
+  };
+
   const updateSetting = async <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
     const updated = { ...settings, [key]: value };
     setSettings(updated);
     await saveSettings({ [key]: value });
 
-    // Transactionally forward engine-level options to offscreen runner
-    if (key === 'hashMb') {
+    if (key === 'activeEngineId') {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(value) });
+    } else if (key === 'hashMb') {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Hash', value: Number(value) });
     } else if (key === 'threads') {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Threads', value: Number(value) });
@@ -79,6 +95,28 @@ export default function App() {
     }
 
     showSavedNotification();
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.wasm')) {
+      setImportStatus('Error: Please select a valid .wasm binary');
+      return;
+    }
+
+    try {
+      setImportStatus('Importing engine binary...');
+      const buffer = await file.arrayBuffer();
+      const meta = await EngineRegistry.saveCustomEngine(file.name.replace('.wasm', ''), buffer);
+      await refreshEnginesList();
+      await updateSetting('activeEngineId', meta.id);
+      setImportStatus(`Success: ${meta.name} imported!`);
+      setTimeout(() => setImportStatus(null), 3000);
+    } catch (err: any) {
+      setImportStatus(`Import failed: ${err?.message || 'Invalid binary'}`);
+    }
   };
 
   const showSavedNotification = () => {
@@ -107,7 +145,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="popup-title">Chess AI Overlay</h1>
-            <p className="popup-subtitle">{capabilities?.name || 'Stockfish WASM'} • MV3</p>
+            <p className="popup-subtitle">{capabilities?.name || 'Stockfish 17'} • MV3</p>
           </div>
         </div>
         <div className={`status-badge status-${engineStatus}`}>
@@ -144,47 +182,106 @@ export default function App() {
       <nav className="tab-bar">
         <button
           type="button"
+          className={`tab-btn ${activeTab === 'engine' ? 'active' : ''}`}
+          onClick={() => setActiveTab('engine')}
+        >
+          <Server size={12} /> Engine
+        </button>
+        <button
+          type="button"
           className={`tab-btn ${activeTab === 'board' ? 'active' : ''}`}
           onClick={() => setActiveTab('board')}
         >
-          <Eye size={13} /> Board
+          <Eye size={12} /> Board
         </button>
         <button
           type="button"
           className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`}
           onClick={() => setActiveTab('analysis')}
         >
-          <Sliders size={13} /> Analysis
+          <Sliders size={12} /> Analysis
         </button>
         <button
           type="button"
           className={`tab-btn ${activeTab === 'strength' ? 'active' : ''}`}
           onClick={() => setActiveTab('strength')}
         >
-          <ShieldAlert size={13} /> Strength
+          <ShieldAlert size={12} /> Strength
         </button>
         <button
           type="button"
           className={`tab-btn ${activeTab === 'resources' ? 'active' : ''}`}
           onClick={() => setActiveTab('resources')}
         >
-          <Cpu size={13} /> Resources
+          <Cpu size={12} /> Resources
         </button>
         <button
           type="button"
           className={`tab-btn ${activeTab === 'opening' ? 'active' : ''}`}
           onClick={() => setActiveTab('opening')}
         >
-          <BookOpen size={13} /> Opening
+          <BookOpen size={12} /> Opening
         </button>
         <button
           type="button"
           className={`tab-btn ${activeTab === 'advanced' ? 'active' : ''}`}
           onClick={() => setActiveTab('advanced')}
         >
-          <Terminal size={13} /> UCI
+          <Terminal size={12} /> UCI
         </button>
       </nav>
+
+      {/* Tab: Engine Switcher & Custom WASM */}
+      {activeTab === 'engine' && (
+        <div className="settings-section">
+          <div className="section-title">
+            <Server size={14} /> Active Engine & Registry
+          </div>
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Selected Engine</span>
+            </div>
+            <select
+              className="select-dropdown"
+              value={settings.activeEngineId}
+              onChange={(e) => updateSetting('activeEngineId', e.target.value)}
+            >
+              {installedEngines.map((eng) => (
+                <option key={eng.id} value={eng.id}>
+                  {eng.name} {eng.isBuiltIn ? '(Built-in)' : '(Custom WASM)'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".wasm"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+            <button
+              type="button"
+              className="btn"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <UploadCloud size={14} /> Import Custom WASM Engine (.wasm)
+            </button>
+            {importStatus && (
+              <div style={{ fontSize: 11, color: '#38bdf8', marginTop: 6, textAlign: 'center' }}>
+                {importStatus}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: '#64748b', marginTop: 10 }}>
+            Supports any UCI-compliant WebAssembly chess binary with standard protocol handshake.
+          </div>
+        </div>
+      )}
 
       {/* Tab: Board */}
       {activeTab === 'board' && (
@@ -204,7 +301,7 @@ export default function App() {
             </label>
 
             <label className="toggle-row">
-              <span className="toggle-label">Show Opponent Moves</span>
+              <span className="toggle-label">Show Opponent Response Arrows</span>
               <input
                 type="checkbox"
                 checked={settings.showOpponentMoves}
@@ -245,21 +342,11 @@ export default function App() {
           </div>
 
           <div className="setting-item" style={{ marginTop: 12 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Controlled Side</span>
-              <span className="setting-value">{settings.controlledColor.toUpperCase()}</span>
+            <div className="section-title" style={{ marginTop: 6 }}>
+              <Lock size={13} /> Capture Privacy (Resistance)
             </div>
-            <div className="pill-group">
-              {(['auto', 'w', 'b'] as const).map((side) => (
-                <button
-                  key={side}
-                  type="button"
-                  className={`pill-btn ${settings.controlledColor === side ? 'active' : ''}`}
-                  onClick={() => updateSetting('controlledColor', side)}
-                >
-                  {side === 'auto' ? 'Auto (Board)' : side === 'w' ? 'White' : 'Black'}
-                </button>
-              ))}
+            <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+              Press <b>Alt + H</b> anytime on Chess.com to immediately toggle the overlay visibility.
             </div>
           </div>
         </div>
@@ -334,40 +421,45 @@ export default function App() {
             <ShieldAlert size={14} /> Engine Strength & Limit
           </div>
 
-          <label className="toggle-row">
-            <span className="toggle-label">Limit Engine Strength</span>
-            <input
-              type="checkbox"
-              checked={settings.limitStrength}
-              onChange={(e) => updateSetting('limitStrength', e.target.checked)}
-              className="toggle-switch"
-            />
-          </label>
+          {capabilities?.hasLimitStrength || capabilities?.hasElo ? (
+            <>
+              <label className="toggle-row">
+                <span className="toggle-label">Limit Engine Strength</span>
+                <input
+                  type="checkbox"
+                  checked={settings.limitStrength}
+                  onChange={(e) => updateSetting('limitStrength', e.target.checked)}
+                  className="toggle-switch"
+                />
+              </label>
 
-          <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Target Elo Rating</span>
-              <span className="setting-value">{settings.targetElo} Elo</span>
+              <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Target Elo Rating</span>
+                  <span className="setting-value">{settings.targetElo} Elo</span>
+                </div>
+                <input
+                  type="range"
+                  min="1350"
+                  max="2850"
+                  step="25"
+                  disabled={!settings.limitStrength}
+                  value={settings.targetElo}
+                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+                <div className="slider-hints">
+                  <span>Club (1400)</span>
+                  <span>Expert (2000)</span>
+                  <span>Master (2600)</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 12, color: '#64748b', padding: '8px 0' }}>
+              Strength limiting options are not advertised by the active engine.
             </div>
-            <input
-              type="range"
-              min="1350"
-              max="2850"
-              step="25"
-              disabled={!settings.limitStrength}
-              value={settings.targetElo}
-              onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
-              className="slider"
-            />
-            <div className="slider-hints">
-              <span>Club (1400)</span>
-              <span>Expert (2000)</span>
-              <span>Master (2600)</span>
-            </div>
-          </div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-            Maps to UCI_LimitStrength and UCI_Elo exposed by Stockfish.
-          </div>
+          )}
         </div>
       )}
 
@@ -521,7 +613,7 @@ export default function App() {
                   </div>
                 ))
             ) : (
-              <div style={{ fontSize: 12, color: '#64748b' }}>Stockfish UCI options discovered automatically.</div>
+              <div style={{ fontSize: 12, color: '#64748b' }}>UCI options discovered dynamically upon engine initialization.</div>
             )}
           </div>
         </div>

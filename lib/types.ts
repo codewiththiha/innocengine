@@ -1,5 +1,5 @@
 export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.3.0';
 
 export interface UciOption {
   name: string;
@@ -12,13 +12,24 @@ export interface UciOption {
 }
 
 export interface EngineCapabilities {
+  id: string;
   name: string;
   author: string;
   hasElo: boolean;
+  hasLimitStrength: boolean;
   hasSkillLevel: boolean;
   hasThreads: boolean;
   hasHash: boolean;
   options: Record<string, UciOption>;
+}
+
+export interface CustomEngineMeta {
+  id: string;
+  name: string;
+  author?: string;
+  sizeBytes: number;
+  dateAdded: number;
+  isBuiltIn?: boolean;
 }
 
 export interface OpeningConfig {
@@ -42,8 +53,16 @@ export interface EngineSettings {
   showHud: boolean;
   autoAnalyze: boolean;
   controlledColor: 'auto' | 'w' | 'b';
+  activeEngineId: string;
+  captureResistantOverlay: boolean;
   opening: OpeningConfig;
   customOptions: Record<string, string | number | boolean>;
+}
+
+export interface MoveContinuation {
+  from: string;
+  to: string;
+  san?: string;
 }
 
 export interface EngineCandidate {
@@ -55,7 +74,7 @@ export interface EngineCandidate {
   scoreCp: number | null;
   scoreMate: number | null;
   pv: string[];
-  isOpponent?: boolean;
+  continuation?: MoveContinuation;
   isBookMove?: boolean;
 }
 
@@ -72,6 +91,7 @@ export interface MoveLine {
 }
 
 export interface EngineEvaluation {
+  engineInstanceId: string;
   analysisId: number;
   positionKey: string;
   fen: string;
@@ -93,7 +113,7 @@ export interface BoardState {
   positionKey: string;
   isFlipped: boolean;
   turn: 'w' | 'b';
-  controlledColor: 'w' | 'b';
+  controlledColor: 'auto' | 'w' | 'b';
   pieceMap: Map<string, string>;
   boardElement?: HTMLElement;
 }
@@ -113,12 +133,14 @@ export type ExtensionMessage =
   | { target: 'engine'; type: 'ANALYZE'; analysisId: number; positionKey: string; fen: string; depth?: number; multiPv?: number; tabId?: number }
   | { target: 'engine'; type: 'STOP'; analysisId?: number }
   | { target: 'engine'; type: 'PING' }
+  | { target: 'engine'; type: 'SWITCH_ENGINE'; engineId: string }
   | { target: 'engine'; type: 'SET_OPTION'; name: string; value: string | number | boolean }
   | { target: 'engine'; type: 'UPDATE_SETTINGS'; settings: Partial<EngineSettings> }
   | { target: 'content'; type: 'EVAL_UPDATE'; evaluation: EngineEvaluation; senderTabId?: number }
   | { target: 'content'; type: 'ENGINE_STATUS'; status: 'loading' | 'ready' | 'analyzing' | 'error'; message?: string; senderTabId?: number }
   | { target: 'content'; type: 'SETTINGS_CHANGED'; settings: EngineSettings }
   | { target: 'popup'; type: 'ENGINE_CAPABILITIES'; capabilities: EngineCapabilities }
+  | { target: 'popup'; type: 'INSTALLED_ENGINES'; engines: CustomEngineMeta[] }
   | { target: 'popup'; type: 'ENGINE_STATUS'; status: 'loading' | 'ready' | 'analyzing' | 'error'; message?: string }
   | { target: 'popup'; type: 'TELEMETRY_UPDATE'; telemetry: EngineTelemetry }
   | { target: 'popup'; type: 'CURRENT_EVAL'; evaluation: EngineEvaluation | null };
