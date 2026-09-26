@@ -1,14 +1,22 @@
 import type { EngineEvaluation, EngineCapabilities, EngineTelemetry } from '../lib/types';
 import { getSettings } from '../lib/storage';
+import { UnifiedEngineHost } from '../lib/unified-engine-host';
 
 export default defineBackground(() => {
+  const hasOffscreenApi = typeof chrome !== 'undefined' && !!(chrome as any).offscreen?.createDocument;
   let creatingOffscreen: Promise<void> | null = null;
   let latestEvaluation: EngineEvaluation | null = null;
   let latestCapabilities: EngineCapabilities | null = null;
   let latestTelemetry: EngineTelemetry | null = null;
   let activeChessTabId: number | undefined;
 
+  // On Firefox / environments without chrome.offscreen, host engine runners directly in background!
+  if (!hasOffscreenApi) {
+    new UnifiedEngineHost();
+  }
+
   async function hasOffscreenDocument(): Promise<boolean> {
+    if (!hasOffscreenApi) return false;
     if ('getContexts' in chrome.runtime) {
       const contexts = await (chrome.runtime as any).getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT'],
@@ -21,7 +29,7 @@ export default defineBackground(() => {
   }
 
   async function ensureOffscreenDocument() {
-    if (await hasOffscreenDocument()) {
+    if (!hasOffscreenApi || (await hasOffscreenDocument())) {
       return;
     }
 
@@ -43,14 +51,16 @@ export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener(async () => {
     const settings = await getSettings();
     await chrome.storage.local.set({ chess_overlay_settings: settings });
-    await ensureOffscreenDocument();
+    if (hasOffscreenApi) {
+      await ensureOffscreenDocument();
+    }
   });
 
   // Forward settings updates from background service worker to offscreen document
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && changes['chess_overlay_settings']) {
       const newSettings = changes['chess_overlay_settings'].newValue;
-      if (newSettings) {
+      if (newSettings && hasOffscreenApi) {
         chrome.runtime.sendMessage({
           target: 'engine',
           type: 'SETTINGS_UPDATE',
@@ -68,19 +78,21 @@ export default defineBackground(() => {
           activeChessTabId = sender.tab.id;
         }
 
-        ensureOffscreenDocument()
-          .then(() => {
-            const tabId = sender.tab?.id || activeChessTabId;
-            const forwarded = { ...message, senderTabId: tabId };
-            chrome.runtime.sendMessage(forwarded).catch(() => {});
-          })
-          .catch((err: any) => {
-            console.error('[Background] Failed to ensure offscreen document:', err);
-          });
+        if (hasOffscreenApi) {
+          ensureOffscreenDocument()
+            .then(() => {
+              const tabId = sender.tab?.id || activeChessTabId;
+              const forwarded = { ...message, senderTabId: tabId };
+              chrome.runtime.sendMessage(forwarded).catch(() => {});
+            })
+            .catch((err: any) => {
+              console.error('[Background] Failed to ensure offscreen document:', err);
+            });
+        }
         return false;
       }
 
-      // 2. Target: Content (evaluation update from Offscreen)
+      // 2. Target: Content (evaluation update from Offscreen or Direct Background Host)
       if (message.target === 'content') {
         if (message.type === 'EVAL_UPDATE' && message.evaluation) {
           latestEvaluation = message.evaluation;

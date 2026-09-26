@@ -102,7 +102,35 @@ npm run zip
 ```
 Creates `.output/chess-ai-overlay-1.0.0-chrome.zip` ready for Chrome Web Store submission or distribution.
 
-### 5. Load Extension in Chrome
+### 5. Multi-Browser Support: Mozilla Firefox
+The extension is fully compatible with Mozilla Firefox (both Manifest V2 and Manifest V3):
+- **Chrome Engine Execution**: Uses `chrome.offscreen` document to bypass service worker WASM limitations.
+- **Firefox Engine Execution**: Background script directly hosts `UnifiedEngineHost` with native WebAssembly and Web Worker support (bypassing Chromium-only `chrome.offscreen`).
+- **Gecko Extension ID**: Configured with `browser_specific_settings.gecko.id: "chess-ai-overlay@innocengine.dev"`.
+
+#### Firefox Build Commands:
+```bash
+# Build Firefox extension
+npm run build:firefox
+
+# Build Firefox MV3 specifically
+npm run build:firefox:mv3
+
+# Package Firefox zip and AMO sources archive
+npm run zip:firefox
+
+# Build and package both Chrome and Firefox simultaneously
+npm run build:all
+npm run zip:all
+```
+
+#### Load Extension in Firefox:
+1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on...**.
+3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select the generated `.output/chess-ai-overlay-1.0.0-firefox.zip`.
+4. Open [Chess.com](https://www.chess.com) to start playing!
+
+### 6. Load Extension in Chrome
 1. Open Google Chrome and navigate to `chrome://extensions/`.
 2. Toggle **Developer mode** in the top-right corner.
 3. Click **Load unpacked** and select the `.output/chrome-mv3` folder.
