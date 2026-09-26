@@ -8,6 +8,7 @@ class StockfishEngineHost {
   private currentFen: string = '';
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
+  private currentMultiPv: number = 1;
   private currentSenderTabId?: number;
 
   constructor() {
@@ -34,6 +35,7 @@ class StockfishEngineHost {
       this.worker.postMessage('uci');
       this.worker.postMessage('isready');
       this.worker.postMessage('setoption name Hash value 32');
+      this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
     } catch (err) {
       console.error('[EngineHost] Error instantiating Stockfish worker:', err);
       this.broadcastStatus('error');
@@ -130,8 +132,16 @@ class StockfishEngineHost {
     this.parser.reset(fen, analysisId, positionKey);
 
     this.worker.postMessage('stop');
+
+    const targetMultiPv = Math.max(1, Math.min(4, multiPv));
+    if (this.currentMultiPv !== targetMultiPv) {
+      this.currentMultiPv = targetMultiPv;
+      this.worker.postMessage(`setoption name MultiPV value ${targetMultiPv}`);
+      this.worker.postMessage('isready');
+    }
+
     this.worker.postMessage(`position fen ${fen}`);
-    this.worker.postMessage(`go depth ${depth} multipv ${multiPv}`);
+    this.worker.postMessage(`go depth ${depth}`);
     this.broadcastStatus('analyzing');
   }
 

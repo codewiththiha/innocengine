@@ -34,6 +34,14 @@ export default defineContentScript({
       });
 
       subscribeToSettings((newSettings) => {
+        const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
+        const depthChanged = newSettings.depth !== currentSettings.depth;
+        const openingChanged =
+          newSettings.opening.enabled !== currentSettings.opening.enabled ||
+          newSettings.opening.repertoireId !== currentSettings.opening.repertoireId ||
+          newSettings.opening.mode !== currentSettings.opening.mode ||
+          newSettings.opening.maxPlies !== currentSettings.opening.maxPlies;
+
         currentSettings = newSettings;
         if (overlay) {
           overlay.updateSettings(newSettings);
@@ -41,13 +49,11 @@ export default defineContentScript({
         if (highlightController) {
           highlightController.updateSettings(newSettings);
         }
-        if (lastPositionKey && engineClient && newSettings.autoAnalyze) {
-          const board = currentBoard || BoardParser.findBoardElement();
-          if (board) {
-            const state = BoardParser.extractBoardState(board);
-            if (state) {
-              engineClient.analyze(state.fen, currentSettings);
-            }
+
+        if (currentBoard && (multiPvChanged || depthChanged || openingChanged)) {
+          const state = BoardParser.extractBoardState(currentBoard);
+          if (state && currentSettings.autoAnalyze) {
+            engineClient?.analyze(state.fen, currentSettings);
           }
         }
       });

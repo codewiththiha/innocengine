@@ -35,7 +35,7 @@ export interface CustomEngineMeta {
 export interface OpeningConfig {
   enabled: boolean;
   repertoireId: string;
-  mode: 'prefer' | 'book-only';
+  mode: 'coexist' | 'prefer' | 'book-only';
   maxPlies: number;
 }
 
@@ -76,6 +76,7 @@ export interface EngineCandidate {
   pv: string[];
   continuation?: MoveContinuation;
   isBookMove?: boolean;
+  bookName?: string;
 }
 
 export interface MoveLine {

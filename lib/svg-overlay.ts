@@ -15,17 +15,30 @@ const PALETTES: Record<number, VariationPalette> = {
     markerId: 'ai-marker-pv1',
   },
   2: {
-    fill: 'rgba(59, 130, 246, 0.14)',
-    stroke: 'rgba(59, 130, 246, 0.65)',
-    arrow: 'rgba(59, 130, 246, 0.75)',
+    fill: 'rgba(59, 130, 246, 0.16)',
+    stroke: 'rgba(59, 130, 246, 0.70)',
+    arrow: 'rgba(59, 130, 246, 0.80)',
     markerId: 'ai-marker-pv2',
   },
   3: {
-    fill: 'rgba(168, 85, 247, 0.12)',
-    stroke: 'rgba(168, 85, 247, 0.55)',
-    arrow: 'rgba(168, 85, 247, 0.65)',
+    fill: 'rgba(168, 85, 247, 0.15)',
+    stroke: 'rgba(168, 85, 247, 0.65)',
+    arrow: 'rgba(168, 85, 247, 0.75)',
     markerId: 'ai-marker-pv3',
   },
+  4: {
+    fill: 'rgba(20, 184, 166, 0.15)',
+    stroke: 'rgba(20, 184, 166, 0.65)',
+    arrow: 'rgba(20, 184, 166, 0.75)',
+    markerId: 'ai-marker-pv4',
+  },
+};
+
+const BOOK_PALETTE: VariationPalette = {
+  fill: 'rgba(16, 185, 129, 0.22)',
+  stroke: 'rgba(16, 185, 129, 0.85)',
+  arrow: 'rgba(16, 185, 129, 0.95)',
+  markerId: 'ai-marker-book',
 };
 
 const OPPONENT_ARROW_PALETTE = {
@@ -111,14 +124,20 @@ export class SvgOverlay {
 
     svg.innerHTML = `
       <defs>
-        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(245, 158, 11, 0.85)" />
         </marker>
-        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(59, 130, 246, 0.75)" />
+        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(59, 130, 246, 0.80)" />
         </marker>
-        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
-          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.65)" />
+        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.75)" />
+        </marker>
+        <marker id="ai-marker-pv4" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(20, 184, 166, 0.75)" />
+        </marker>
+        <marker id="ai-marker-book" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(16, 185, 129, 0.95)" />
         </marker>
         <marker id="ai-marker-opp" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.26" markerHeight="0.26" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(148, 163, 184, 0.65)" />
@@ -248,7 +267,7 @@ export class SvgOverlay {
     }
 
     const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates
-      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.continuation ? `${c.continuation.from}${c.continuation.to}` : ''}`)
+      .map((c) => `${c.pvId}:${c.from}${c.to}:${c.isBookMove ? 'bk' : ''}:${c.continuation ? `${c.continuation.from}${c.continuation.to}` : ''}`)
       .join(';')}`;
 
     if (newKey === this.currentRenderKey) {
@@ -266,12 +285,10 @@ export class SvgOverlay {
     if (contLayer) contLayer.innerHTML = '';
 
     candidates.forEach((candidate) => {
-      const palette = PALETTES[candidate.pvId] || PALETTES[1] || {
-        fill: 'rgba(245, 158, 11, 0.18)',
-        stroke: 'rgba(245, 158, 11, 0.75)',
-        arrow: 'rgba(245, 158, 11, 0.85)',
-        markerId: 'ai-marker-pv1',
-      };
+      const palette = candidate.isBookMove
+        ? BOOK_PALETTE
+        : PALETTES[candidate.pvId] || PALETTES[1] || BOOK_PALETTE;
+
       const fromPos = this.algebraicToSvgPos(candidate.from);
       const toPos = this.algebraicToSvgPos(candidate.to);
       if (!fromPos || !toPos) return;
@@ -299,6 +316,16 @@ export class SvgOverlay {
       rectTo.setAttribute('stroke', palette.stroke);
       rectTo.setAttribute('stroke-width', '0.02');
       hlLayer.appendChild(rectTo);
+
+      // Distinguish book moves with a subtle indicator circle
+      if (candidate.isBookMove) {
+        const bookCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        bookCircle.setAttribute('cx', (toPos.x + 0.82).toString());
+        bookCircle.setAttribute('cy', (toPos.y + 0.18).toString());
+        bookCircle.setAttribute('r', '0.09');
+        bookCircle.setAttribute('fill', 'rgba(16, 185, 129, 0.95)');
+        hlLayer.appendChild(bookCircle);
+      }
 
       // Primary connector arrow
       if (this.settings.showConnectors) {
@@ -430,7 +457,14 @@ export class SvgOverlay {
     const dotEl = this.hudElement.querySelector('#ai-status-dot') as HTMLElement;
 
     if (depthEl) depthEl.innerText = `d${evalData.depth || 0}`;
-    if (bestEl) bestEl.innerText = evalData.bestMove ? this.formatUciMove(evalData.bestMove) : '-';
+    if (bestEl) {
+      const bookCand = this.activeCandidates.find((c) => c.isBookMove);
+      if (bookCand && bookCand.bookName) {
+        bestEl.innerText = `${evalData.bestMove ? this.formatUciMove(evalData.bestMove) : '-'} | 📖 ${bookCand.bookName}`;
+      } else {
+        bestEl.innerText = evalData.bestMove ? this.formatUciMove(evalData.bestMove) : '-';
+      }
+    }
 
     if (evalEl) {
       if (evalData.scoreMate !== null) {

@@ -568,24 +568,55 @@ export default function App() {
 
           <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
             <div className="setting-label-row">
-              <span className="setting-label">Influence Mode</span>
+              <span className="setting-label">Display Mode</span>
             </div>
             <div className="pill-group">
-              {(['prefer', 'book-only'] as const).map((m) => (
+              {([
+                { id: 'coexist', label: 'Overlay Both' },
+                { id: 'prefer', label: 'Engine Guided' },
+                { id: 'book-only', label: 'Book Only' },
+              ] as const).map(({ id, label }) => (
                 <button
-                  key={m}
+                  key={id}
                   type="button"
                   disabled={!settings.opening.enabled}
-                  className={`pill-btn ${settings.opening.mode === m ? 'active' : ''}`}
-                  onClick={() => updateSetting('opening', { ...settings.opening, mode: m })}
+                  className={`pill-btn ${settings.opening.mode === id ? 'active' : ''}`}
+                  onClick={() => updateSetting('opening', { ...settings.opening, mode: id })}
                 >
-                  {m === 'prefer' ? 'Prefer (Soft)' : 'Book Only'}
+                  {label}
                 </button>
               ))}
             </div>
           </div>
+
+          <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
+            <div className="setting-label-row">
+              <span className="setting-label">Repertoire Depth Limit</span>
+              <span className="setting-value">{settings.opening.maxPlies} plies ({settings.opening.maxPlies / 2} moves)</span>
+            </div>
+            <input
+              type="range"
+              min="4"
+              max="24"
+              step="2"
+              disabled={!settings.opening.enabled}
+              value={settings.opening.maxPlies}
+              onChange={(e) =>
+                updateSetting('opening', { ...settings.opening, maxPlies: parseInt(e.target.value, 10) })
+              }
+              className="slider"
+            />
+            <div className="slider-hints">
+              <span>Short (6 plies)</span>
+              <span>Standard (12 plies)</span>
+              <span>Deep (20 plies)</span>
+            </div>
+          </div>
+
           <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-            If the opponent deviates, engine gracefully resumes standard calculation.
+            {settings.opening.mode === 'coexist' && 'Shows distinct Emerald Green highlight for Opening Book alongside Engine variations.'}
+            {settings.opening.mode === 'prefer' && 'Promotes the repertoire move to the primary variation (#1), followed by engine alternatives.'}
+            {settings.opening.mode === 'book-only' && 'Only displays the opening repertoire move during the opening phase.'}
           </div>
         </div>
       )}

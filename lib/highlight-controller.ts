@@ -1,4 +1,5 @@
 import type { EngineCandidate, EngineEvaluation, EngineSettings, BoardState } from './types';
+import { OpeningBook } from './opening-book';
 
 export interface RenderSnapshot {
   candidates: EngineCandidate[];
@@ -61,14 +62,15 @@ export class HighlightController {
     const validCandidates = this.validateCandidates(evaluation.candidates);
     if (validCandidates.length === 0) return;
 
-    const topCandidates = validCandidates.slice(0, Math.max(1, this.settings.multiPv));
+    const displayCandidates = this.applyOpeningBook(validCandidates);
+    if (displayCandidates.length === 0) return;
 
     // If Stockfish completed calculation (bestmove arrived), commit atomically
     if (!evaluation.isCalculating) {
       this.clearPendingTimer();
-      this.committedCandidates = topCandidates;
+      this.committedCandidates = displayCandidates;
       this.renderCallback({
-        candidates: topCandidates,
+        candidates: displayCandidates,
         isCommitted: true,
         depth: evaluation.depth,
       });
@@ -76,7 +78,7 @@ export class HighlightController {
     }
 
     // While searching: apply candidate stability window before updating visual preview
-    const primaryCandidate = topCandidates[0];
+    const primaryCandidate = displayCandidates[0];
     if (!primaryCandidate) return;
 
     const primaryMoveKey = `${primaryCandidate.from}-${primaryCandidate.to}`;
@@ -89,18 +91,18 @@ export class HighlightController {
       this.clearPendingTimer();
       this.stabilityTimer = setTimeout(() => {
         if (this.pendingCandidateKey === primaryMoveKey) {
-          this.committedCandidates = topCandidates;
+          this.committedCandidates = displayCandidates;
           this.renderCallback({
-            candidates: topCandidates,
+            candidates: displayCandidates,
             isCommitted: false,
             depth: evaluation.depth,
           });
         }
       }, this.STABILITY_WINDOW_MS);
     } else if (now - this.candidatePendingSince >= this.STABILITY_WINDOW_MS) {
-      this.committedCandidates = topCandidates;
+      this.committedCandidates = displayCandidates;
       this.renderCallback({
-        candidates: topCandidates,
+        candidates: displayCandidates,
         isCommitted: false,
         depth: evaluation.depth,
       });
@@ -121,7 +123,7 @@ export class HighlightController {
         const isWhitePiece = piece === piece.toUpperCase();
         const pieceTurn = isWhitePiece ? 'w' : 'b';
 
-        // Candidate must match side to move
+        // Root candidate must match side to move
         if (pieceTurn !== turn) {
           return false;
         }
@@ -132,6 +134,79 @@ export class HighlightController {
         ...cand,
         continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
       }));
+  }
+
+  private applyOpeningBook(engineCandidates: EngineCandidate[]): EngineCandidate[] {
+    if (!this.settings.opening.enabled || !this.activePositionKey) {
+      return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
+    }
+
+    const bookEntry = OpeningBook.lookupMove(this.activePositionKey, this.settings.opening.repertoireId);
+    if (!bookEntry || !bookEntry.move || bookEntry.move.length < 4) {
+      return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
+    }
+
+    const bookFrom = bookEntry.move.substring(0, 2);
+    const bookTo = bookEntry.move.substring(2, 4);
+    const mode = this.settings.opening.mode || 'coexist';
+
+    if (mode === 'book-only') {
+      return [
+        {
+          pvId: 0,
+          from: bookFrom,
+          to: bookTo,
+          depth: 0,
+          scoreCp: null,
+          scoreMate: null,
+          pv: [bookEntry.move],
+          isBookMove: true,
+          bookName: bookEntry.name,
+        },
+      ];
+    }
+
+    const topEngineCandidates = engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
+    const matchIdx = topEngineCandidates.findIndex((c) => c.from === bookFrom && c.to === bookTo);
+
+    if (matchIdx !== -1 && topEngineCandidates[matchIdx]) {
+      // Move was already suggested by the engine: tag with book metadata
+      topEngineCandidates[matchIdx] = {
+        ...topEngineCandidates[matchIdx],
+        isBookMove: true,
+        bookName: bookEntry.name,
+      };
+
+      if (mode === 'prefer' && matchIdx > 0) {
+        const [matched] = topEngineCandidates.splice(matchIdx, 1);
+        if (matched) topEngineCandidates.unshift(matched);
+      }
+
+      return topEngineCandidates;
+    }
+
+    // Engine top moves do not include the opening book move:
+    const bookCandidate: EngineCandidate = {
+      pvId: 0,
+      from: bookFrom,
+      to: bookTo,
+      depth: 0,
+      scoreCp: null,
+      scoreMate: null,
+      pv: [bookEntry.move],
+      isBookMove: true,
+      bookName: bookEntry.name,
+    };
+
+    if (mode === 'prefer') {
+      // In prefer mode: Repertoire move is #1, followed by engine variations
+      return [bookCandidate, ...topEngineCandidates.slice(0, Math.max(0, this.settings.multiPv - 1))];
+    }
+
+    // In coexist mode: Show both engine variations AND opening book move
+    // e.g. 1 engine candidate (Amber) + 1 book candidate (Emerald) = 2 highlights
+    // e.g. 3 engine candidates + 1 book candidate = 4 highlights
+    return [...topEngineCandidates, bookCandidate];
   }
 
   private clearPendingTimer() {

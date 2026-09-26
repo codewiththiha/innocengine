@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   opening: {
     enabled: false,
     repertoireId: 'sicilian',
-    mode: 'prefer',
+    mode: 'coexist',
     maxPlies: 12,
   },
   customOptions: {},
