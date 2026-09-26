@@ -3,6 +3,8 @@ import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
 import { EngineRegistry, type BUILTIN_STOCKFISH } from '../../lib/engine-registry';
 import { capsFor } from '../../lib/engine-capabilities';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
+import { OPENING_CATALOG } from '../../lib/openings/catalog';
+import OpeningBrowser from './components/OpeningBrowser';
 import { getEngineStrengthDescription, mapEloToPatriciaSkill } from '../../lib/engine-tuning';
 import type {
   EngineSettings,
@@ -952,7 +954,7 @@ export default function App() {
       {activeTab === 'opening' && (
         <div className="settings-section">
           <div className="section-title">
-            <BookOpen size={14} /> Soft Repertoire Layer
+            <BookOpen size={14} /> Opening Book & Repertoire Engine
           </div>
 
           <label className="toggle-row">
@@ -969,56 +971,30 @@ export default function App() {
 
           <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
             <div className="setting-label-row">
-              <span className="setting-label">Active Repertoire</span>
+              <span className="setting-label">Display & Tactical Integration Mode</span>
             </div>
             <select
               className="select-dropdown"
               disabled={!settings.opening.enabled}
-              value={settings.opening.repertoireId}
+              value={settings.opening.mode}
               onChange={(e) =>
-                updateSetting('opening', { ...settings.opening, repertoireId: e.target.value })
+                updateSetting('opening', { ...settings.opening, mode: e.target.value as any })
               }
             >
-              <optgroup label="⚪ White Openings">
-                {REPERTOIRE_LIST.filter((r) => r.side === 'w').map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} ({r.category})
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="⚫ Black Defenses">
-                {REPERTOIRE_LIST.filter((r) => r.side === 'b').map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} ({r.category})
-                  </option>
-                ))}
-              </optgroup>
+              <option value="adaptive">Adaptive (Tactical Veto: suppresses book if queen hangs or engine refutes)</option>
+              <option value="coexist">Coexist (Overlay both engine variations & repertoire)</option>
+              <option value="prefer">Prefer Book (Promote safe repertoire move to #1)</option>
+              <option value="hint">Hint Only (Non-intrusive hint; never displaces engine lines)</option>
+              <option value="book-only">Book Only (Repertoire moves only with tactical safety fallback)</option>
+              <option value="off">Off (Disable opening recommendations)</option>
             </select>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.3 }}>
-              Repertoires automatically recommend the proper move when it is your side's turn.
-            </div>
-          </div>
-
-          <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Display Mode</span>
-            </div>
-            <div className="pill-group">
-              {([
-                { id: 'coexist', label: 'Overlay Both' },
-                { id: 'prefer', label: 'Engine Guided' },
-                { id: 'book-only', label: 'Book Only' },
-              ] as const).map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  disabled={!settings.opening.enabled}
-                  className={`pill-btn ${settings.opening.mode === id ? 'active' : ''}`}
-                  onClick={() => updateSetting('opening', { ...settings.opening, mode: id })}
-                >
-                  {label}
-                </button>
-              ))}
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 5, lineHeight: 1.3 }}>
+              {settings.opening.mode === 'adaptive' && 'Smartest mode: guides opening theory but instantly suppresses book moves if an enemy piece attacks your queen or wins material.'}
+              {settings.opening.mode === 'coexist' && 'Renders emerald green book highlight alongside amber/blue engine variations.'}
+              {settings.opening.mode === 'prefer' && 'Promotes the safe repertoire move to primary variation (#1) during the opening phase.'}
+              {settings.opening.mode === 'hint' && 'Subtle hint mode recommended for human policy engines like Maia.'}
+              {settings.opening.mode === 'book-only' && 'Only suggests book moves; safely falls back to engine if line deviates or hangs material.'}
+              {settings.opening.mode === 'off' && 'Opening book recommendations disabled.'}
             </div>
           </div>
 
@@ -1041,15 +1017,27 @@ export default function App() {
             />
             <div className="slider-hints">
               <span>Short (6 plies)</span>
-              <span>Standard (12 plies)</span>
-              <span>Deep (20 plies)</span>
+              <span>Standard (14 plies)</span>
+              <span>Deep (24 plies)</span>
             </div>
           </div>
 
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-            {settings.opening.mode === 'coexist' && 'Shows distinct Emerald Green highlight for Opening Book alongside Engine variations.'}
-            {settings.opening.mode === 'prefer' && 'Promotes the repertoire move to the primary variation (#1), followed by engine alternatives.'}
-            {settings.opening.mode === 'book-only' && 'Only displays the opening repertoire move during the opening phase.'}
+          {/* Searchable Categorized Opening Catalog */}
+          <div style={{ marginTop: 12, opacity: settings.opening.enabled ? 1 : 0.45 }}>
+            <div className="section-title" style={{ fontSize: 12, marginBottom: 4 }}>
+              <Sparkles size={13} /> Searchable Opening Catalog & Repertoires
+            </div>
+            <OpeningBrowser
+              openings={OPENING_CATALOG}
+              selectedIds={settings.opening.selectedOpeningIds || []}
+              onChange={(ids) => {
+                updateSetting('opening', {
+                  ...settings.opening,
+                  selectedOpeningIds: ids,
+                  repertoireId: ids.length === 1 ? ids[0]! : 'auto',
+                });
+              }}
+            />
           </div>
         </div>
       )}

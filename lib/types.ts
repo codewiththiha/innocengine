@@ -38,11 +38,37 @@ export interface CustomEngineMeta {
   isBuiltIn?: boolean;
 }
 
+export type OpeningMode = 'off' | 'hint' | 'coexist' | 'prefer' | 'book-only' | 'adaptive';
+
 export interface OpeningConfig {
   enabled: boolean;
   repertoireId: string;
-  mode: 'coexist' | 'prefer' | 'book-only';
+  selectedOpeningIds?: string[];
+  mode: OpeningMode;
   maxPlies: number;
+  reserveSlot?: boolean;
+  categories?: any[];
+  searchQuery?: string;
+  includeMeme?: boolean;
+  includeWeird?: boolean;
+  maxRisk?: number;
+  strictLine?: boolean;
+  safety?: {
+    maxLossCp?: number;
+    forbidQueenHang?: boolean;
+    minEngineDepth?: number;
+    maxEngineDisagreementCp?: number;
+    allowRiskyOpenings?: boolean;
+    allowMemeOpenings?: boolean;
+  };
+  enginePolicy?: Record<string, {
+    mode?: OpeningMode;
+    maxLossCp?: number;
+    minEngineDepth?: number;
+    allowOffBook?: boolean;
+    allowRisky?: boolean;
+    allowMeme?: boolean;
+  }>;
 }
 
 export interface EngineSettings {

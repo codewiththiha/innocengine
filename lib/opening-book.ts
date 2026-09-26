@@ -1,4 +1,5 @@
 import { Chess } from 'chess.js';
+import { isLegalUci } from './opening-safety';
 
 export interface RepertoireEntry {
   move: string;
@@ -178,7 +179,6 @@ const REPERTOIRE_TREES: Record<string, Record<string, RepertoireEntry>> = {
     // 1. d4
     'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w': { move: 'd2d4', name: "London 1.d4" },
     // 2. Bf4 against 1...d5
-    'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b': { move: 'c1f4', name: 'London 2.Bf4' },
     'rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w': { move: 'c1f4', name: 'London 2.Bf4' },
     // 2. Bf4 against 1...Nf6
     'rnbqkb1r/pppppppp/5n2/8/3P4/8/PPP1PPPP/RNBQKBNR w': { move: 'c1f4', name: 'London vs Nf6 2.Bf4' },
@@ -283,6 +283,22 @@ export class OpeningBook {
   }
 
   public static lookupMove(
+    positionKeyOrFen: string,
+    repertoireId: string,
+    fullFen?: string
+  ): RepertoireEntry | null {
+    const raw = this.lookupRaw(positionKeyOrFen, repertoireId, fullFen);
+    if (!raw?.move) return null;
+
+    const tokens = positionKeyOrFen.trim().split(/\s+/);
+    const fenToTest = fullFen || (tokens.length >= 4 ? `${tokens.slice(0, 4).join(' ')} 0 1` : '');
+    if (fenToTest && !isLegalUci(fenToTest, raw.move)) {
+      return null;
+    }
+    return raw;
+  }
+
+  private static lookupRaw(
     positionKeyOrFen: string,
     repertoireId: string,
     fullFen?: string

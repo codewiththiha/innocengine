@@ -27,9 +27,58 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   captureResistantOverlay: false,
   opening: {
     enabled: false,
-    repertoireId: 'sicilian',
-    mode: 'coexist',
-    maxPlies: 12,
+    repertoireId: 'auto',
+    selectedOpeningIds: [],
+    mode: 'adaptive',
+    maxPlies: 14,
+    reserveSlot: true,
+    categories: [],
+    includeMeme: false,
+    includeWeird: false,
+    maxRisk: 5,
+    strictLine: true,
+    safety: {
+      maxLossCp: 250,
+      forbidQueenHang: true,
+      minEngineDepth: 8,
+      maxEngineDisagreementCp: 200,
+      allowRiskyOpenings: false,
+      allowMemeOpenings: false,
+    },
+    enginePolicy: {
+      stockfish: {
+        mode: 'adaptive',
+        maxLossCp: 200,
+        minEngineDepth: 10,
+        allowOffBook: false,
+        allowRisky: false,
+        allowMeme: false,
+      },
+      patricia: {
+        mode: 'adaptive',
+        maxLossCp: 300,
+        minEngineDepth: 8,
+        allowOffBook: true,
+        allowRisky: true,
+        allowMeme: false,
+      },
+      maia3: {
+        mode: 'hint',
+        maxLossCp: 180,
+        minEngineDepth: 0,
+        allowOffBook: true,
+        allowRisky: false,
+        allowMeme: false,
+      },
+      maia2: {
+        mode: 'hint',
+        maxLossCp: 180,
+        minEngineDepth: 0,
+        allowOffBook: true,
+        allowRisky: false,
+        allowMeme: false,
+      },
+    },
   },
   customOptions: {},
 };
@@ -44,6 +93,7 @@ export async function getSettings(): Promise<EngineSettings> {
       return DEFAULT_SETTINGS;
     }
     const loaded = (result[STORAGE_KEY] || {}) as Partial<EngineSettings>;
+    const loadedOpening = (loaded.opening || {}) as any;
     return {
       ...DEFAULT_SETTINGS,
       ...loaded,
@@ -51,6 +101,18 @@ export async function getSettings(): Promise<EngineSettings> {
       highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
       highlighterOpacity: loaded.highlighterOpacity ?? 0.35,
       showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
+      opening: {
+        ...DEFAULT_SETTINGS.opening,
+        ...loadedOpening,
+        safety: {
+          ...DEFAULT_SETTINGS.opening.safety,
+          ...(loadedOpening.safety || {}),
+        },
+        enginePolicy: {
+          ...DEFAULT_SETTINGS.opening.enginePolicy,
+          ...(loadedOpening.enginePolicy || {}),
+        },
+      },
     };
   } catch (_) {
     return DEFAULT_SETTINGS;

@@ -1,5 +1,11 @@
 import type { EngineCandidate, EngineEvaluation, EngineSettings, BoardState } from './types';
 import { OpeningBook } from './opening-book';
+import { validateBookMoveCached } from './opening-safety';
+import { OPENING_CATALOG } from './openings/catalog';
+import { OpeningIndex } from './openings/index';
+import { resolveSafeOpeningEntry } from './openings/resolver';
+
+export const globalOpeningIndex = new OpeningIndex(OPENING_CATALOG);
 
 export interface RenderSnapshot {
   candidates: EngineCandidate[];
@@ -32,23 +38,8 @@ export class HighlightController {
   public updateSettings(settings: EngineSettings) {
     this.settings = settings;
     if (this.currentBoardState && this.settings.opening.enabled && this.isWithinBookDepth(this.currentBoardState.fen)) {
-      const bookEntry = OpeningBook.lookupMove(
-        this.currentBoardState.positionKey,
-        this.settings.opening.repertoireId,
-        this.currentBoardState.fen
-      );
-      if (bookEntry && bookEntry.move && bookEntry.move.length >= 4 && !this.latestEngineSnapshot) {
-        const bookCandidate: EngineCandidate = {
-          pvId: 0,
-          from: bookEntry.move.substring(0, 2),
-          to: bookEntry.move.substring(2, 4),
-          depth: 0,
-          scoreCp: 0,
-          scoreMate: null,
-          pv: [bookEntry.move],
-          isBookMove: true,
-          bookName: bookEntry.name,
-        };
+      const bookCandidate = this.getValidatedBookCandidate();
+      if (bookCandidate && !this.latestEngineSnapshot) {
         this.committedCandidates = this.shouldShowForTurn() ? [bookCandidate] : [];
         this.broadcastCurrentState();
         return;
@@ -79,21 +70,10 @@ export class HighlightController {
       this.pendingCandidates = [];
       this.pendingDepth = 0;
 
-      // Immediately display opening repertoire move if available for the new position
+      // Immediately display opening repertoire move if available and validated safe
       if (this.settings.opening.enabled && this.isWithinBookDepth(boardState.fen)) {
-        const bookEntry = OpeningBook.lookupMove(boardState.positionKey, this.settings.opening.repertoireId, boardState.fen);
-        if (bookEntry && bookEntry.move && bookEntry.move.length >= 4) {
-          const bookCandidate: EngineCandidate = {
-            pvId: 0,
-            from: bookEntry.move.substring(0, 2),
-            to: bookEntry.move.substring(2, 4),
-            depth: 0,
-            scoreCp: 0,
-            scoreMate: null,
-            pv: [bookEntry.move],
-            isBookMove: true,
-            bookName: bookEntry.name,
-          };
+        const bookCandidate = this.getValidatedBookCandidate();
+        if (bookCandidate) {
           this.committedCandidates = this.shouldShowForTurn() ? [bookCandidate] : [];
           this.broadcastCurrentState();
           return;
@@ -266,69 +246,57 @@ export class HighlightController {
       }));
   }
 
-  private applyOpeningBook(engineCandidates: EngineCandidate[]): EngineCandidate[] {
-    if (
-      !this.settings.opening.enabled ||
-      !this.activePositionKey ||
-      !this.currentBoardState ||
-      !this.isWithinBookDepth(this.currentBoardState.fen)
-    ) {
-      return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
+  private getValidatedBookCandidate(engineCandidates: EngineCandidate[] = []): EngineCandidate | null {
+    if (!this.currentBoardState) return null;
+    const openingSettings = this.settings.opening;
+    if (!openingSettings?.enabled) return null;
+    if (!this.isWithinBookDepth(this.currentBoardState.fen)) return null;
+
+    // 1. Try PGN-indexed catalog resolver first
+    const resolved = resolveSafeOpeningEntry(
+      globalOpeningIndex,
+      this.currentBoardState.fen,
+      this.settings,
+      engineCandidates
+    );
+
+    if (resolved) {
+      return {
+        pvId: 0,
+        from: resolved.uci.substring(0, 2),
+        to: resolved.uci.substring(2, 4),
+        promotion: resolved.uci.length > 4 ? resolved.uci.substring(4, 5) : undefined,
+        depth: 0,
+        scoreCp: null,
+        scoreMate: null,
+        pv: [resolved.uci],
+        isBookMove: true,
+        bookName: resolved.openingName,
+      };
     }
 
+    // 2. Legacy fallback to OpeningBook.lookupMove with tactical safety validation
     const bookEntry = OpeningBook.lookupMove(
-      this.activePositionKey,
-      this.settings.opening.repertoireId,
+      this.currentBoardState.positionKey,
+      openingSettings.repertoireId,
       this.currentBoardState.fen
     );
-    if (!bookEntry || !bookEntry.move || bookEntry.move.length < 4) {
-      return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
-    }
 
-    const bookFrom = bookEntry.move.substring(0, 2);
-    const bookTo = bookEntry.move.substring(2, 4);
-    const mode = this.settings.opening.mode || 'coexist';
+    if (!bookEntry?.move || bookEntry.move.length < 4) return null;
 
-    if (mode === 'book-only') {
-      return [
-        {
-          pvId: 0,
-          from: bookFrom,
-          to: bookTo,
-          depth: 0,
-          scoreCp: null,
-          scoreMate: null,
-          pv: [bookEntry.move],
-          isBookMove: true,
-          bookName: bookEntry.name,
-        },
-      ];
-    }
+    const validation = validateBookMoveCached(
+      this.currentBoardState.fen,
+      bookEntry.move,
+      openingSettings.safety
+    );
 
-    const topEngineCandidates = engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
-    const matchIdx = topEngineCandidates.findIndex((c) => c.from === bookFrom && c.to === bookTo);
+    if (!validation.legal || !validation.safe) return null;
 
-    if (matchIdx !== -1 && topEngineCandidates[matchIdx]) {
-      // Move was already suggested by the engine: tag with book metadata
-      topEngineCandidates[matchIdx] = {
-        ...topEngineCandidates[matchIdx],
-        isBookMove: true,
-        bookName: bookEntry.name,
-      };
-
-      if (mode === 'prefer' && matchIdx > 0) {
-        const [matched] = topEngineCandidates.splice(matchIdx, 1);
-        if (matched) topEngineCandidates.unshift(matched);
-      }
-
-      return topEngineCandidates;
-    }
-
-    // Engine top moves do not include the opening book move:
-    const bookCandidate: EngineCandidate = {
+    return {
       pvId: 0,
-      from: bookFrom,
-      to: bookTo,
+      from: bookEntry.move.substring(0, 2),
+      to: bookEntry.move.substring(2, 4),
+      promotion: bookEntry.move.length > 4 ? bookEntry.move.substring(4, 5) : undefined,
       depth: 0,
       scoreCp: null,
       scoreMate: null,
@@ -336,16 +304,146 @@ export class HighlightController {
       isBookMove: true,
       bookName: bookEntry.name,
     };
+  }
 
-    if (mode === 'prefer') {
-      // In prefer mode: Repertoire move is #1, followed by engine variations
-      return [bookCandidate, ...topEngineCandidates.slice(0, Math.max(0, this.settings.multiPv - 1))];
+  private allowBookMoveAgainstEngine(
+    bookCandidate: EngineCandidate,
+    engineCandidates: EngineCandidate[]
+  ): boolean {
+    if (!engineCandidates.length) return true;
+
+    const opening = this.settings.opening;
+    const enginePolicy = opening?.enginePolicy?.[this.settings.activeEngineId] ?? {};
+    const minEngineDepth = enginePolicy.minEngineDepth ?? opening?.safety?.minEngineDepth ?? 8;
+    const topEngineCandidate = engineCandidates[0];
+    if (!topEngineCandidate) return true;
+
+    const engineDepth = topEngineCandidate.depth ?? 0;
+    if (engineDepth < minEngineDepth) {
+      return true;
     }
 
-    // In coexist mode: Show both engine variations AND opening book move
-    // e.g. 1 engine candidate (Amber) + 1 book candidate (Emerald) = 2 highlights
-    // e.g. 3 engine candidates + 1 book candidate = 4 highlights
-    return [...topEngineCandidates, bookCandidate];
+    const engineAlreadyIncludesBookMove = engineCandidates.some(
+      (c) =>
+        c.from === bookCandidate.from &&
+        c.to === bookCandidate.to &&
+        (c.promotion ?? '') === (bookCandidate.promotion ?? '')
+    );
+
+    if (engineAlreadyIncludesBookMove) {
+      return true;
+    }
+
+    if (topEngineCandidate.scoreMate != null) {
+      return false;
+    }
+
+    const bookName = bookCandidate.bookName?.toLowerCase() ?? '';
+    const isRiskyBook =
+      bookName.includes('gambit') ||
+      bookName.includes('trap') ||
+      bookName.includes('meme') ||
+      bookName.includes('weird') ||
+      bookName.includes('chaos');
+
+    if (isRiskyBook && !opening?.safety?.allowRiskyOpenings && !enginePolicy.allowRisky) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private applyOpeningBook(engineCandidates: EngineCandidate[]): EngineCandidate[] {
+    const multiPv = Math.max(1, this.settings.multiPv || 1);
+    const baseCandidates = engineCandidates.slice(0, multiPv);
+    const opening = this.settings.opening;
+
+    if (!opening?.enabled || !this.currentBoardState || !this.isWithinBookDepth(this.currentBoardState.fen)) {
+      return baseCandidates;
+    }
+
+    const bookCandidate = this.getValidatedBookCandidate(baseCandidates);
+    if (!bookCandidate) {
+      return baseCandidates;
+    }
+
+    const mode = opening.mode || 'adaptive';
+
+    if (mode === 'off') {
+      return baseCandidates;
+    }
+
+    if (mode === 'book-only') {
+      return [bookCandidate];
+    }
+
+    const matchIdx = baseCandidates.findIndex(
+      (c) =>
+        c.from === bookCandidate.from &&
+        c.to === bookCandidate.to &&
+        (c.promotion ?? '') === (bookCandidate.promotion ?? '')
+    );
+
+    if (matchIdx !== -1) {
+      const updated = [...baseCandidates];
+      updated[matchIdx] = {
+        ...updated[matchIdx]!,
+        isBookMove: true,
+        bookName: bookCandidate.bookName,
+      };
+
+      if (mode === 'prefer' && matchIdx > 0) {
+        const [matched] = updated.splice(matchIdx, 1);
+        if (matched) updated.unshift(matched);
+      }
+
+      return updated;
+    }
+
+    const reserveBookSlot = opening.reserveSlot ?? true;
+
+    if (mode === 'prefer') {
+      return [bookCandidate, ...baseCandidates].slice(0, multiPv);
+    }
+
+    if (mode === 'coexist') {
+      if (baseCandidates.length < multiPv) {
+        return [...baseCandidates, bookCandidate];
+      }
+      if (reserveBookSlot) {
+        return [...baseCandidates.slice(0, Math.max(0, multiPv - 1)), bookCandidate];
+      }
+      return baseCandidates;
+    }
+
+    if (mode === 'hint') {
+      if (baseCandidates.length < multiPv) {
+        return [...baseCandidates, bookCandidate];
+      }
+      return baseCandidates;
+    }
+
+    if (mode === 'adaptive') {
+      const allowUnsafeLookingBookMove = this.allowBookMoveAgainstEngine(
+        bookCandidate,
+        baseCandidates
+      );
+
+      if (!allowUnsafeLookingBookMove) {
+        return baseCandidates;
+      }
+
+      if (baseCandidates.length < multiPv) {
+        return [...baseCandidates, bookCandidate];
+      }
+
+      if (reserveBookSlot) {
+        return [...baseCandidates.slice(0, Math.max(0, multiPv - 1)), bookCandidate];
+      }
+      return baseCandidates;
+    }
+
+    return baseCandidates;
   }
 
   private clearPendingTimer() {
