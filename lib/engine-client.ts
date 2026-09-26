@@ -60,6 +60,11 @@ export class EngineClient {
         fen,
         depth: settings.depth,
         multiPv: settings.multiPv,
+        activeEngineId: settings.activeEngineId,
+        limitStrength: settings.limitStrength,
+        targetElo: settings.targetElo,
+        threads: settings.threads,
+        hashMb: settings.hashMb,
       });
     } catch (err) {
       console.warn('[EngineClient] Error dispatching analyze message:', err);

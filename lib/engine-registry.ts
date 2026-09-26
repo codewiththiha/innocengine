@@ -13,6 +13,15 @@ export const BUILTIN_STOCKFISH: CustomEngineMeta = {
   isBuiltIn: true,
 };
 
+export const BUILTIN_MAIA3: CustomEngineMeta = {
+  id: 'maia3',
+  name: 'Maia-3 (Human Move Policy)',
+  author: 'CSSLab / University of Toronto',
+  sizeBytes: 26214400,
+  dateAdded: 0,
+  isBuiltIn: true,
+};
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -45,13 +54,13 @@ export class EngineRegistry {
             dateAdded: e.dateAdded,
             isBuiltIn: false,
           }));
-          resolve([BUILTIN_STOCKFISH, ...custom]);
+          resolve([BUILTIN_STOCKFISH, BUILTIN_MAIA3, ...custom]);
         };
 
-        req.onerror = () => resolve([BUILTIN_STOCKFISH]);
+        req.onerror = () => resolve([BUILTIN_STOCKFISH, BUILTIN_MAIA3]);
       });
     } catch (_) {
-      return [BUILTIN_STOCKFISH];
+      return [BUILTIN_STOCKFISH, BUILTIN_MAIA3];
     }
   }
 
@@ -85,7 +94,7 @@ export class EngineRegistry {
   }
 
   public static async getEngineWasmBytes(id: string): Promise<ArrayBuffer | null> {
-    if (id === 'stockfish') return null;
+    if (id === 'stockfish' || id === 'maia3') return null;
 
     try {
       const db = await openDb();
@@ -110,7 +119,7 @@ export class EngineRegistry {
   }
 
   public static async deleteCustomEngine(id: string): Promise<void> {
-    if (id === 'stockfish') return;
+    if (id === 'stockfish' || id === 'maia3') return;
 
     const db = await openDb();
     return new Promise((resolve, reject) => {

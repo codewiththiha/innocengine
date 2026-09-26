@@ -262,7 +262,12 @@ export class SvgOverlay {
 
   public renderCandidates(candidates: EngineCandidate[]) {
     this.activeCandidates = candidates;
-    if (!this.settings.showHighlights || !this.svg) {
+    const hasHighlightsEnabled =
+      (this.settings.highlightPlayerMoves ?? true) ||
+      (this.settings.highlightOpponentMoves ?? true) ||
+      this.settings.showHighlights;
+    if (!hasHighlightsEnabled || !this.svg) {
+      this.clearHighlights();
       return;
     }
 
@@ -283,6 +288,8 @@ export class SvgOverlay {
     hlLayer.innerHTML = '';
     connLayer.innerHTML = '';
     if (contLayer) contLayer.innerHTML = '';
+
+    const showArrows = this.settings.showArrows ?? this.settings.showConnectors ?? true;
 
     candidates.forEach((candidate) => {
       const palette = candidate.isBookMove
@@ -327,8 +334,8 @@ export class SvgOverlay {
         hlLayer.appendChild(bookCircle);
       }
 
-      // Primary connector arrow
-      if (this.settings.showConnectors) {
+      // Move arrow (controlled by single showArrows setting)
+      if (showArrows) {
         this.renderArrowLine(connLayer, fromPos, toPos, palette.arrow, palette.markerId, '0.028');
       }
 
@@ -349,7 +356,7 @@ export class SvgOverlay {
           rectOppTo.setAttribute('stroke-dasharray', '0.08 0.04');
           if (contLayer) contLayer.appendChild(rectOppTo);
 
-          if (this.settings.showConnectors) {
+          if (showArrows) {
             this.renderArrowLine(
               contLayer || connLayer,
               oppFromPos,
@@ -423,13 +430,17 @@ export class SvgOverlay {
     let evalScoreString = '0.0';
     let whiteWinPercent = 50;
 
-    if (evalData.scoreMate !== null) {
-      evalScoreString = `M${evalData.scoreMate > 0 ? '+' : ''}${evalData.scoreMate}`;
-      whiteWinPercent = evalData.scoreMate > 0 ? 100 : 0;
-    } else if (evalData.scoreCp !== null) {
-      const pawns = evalData.scoreCp / 100;
+    const isBlack = evalData.fen.split(' ')[1] === 'b';
+    const whiteCp = evalData.whiteScoreCp ?? (evalData.scoreCp !== null ? (isBlack ? -evalData.scoreCp : evalData.scoreCp) : null);
+    const whiteMate = evalData.whiteScoreMate ?? (evalData.scoreMate !== null ? (isBlack ? -evalData.scoreMate : evalData.scoreMate) : null);
+
+    if (whiteMate !== null) {
+      evalScoreString = `M${whiteMate > 0 ? '+' : ''}${whiteMate}`;
+      whiteWinPercent = whiteMate > 0 ? 100 : 0;
+    } else if (whiteCp !== null) {
+      const pawns = whiteCp / 100;
       evalScoreString = `${pawns > 0 ? '+' : ''}${pawns.toFixed(1)}`;
-      const winP = 1 / (1 + Math.exp(-0.00368208 * evalData.scoreCp));
+      const winP = 1 / (1 + Math.exp(-0.00368208 * whiteCp));
       whiteWinPercent = Math.max(5, Math.min(95, Math.round(winP * 100)));
     }
 
@@ -467,13 +478,17 @@ export class SvgOverlay {
     }
 
     if (evalEl) {
-      if (evalData.scoreMate !== null) {
-        evalEl.innerText = `M${evalData.scoreMate > 0 ? '+' : ''}${evalData.scoreMate}`;
-        evalEl.style.color = '#f43f5e';
-      } else if (evalData.scoreCp !== null) {
-        const p = (evalData.scoreCp / 100).toFixed(2);
-        evalEl.innerText = `${evalData.scoreCp > 0 ? '+' : ''}${p}`;
-        evalEl.style.color = evalData.scoreCp >= 0 ? '#38bdf8' : '#cbd5e1';
+      const isBlack = evalData.fen.split(' ')[1] === 'b';
+      const whiteCp = evalData.whiteScoreCp ?? (evalData.scoreCp !== null ? (isBlack ? -evalData.scoreCp : evalData.scoreCp) : null);
+      const whiteMate = evalData.whiteScoreMate ?? (evalData.scoreMate !== null ? (isBlack ? -evalData.scoreMate : evalData.scoreMate) : null);
+
+      if (whiteMate !== null) {
+        evalEl.innerText = `M${whiteMate > 0 ? '+' : ''}${whiteMate}`;
+        evalEl.style.color = whiteMate > 0 ? '#38bdf8' : '#f43f5e';
+      } else if (whiteCp !== null) {
+        const p = (whiteCp / 100).toFixed(2);
+        evalEl.innerText = `${whiteCp > 0 ? '+' : ''}${p}`;
+        evalEl.style.color = whiteCp >= 0 ? '#38bdf8' : '#f87171';
       }
     }
 

@@ -8,6 +8,7 @@ export default defineConfig({
     description: 'Educational tool for real-time Stockfish analysis and board move square highlights on Chess.com.',
     version: '1.0.0',
     permissions: ['storage', 'activeTab', 'tabs', 'offscreen'],
+    host_permissions: ['*://*.chess.com/*', 'https://huggingface.co/*', 'https://raw.githubusercontent.com/*'],
     action: {
       default_title: 'Chess AI Overlay Settings',
       default_popup: 'popup.html',

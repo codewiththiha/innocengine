@@ -88,6 +88,9 @@ export class UciParser {
 
     const sortedLines = Array.from(this.currentLines.values()).sort((a, b) => a.id - b.id);
     const primaryLine = sortedLines[0] || moveLine;
+    const isBlack = this.currentFen.split(' ')[1] === 'b';
+    const whiteScoreCp = primaryLine.scoreCp !== null ? (isBlack ? -primaryLine.scoreCp : primaryLine.scoreCp) : null;
+    const whiteScoreMate = primaryLine.scoreMate !== null ? (isBlack ? -primaryLine.scoreMate : primaryLine.scoreMate) : null;
 
     const candidates = this.buildCandidates(sortedLines);
 
@@ -98,8 +101,14 @@ export class UciParser {
       depth: this.maxDepthSeen,
       scoreCp: primaryLine.scoreCp,
       scoreMate: primaryLine.scoreMate,
+      whiteScoreCp,
+      whiteScoreMate,
       bestMove: primaryLine.bestMove,
-      multiPvLines: sortedLines,
+      multiPvLines: sortedLines.map((line) => ({
+        ...line,
+        whiteScoreCp: line.scoreCp !== null ? (isBlack ? -line.scoreCp : line.scoreCp) : null,
+        whiteScoreMate: line.scoreMate !== null ? (isBlack ? -line.scoreMate : line.scoreMate) : null,
+      })),
       candidates,
       nodes,
       nps,
@@ -114,6 +123,9 @@ export class UciParser {
     const bestMove = parts.length > 1 && parts[1] ? parts[1] : '';
     const sortedLines = Array.from(this.currentLines.values()).sort((a, b) => a.id - b.id);
     const primaryLine = sortedLines[0];
+    const isBlack = this.currentFen.split(' ')[1] === 'b';
+    const whiteScoreCp = primaryLine && primaryLine.scoreCp !== null ? (isBlack ? -primaryLine.scoreCp : primaryLine.scoreCp) : null;
+    const whiteScoreMate = primaryLine && primaryLine.scoreMate !== null ? (isBlack ? -primaryLine.scoreMate : primaryLine.scoreMate) : null;
 
     const candidates = this.buildCandidates(sortedLines);
 
@@ -124,8 +136,14 @@ export class UciParser {
       depth: this.maxDepthSeen,
       scoreCp: primaryLine ? primaryLine.scoreCp : null,
       scoreMate: primaryLine ? primaryLine.scoreMate : null,
+      whiteScoreCp,
+      whiteScoreMate,
       bestMove: bestMove !== '(none)' ? bestMove : primaryLine ? primaryLine.bestMove : null,
-      multiPvLines: sortedLines,
+      multiPvLines: sortedLines.map((line) => ({
+        ...line,
+        whiteScoreCp: line.scoreCp !== null ? (isBlack ? -line.scoreCp : line.scoreCp) : null,
+        whiteScoreMate: line.scoreMate !== null ? (isBlack ? -line.scoreMate : line.scoreMate) : null,
+      })),
       candidates,
       isCalculating: false,
       timestamp: Date.now(),

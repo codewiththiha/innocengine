@@ -164,11 +164,18 @@ export default function App() {
           </div>
           <div className="eval-body">
             <div className="eval-score">
-              {currentEval.scoreMate !== null
-                ? `M${currentEval.scoreMate > 0 ? '+' : ''}${currentEval.scoreMate}`
-                : currentEval.scoreCp !== null
-                ? `${currentEval.scoreCp > 0 ? '+' : ''}${(currentEval.scoreCp / 100).toFixed(2)}`
-                : '0.00'}
+              {(() => {
+                const isBlack = currentEval.fen?.split(' ')[1] === 'b';
+                const whiteCp = currentEval.whiteScoreCp ?? (currentEval.scoreCp !== null ? (isBlack ? -currentEval.scoreCp : currentEval.scoreCp) : null);
+                const whiteMate = currentEval.whiteScoreMate ?? (currentEval.scoreMate !== null ? (isBlack ? -currentEval.scoreMate : currentEval.scoreMate) : null);
+                if (whiteMate !== null) {
+                  return `M${whiteMate > 0 ? '+' : ''}${whiteMate}`;
+                }
+                if (whiteCp !== null) {
+                  return `${whiteCp > 0 ? '+' : ''}${(whiteCp / 100).toFixed(2)}`;
+                }
+                return '0.00';
+              })()}
             </div>
             <div className="eval-best-move">
               <span className="best-move-label">Best Move:</span>
@@ -177,9 +184,9 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', gap: 10, fontSize: 10, color: '#94a3b8', marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 4 }}>
             <span>Raw PV: {currentEval.multiPvLines?.length || 0}</span>
-            <span>Visible: {Math.min(settings.multiPv, currentEval.candidates?.length || 0)}</span>
-            <span>Opponent: {settings.showOpponentMoves ? 'ON' : 'OFF'}</span>
-            <span>Side: {settings.controlledColor}</span>
+            <span>Player: {settings.highlightPlayerMoves ? 'ON' : 'OFF'}</span>
+            <span>Opponent: {settings.highlightOpponentMoves ? 'ON' : 'OFF'}</span>
+            <span>Arrows: {settings.showArrows ? 'ON' : 'OFF'}</span>
           </div>
         </div>
       )}
@@ -286,6 +293,12 @@ export default function App() {
           <div style={{ fontSize: 11, color: '#64748b', marginTop: 10 }}>
             Supports any UCI-compliant WebAssembly chess binary with standard protocol handshake.
           </div>
+
+          {settings.activeEngineId === 'maia3' && (
+            <div style={{ marginTop: 10, padding: 8, background: 'rgba(56, 189, 248, 0.08)', borderRadius: 6, border: '1px solid rgba(56, 189, 248, 0.2)', fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Maia-3 Human Engine Active:</span> Predicts moves human players make at target Elo rating rather than ruthless engine tactics.
+            </div>
+          )}
         </div>
       )}
 
@@ -297,31 +310,41 @@ export default function App() {
           </div>
           <div className="toggle-list">
             <label className="toggle-row">
-              <span className="toggle-label">Move Candidate Highlights</span>
+              <span className="toggle-label">Highlight Player's Moves</span>
               <input
                 type="checkbox"
-                checked={settings.showHighlights}
-                onChange={(e) => updateSetting('showHighlights', e.target.checked)}
+                checked={settings.highlightPlayerMoves}
+                onChange={(e) => {
+                  updateSetting('highlightPlayerMoves', e.target.checked);
+                  updateSetting('showHighlights', e.target.checked || settings.highlightOpponentMoves);
+                }}
                 className="toggle-switch"
               />
             </label>
 
             <label className="toggle-row">
-              <span className="toggle-label">Show Opponent Response Arrows</span>
+              <span className="toggle-label">Highlight Opponent's Moves</span>
               <input
                 type="checkbox"
-                checked={settings.showOpponentMoves}
-                onChange={(e) => updateSetting('showOpponentMoves', e.target.checked)}
+                checked={settings.highlightOpponentMoves}
+                onChange={(e) => {
+                  updateSetting('highlightOpponentMoves', e.target.checked);
+                  updateSetting('showOpponentMoves', e.target.checked);
+                  updateSetting('showHighlights', e.target.checked || settings.highlightPlayerMoves);
+                }}
                 className="toggle-switch"
               />
             </label>
 
             <label className="toggle-row">
-              <span className="toggle-label">Subtle Move Connectors</span>
+              <span className="toggle-label">Show Move Arrows</span>
               <input
                 type="checkbox"
-                checked={settings.showConnectors}
-                onChange={(e) => updateSetting('showConnectors', e.target.checked)}
+                checked={settings.showArrows}
+                onChange={(e) => {
+                  updateSetting('showArrows', e.target.checked);
+                  updateSetting('showConnectors', e.target.checked);
+                }}
                 className="toggle-switch"
               />
             </label>
@@ -424,48 +447,46 @@ export default function App() {
       {activeTab === 'strength' && (
         <div className="settings-section">
           <div className="section-title">
-            <ShieldAlert size={14} /> Engine Strength & Limit
+            <ShieldAlert size={14} /> Engine Strength & Elo Limiter
           </div>
 
-          {capabilities?.hasLimitStrength || capabilities?.hasElo ? (
-            <>
-              <label className="toggle-row">
-                <span className="toggle-label">Limit Engine Strength</span>
-                <input
-                  type="checkbox"
-                  checked={settings.limitStrength}
-                  onChange={(e) => updateSetting('limitStrength', e.target.checked)}
-                  className="toggle-switch"
-                />
-              </label>
+          <label className="toggle-row">
+            <span className="toggle-label">Limit Engine Strength</span>
+            <input
+              type="checkbox"
+              checked={settings.limitStrength}
+              onChange={(e) => updateSetting('limitStrength', e.target.checked)}
+              className="toggle-switch"
+            />
+          </label>
 
-              <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Target Elo Rating</span>
-                  <span className="setting-value">{settings.targetElo} Elo</span>
-                </div>
-                <input
-                  type="range"
-                  min="1350"
-                  max="2850"
-                  step="25"
-                  disabled={!settings.limitStrength}
-                  value={settings.targetElo}
-                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
-                  className="slider"
-                />
-                <div className="slider-hints">
-                  <span>Club (1400)</span>
-                  <span>Expert (2000)</span>
-                  <span>Master (2600)</span>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div style={{ fontSize: 12, color: '#64748b', padding: '8px 0' }}>
-              Strength limiting options are not advertised by the active engine.
+          <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
+            <div className="setting-label-row">
+              <span className="setting-label">Target Elo Rating</span>
+              <span className="setting-value">{settings.targetElo} Elo</span>
             </div>
-          )}
+            <input
+              type="range"
+              min="1100"
+              max="3190"
+              step="25"
+              disabled={!settings.limitStrength}
+              value={settings.targetElo}
+              onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
+              className="slider"
+            />
+            <div className="slider-hints">
+              <span>Novice (1200)</span>
+              <span>Club (1600)</span>
+              <span>Master (2200)</span>
+              <span>GM (2800+)</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8, lineHeight: 1.4 }}>
+              {settings.activeEngineId === 'maia3'
+                ? 'Calibrates Maia-3 neural move predictor to human games played at this Elo rating.'
+                : 'Configures UCI_Elo, UCI_LimitStrength, and Skill Level in Stockfish WASM to throttle engine strength.'}
+            </div>
+          </div>
         </div>
       )}
 

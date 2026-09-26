@@ -47,8 +47,11 @@ export interface EngineSettings {
   limitStrength: boolean;
   targetElo: number;
   showHighlights: boolean;
-  showOpponentMoves: boolean;
+  highlightPlayerMoves: boolean;
+  highlightOpponentMoves: boolean;
+  showArrows: boolean;
   showConnectors: boolean;
+  showOpponentMoves: boolean;
   showEvalBar: boolean;
   showHud: boolean;
   autoAnalyze: boolean;
@@ -84,6 +87,8 @@ export interface MoveLine {
   depth: number;
   scoreCp: number | null;
   scoreMate: number | null;
+  whiteScoreCp?: number | null;
+  whiteScoreMate?: number | null;
   bestMove: string;
   pv: string[];
   nodes?: number;
@@ -99,6 +104,8 @@ export interface EngineEvaluation {
   depth: number;
   scoreCp: number | null;
   scoreMate: number | null;
+  whiteScoreCp?: number | null;
+  whiteScoreMate?: number | null;
   bestMove: string | null;
   multiPvLines: MoveLine[];
   candidates: EngineCandidate[];

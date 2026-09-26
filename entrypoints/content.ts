@@ -36,6 +36,10 @@ export default defineContentScript({
       subscribeToSettings((newSettings) => {
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
         const depthChanged = newSettings.depth !== currentSettings.depth;
+        const engineChanged = newSettings.activeEngineId !== currentSettings.activeEngineId;
+        const eloChanged =
+          newSettings.limitStrength !== currentSettings.limitStrength ||
+          newSettings.targetElo !== currentSettings.targetElo;
         const openingChanged =
           newSettings.opening.enabled !== currentSettings.opening.enabled ||
           newSettings.opening.repertoireId !== currentSettings.opening.repertoireId ||
@@ -50,7 +54,7 @@ export default defineContentScript({
           highlightController.updateSettings(newSettings);
         }
 
-        if (currentBoard && (multiPvChanged || depthChanged || openingChanged)) {
+        if (currentBoard && (multiPvChanged || depthChanged || engineChanged || eloChanged || openingChanged)) {
           const state = BoardParser.extractBoardState(currentBoard);
           if (state && currentSettings.autoAnalyze) {
             engineClient?.analyze(state.fen, currentSettings);

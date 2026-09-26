@@ -10,8 +10,11 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   limitStrength: false,
   targetElo: 2000,
   showHighlights: true,
-  showOpponentMoves: false,
+  highlightPlayerMoves: true,
+  highlightOpponentMoves: true,
+  showArrows: true,
   showConnectors: true,
+  showOpponentMoves: true,
   showEvalBar: true,
   showHud: true,
   autoAnalyze: true,
@@ -32,7 +35,14 @@ export async function getSettings(): Promise<EngineSettings> {
   if (!result || !result[STORAGE_KEY]) {
     return DEFAULT_SETTINGS;
   }
-  return { ...DEFAULT_SETTINGS, ...result[STORAGE_KEY] };
+  const loaded = (result[STORAGE_KEY] || {}) as Partial<EngineSettings>;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...loaded,
+    highlightPlayerMoves: loaded.highlightPlayerMoves ?? loaded.showHighlights ?? true,
+    highlightOpponentMoves: loaded.highlightOpponentMoves ?? true,
+    showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
+  };
 }
 
 export async function saveSettings(settings: Partial<EngineSettings>): Promise<void> {

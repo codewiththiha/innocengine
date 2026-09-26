@@ -29,6 +29,26 @@ export class HighlightController {
 
   public updateSettings(settings: EngineSettings) {
     this.settings = settings;
+    if (this.currentBoardState && this.settings.opening.enabled && this.isWithinBookDepth(this.currentBoardState.fen)) {
+      const bookEntry = OpeningBook.lookupMove(this.currentBoardState.positionKey, this.settings.opening.repertoireId);
+      if (bookEntry && bookEntry.move && bookEntry.move.length >= 4 && !this.latestEngineSnapshot) {
+        const bookCandidate: EngineCandidate = {
+          pvId: 0,
+          from: bookEntry.move.substring(0, 2),
+          to: bookEntry.move.substring(2, 4),
+          depth: 0,
+          scoreCp: 0,
+          scoreMate: null,
+          pv: [bookEntry.move],
+          isBookMove: true,
+          bookName: bookEntry.name,
+        };
+        this.committedCandidates = this.shouldShowForTurn() ? [bookCandidate] : [];
+        this.broadcastCurrentState();
+        return;
+      }
+    }
+
     if (this.latestEngineSnapshot) {
       this.handleEvaluation(this.latestEngineSnapshot);
     } else {
@@ -42,19 +62,49 @@ export class HighlightController {
       return;
     }
 
-    if (this.activePositionKey !== boardState.positionKey) {
+    const positionChanged = this.activePositionKey !== boardState.positionKey;
+    this.currentBoardState = boardState;
+
+    if (positionChanged) {
       this.activePositionKey = boardState.positionKey;
       this.clearPendingTimer();
       this.latestEngineSnapshot = null;
+      this.pendingCandidateKey = '';
+
+      // Immediately display opening repertoire move if available for the new position
+      if (this.settings.opening.enabled && this.isWithinBookDepth(boardState.fen)) {
+        const bookEntry = OpeningBook.lookupMove(boardState.positionKey, this.settings.opening.repertoireId);
+        if (bookEntry && bookEntry.move && bookEntry.move.length >= 4) {
+          const bookCandidate: EngineCandidate = {
+            pvId: 0,
+            from: bookEntry.move.substring(0, 2),
+            to: bookEntry.move.substring(2, 4),
+            depth: 0,
+            scoreCp: 0,
+            scoreMate: null,
+            pv: [bookEntry.move],
+            isBookMove: true,
+            bookName: bookEntry.name,
+          };
+          this.committedCandidates = this.shouldShowForTurn() ? [bookCandidate] : [];
+          this.broadcastCurrentState();
+          return;
+        }
+      }
+
       this.committedCandidates = [];
       this.broadcastCurrentState();
     }
-
-    this.currentBoardState = boardState;
   }
 
   public handleEvaluation(evaluation: EngineEvaluation) {
-    if (!this.settings.showHighlights) return;
+    if (!this.shouldShowForTurn()) {
+      this.clearPendingTimer();
+      this.committedCandidates = [];
+      this.broadcastCurrentState();
+      return;
+    }
+
     if (evaluation.positionKey !== this.activePositionKey) return;
 
     this.latestEngineSnapshot = evaluation;
@@ -109,35 +159,51 @@ export class HighlightController {
     }
   }
 
-  private validateCandidates(candidates: EngineCandidate[]): EngineCandidate[] {
-    if (!this.currentBoardState) return [];
-
+  private shouldShowForTurn(): boolean {
+    if (!this.currentBoardState) return true;
     const turn = this.currentBoardState.turn;
-    const pieceMap = this.currentBoardState.pieceMap;
+    const isFlipped = this.currentBoardState.isFlipped;
+    const playerColor = this.settings.controlledColor === 'auto'
+      ? (isFlipped ? 'b' : 'w')
+      : this.settings.controlledColor;
+    const isPlayerTurn = turn === playerColor;
 
-    return candidates
-      .filter((candidate) => {
-        const piece = pieceMap.get(candidate.from);
-        if (!piece) return true;
+    if (isPlayerTurn) {
+      return this.settings.highlightPlayerMoves ?? this.settings.showHighlights ?? true;
+    } else {
+      return this.settings.highlightOpponentMoves ?? true;
+    }
+  }
 
-        const isWhitePiece = piece === piece.toUpperCase();
-        const pieceTurn = isWhitePiece ? 'w' : 'b';
+  private isWithinBookDepth(fen: string): boolean {
+    try {
+      const tokens = fen.trim().split(/\s+/);
+      const fullmove = parseInt(tokens[5] || '1', 10);
+      const isBlack = tokens[1] === 'b';
+      const plies = (fullmove - 1) * 2 + (isBlack ? 1 : 0);
+      const maxPlies = this.settings.opening.maxPlies || 12;
+      return plies <= maxPlies;
+    } catch (_) {
+      return true;
+    }
+  }
 
-        // Root candidate must match side to move
-        if (pieceTurn !== turn) {
-          return false;
-        }
-
-        return true;
-      })
-      .map((cand) => ({
-        ...cand,
-        continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
-      }));
+  private validateCandidates(candidates: EngineCandidate[]): EngineCandidate[] {
+    // Root candidates produced by the chess engine are inherently valid moves for the position.
+    // Opponent continuation display is controlled by showOpponentMoves.
+    return candidates.map((cand) => ({
+      ...cand,
+      continuation: this.settings.showOpponentMoves ? cand.continuation : undefined,
+    }));
   }
 
   private applyOpeningBook(engineCandidates: EngineCandidate[]): EngineCandidate[] {
-    if (!this.settings.opening.enabled || !this.activePositionKey) {
+    if (
+      !this.settings.opening.enabled ||
+      !this.activePositionKey ||
+      !this.currentBoardState ||
+      !this.isWithinBookDepth(this.currentBoardState.fen)
+    ) {
       return engineCandidates.slice(0, Math.max(1, this.settings.multiPv));
     }
 
