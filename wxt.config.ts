@@ -5,9 +5,9 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'Chess Engine AI Overlay',
-    description: 'Educational tool for real-time Stockfish WASM analysis, SVG arrows, and board overlays on Chess.com.',
+    description: 'Educational tool for real-time Stockfish analysis and board move square highlights on Chess.com.',
     version: '1.0.0',
-    permissions: ['storage', 'activeTab', 'offscreen'],
+    permissions: ['storage', 'activeTab', 'tabs', 'offscreen'],
     action: {
       default_title: 'Chess AI Overlay Settings',
       default_popup: 'popup.html',
@@ -15,6 +15,9 @@ export default defineConfig({
     web_accessible_resources: [
       {
         resources: [
+          'stockfish.js',
+          'stockfish.wasm',
+          'stockfish.wasm.js',
           'engine/stockfish.js',
           'engine/stockfish.wasm',
           'engine/stockfish.wasm.js',

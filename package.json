@@ -1,6 +1,6 @@
 {
   "name": "chess-ai-overlay",
-  "description": "Educational tool for real-time Stockfish WASM analysis, SVG arrows, and board overlays on Chess.com.",
+  "description": "Educational tool for real-time Stockfish engine analysis and move square highlights on Chess.com.",
   "private": true,
   "version": "1.0.0",
   "type": "module",

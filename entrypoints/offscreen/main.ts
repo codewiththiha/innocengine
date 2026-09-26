@@ -8,76 +8,41 @@ class StockfishEngineHost {
   private currentSenderTabId: number | undefined;
   private currentFen: string = '';
   private currentEvaluation: EngineEvaluation | null = null;
-  private statusElement: HTMLElement | null = null;
 
   constructor() {
     this.parser = new UciParser();
-    this.statusElement = document.getElementById('status');
     this.initEngine();
     this.setupRuntimeListener();
   }
 
-  private updateStatus(text: string) {
-    if (this.statusElement) {
-      this.statusElement.innerText = text;
-    }
-    console.log(`[EngineHost] ${text}`);
-  }
-
   private initEngine() {
-    this.updateStatus('Initializing Stockfish WASM...');
     try {
-      const workerUrl = chrome.runtime.getURL('engine/stockfish.wasm.js');
+      // Use self-contained single-threaded Stockfish engine for cross-environment reliability
+      const workerUrl = chrome.runtime.getURL('engine/stockfish.js');
       this.worker = new Worker(workerUrl);
 
-      this.worker.onmessage = (event) => {
+      this.worker.onmessage = (event: MessageEvent) => {
         const line = typeof event.data === 'string' ? event.data : '';
         this.handleEngineOutput(line);
       };
 
       this.worker.onerror = (err) => {
-        console.warn('[EngineHost] WASM worker failed, falling back to JS worker...', err);
-        this.fallbackToJs();
+        console.error('[EngineHost] Stockfish worker failed:', err);
       };
 
-      // Send initial UCI handshake
+      // Initialize UCI session
       this.worker.postMessage('uci');
       this.worker.postMessage('isready');
       this.worker.postMessage('setoption name Hash value 32');
-      this.worker.postMessage('setoption name MultiPV value 2');
     } catch (err) {
-      console.error('[EngineHost] Failed to initialize worker:', err);
-      this.fallbackToJs();
-    }
-  }
-
-  private fallbackToJs() {
-    try {
-      const fallbackUrl = chrome.runtime.getURL('engine/stockfish.js');
-      this.worker = new Worker(fallbackUrl);
-      this.worker.onmessage = (event) => {
-        const line = typeof event.data === 'string' ? event.data : '';
-        this.handleEngineOutput(line);
-      };
-      this.worker.postMessage('uci');
-      this.worker.postMessage('isready');
-      this.updateStatus('Fallback Stockfish JS worker running.');
-    } catch (fallbackErr) {
-      this.updateStatus('Error: Failed to load Stockfish engine.');
-      console.error('[EngineHost] JS Fallback also failed:', fallbackErr);
+      console.error('[EngineHost] Error instantiating Stockfish worker:', err);
     }
   }
 
   private handleEngineOutput(line: string) {
-    if (line === 'uciok') {
+    if (line === 'uciok' || line === 'readyok') {
       this.isReady = true;
-      this.updateStatus('Stockfish UCI Ready');
       this.broadcastStatus('ready');
-      return;
-    }
-
-    if (line === 'readyok') {
-      this.isReady = true;
       return;
     }
 
@@ -96,7 +61,6 @@ class StockfishEngineHost {
         timestamp: Date.now(),
       };
 
-      // Broadcast update to content script and popup
       this.broadcastEvaluation(this.currentEvaluation);
     }
   }
@@ -131,7 +95,7 @@ class StockfishEngineHost {
           this.analyzePosition(
             message.fen,
             message.depth || 16,
-            message.multiPv || 2,
+            message.multiPv || 1,
             message.senderTabId
           );
         } else if (message.type === 'STOP') {
@@ -150,9 +114,7 @@ class StockfishEngineHost {
     this.currentFen = fen;
     this.parser.reset(fen);
 
-    this.updateStatus(`Analyzing FEN: ${fen.substring(0, 30)}... depth=${depth}`);
-
-    // Halt any previous calculation
+    // Stop active search before setting next position
     this.worker.postMessage('stop');
     this.worker.postMessage(`setoption name MultiPV value ${multiPv}`);
     this.worker.postMessage(`position fen ${fen}`);
@@ -162,10 +124,8 @@ class StockfishEngineHost {
   public stopAnalysis() {
     if (this.worker) {
       this.worker.postMessage('stop');
-      this.updateStatus('Engine stopped.');
     }
   }
 }
 
-// Start host
 new StockfishEngineHost();

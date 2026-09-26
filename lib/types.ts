@@ -5,14 +5,12 @@ export interface EngineSettings {
   depth: number;
   multiPv: number;
   threads: number;
-  showArrows: boolean;
-  showMultiPv: boolean;
   showHighlights: boolean;
   showEvalBar: boolean;
   showHud: boolean;
   autoAnalyze: boolean;
-  arrowColor: string;
-  engineVariant: 'wasm' | 'asmjs';
+  fromColor: string;
+  toColor: string;
 }
 
 export interface MoveLine {

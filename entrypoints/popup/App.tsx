@@ -4,9 +4,6 @@ import type { EngineSettings, EngineEvaluation } from '../../lib/types';
 import {
   Sliders,
   Eye,
-  Cpu,
-  Layers,
-  Palette,
   ExternalLink,
   RotateCcw,
   Sparkles,
@@ -22,10 +19,8 @@ export default function App() {
   const [savedBadge, setSavedBadge] = useState<boolean>(false);
 
   useEffect(() => {
-    // Load initial settings
     getSettings().then((s) => setSettings(s));
 
-    // Request active evaluation from background
     chrome.runtime.sendMessage({ target: 'popup', type: 'GET_CURRENT_EVAL' }, (res: any) => {
       if (res && res.evaluation) {
         setCurrentEval(res.evaluation);
@@ -33,7 +28,6 @@ export default function App() {
       }
     });
 
-    // Listen for live updates while popup is open
     const listener = (msg: any) => {
       if (msg.target === 'content' && msg.type === 'EVAL_UPDATE') {
         setCurrentEval(msg.evaluation);
@@ -66,17 +60,8 @@ export default function App() {
     chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
   };
 
-  const colorPresets = [
-    { label: 'Emerald', value: '#10b981' },
-    { label: 'Cyan', value: '#06b6d4' },
-    { label: 'Amber', value: '#f59e0b' },
-    { label: 'Purple', value: '#a855f7' },
-    { label: 'Rose', value: '#f43f5e' },
-  ];
-
   return (
     <div className="popup-container">
-      {/* Header */}
       <header className="popup-header">
         <div className="popup-title-group">
           <div className="logo-icon">
@@ -84,7 +69,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="popup-title">Chess AI Overlay</h1>
-            <p className="popup-subtitle">WASM Stockfish & SVG HUD</p>
+            <p className="popup-subtitle">Square Highlighter & Stockfish</p>
           </div>
         </div>
         <div className={`status-badge status-${engineStatus}`}>
@@ -95,12 +80,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Live Eval Preview Card */}
       {currentEval && (
         <div className="eval-card">
           <div className="eval-header">
             <span className="eval-tag">
-              <Activity size={12} style={{ marginRight: 4 }} /> Live Game
+              <Activity size={12} style={{ marginRight: 4 }} /> Live Position
             </span>
             <span className="eval-depth">Depth {currentEval.depth}</span>
           </div>
@@ -120,13 +104,11 @@ export default function App() {
         </div>
       )}
 
-      {/* Settings List */}
       <div className="settings-section">
         <div className="section-title">
           <Sliders size={14} /> Engine Parameters
         </div>
 
-        {/* Depth Slider */}
         <div className="setting-item">
           <div className="setting-label-row">
             <span className="setting-label">Calculation Depth</span>
@@ -135,7 +117,7 @@ export default function App() {
           <input
             type="range"
             min="8"
-            max="25"
+            max="22"
             step="1"
             value={settings.depth}
             onChange={(e) => updateSetting('depth', parseInt(e.target.value, 10))}
@@ -144,75 +126,19 @@ export default function App() {
           <div className="slider-hints">
             <span>Fast (8)</span>
             <span>Balanced (16)</span>
-            <span>Deep (25)</span>
+            <span>Deep (22)</span>
           </div>
-        </div>
-
-        {/* MultiPV Slider */}
-        <div className="setting-item">
-          <div className="setting-label-row">
-            <span className="setting-label">MultiPV (Alternative Lines)</span>
-            <span className="setting-value">{settings.multiPv} lines</span>
-          </div>
-          <input
-            type="range"
-            min="1"
-            max="4"
-            step="1"
-            value={settings.multiPv}
-            onChange={(e) => updateSetting('multiPv', parseInt(e.target.value, 10))}
-            className="slider"
-          />
         </div>
       </div>
 
-      {/* Visual Options */}
       <div className="settings-section">
         <div className="section-title">
-          <Eye size={14} /> Visual Overlay
+          <Eye size={14} /> Square Highlights & Visuals
         </div>
 
-        {/* Arrow Color Picker */}
-        <div className="color-picker-row">
-          <span className="setting-label">Primary Arrow Color</span>
-          <div className="color-swatches">
-            {colorPresets.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                className={`color-swatch ${settings.arrowColor === c.value ? 'selected' : ''}`}
-                style={{ backgroundColor: c.value }}
-                title={c.label}
-                onClick={() => updateSetting('arrowColor', c.value)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Toggle Grid */}
         <div className="toggle-list">
           <label className="toggle-row">
-            <span className="toggle-label">Best Move Arrow</span>
-            <input
-              type="checkbox"
-              checked={settings.showArrows}
-              onChange={(e) => updateSetting('showArrows', e.target.checked)}
-              className="toggle-switch"
-            />
-          </label>
-
-          <label className="toggle-row">
-            <span className="toggle-label">MultiPV Alternative Arrows</span>
-            <input
-              type="checkbox"
-              checked={settings.showMultiPv}
-              onChange={(e) => updateSetting('showMultiPv', e.target.checked)}
-              className="toggle-switch"
-            />
-          </label>
-
-          <label className="toggle-row">
-            <span className="toggle-label">Square Highlights</span>
+            <span className="toggle-label">Piece Move Square Highlights</span>
             <input
               type="checkbox"
               checked={settings.showHighlights}
@@ -222,7 +148,7 @@ export default function App() {
           </label>
 
           <label className="toggle-row">
-            <span className="toggle-label">Live Evaluation Bar</span>
+            <span className="toggle-label">Evaluation Bar</span>
             <input
               type="checkbox"
               checked={settings.showEvalBar}
@@ -232,7 +158,7 @@ export default function App() {
           </label>
 
           <label className="toggle-row">
-            <span className="toggle-label">On-Board Analysis HUD</span>
+            <span className="toggle-label">Top Analysis HUD</span>
             <input
               type="checkbox"
               checked={settings.showHud}
@@ -242,7 +168,7 @@ export default function App() {
           </label>
 
           <label className="toggle-row">
-            <span className="toggle-label">Auto-Analyze Every Move</span>
+            <span className="toggle-label">Auto-Analyze Moves</span>
             <input
               type="checkbox"
               checked={settings.autoAnalyze}
@@ -253,12 +179,16 @@ export default function App() {
         </div>
       </div>
 
-      {/* Footer Actions */}
       <footer className="popup-footer">
         <button type="button" className="action-button primary-btn" onClick={openPlayground}>
           <ExternalLink size={14} style={{ marginRight: 6 }} /> Open Test Playground
         </button>
-        <button type="button" className="action-button secondary-btn" onClick={handleResetDefaults} title="Reset to Defaults">
+        <button
+          type="button"
+          className="action-button secondary-btn"
+          onClick={handleResetDefaults}
+          title="Reset to Defaults"
+        >
           <RotateCcw size={14} />
         </button>
       </footer>
