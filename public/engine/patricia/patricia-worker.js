@@ -324,11 +324,10 @@ function handleCommand(rawCmd) {
     const userDepth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
     const effectiveDepth = isFull ? (userDepth > 0 ? userDepth : 16) : Math.min(bounds.depth, userDepth > 0 ? userDepth : bounds.depth);
 
-    let effectiveCmd = `go depth ${effectiveDepth}`;
-    if (!isFull && bounds.maxNodes > 0) {
-      effectiveCmd += ` nodes ${bounds.maxNodes}`;
-    }
-    effectiveCmd += ` movetime ${bounds.movetime}`;
+    // In single-threaded Patricia WASM, sending "nodes" together with "movetime" causes
+    // search.h line 54 to invoke std::this_thread::sleep_for(INT32_MAX / 2) (12 days freeze).
+    // Restricting via depth + movetime throttles calculation smoothly in sub-50ms without deadlocking.
+    const effectiveCmd = `go depth ${effectiveDepth} movetime ${bounds.movetime}`;
 
     engineInstance.postMessage(effectiveCmd);
     return;
