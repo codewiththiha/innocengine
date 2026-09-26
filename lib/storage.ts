@@ -32,28 +32,43 @@ export const DEFAULT_SETTINGS: EngineSettings = {
 };
 
 export async function getSettings(): Promise<EngineSettings> {
-  const result = await chrome.storage.local.get(STORAGE_KEY);
-  if (!result || !result[STORAGE_KEY]) {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) {
     return DEFAULT_SETTINGS;
   }
-  const loaded = (result[STORAGE_KEY] || {}) as Partial<EngineSettings>;
-  return {
-    ...DEFAULT_SETTINGS,
-    ...loaded,
-    highlightPlayerMoves: loaded.highlightPlayerMoves ?? loaded.showHighlights ?? true,
-    highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
-    highlighterOpacity: loaded.highlighterOpacity ?? 0.35,
-    showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
-  };
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    if (!result || !result[STORAGE_KEY]) {
+      return DEFAULT_SETTINGS;
+    }
+    const loaded = (result[STORAGE_KEY] || {}) as Partial<EngineSettings>;
+    return {
+      ...DEFAULT_SETTINGS,
+      ...loaded,
+      highlightPlayerMoves: loaded.highlightPlayerMoves ?? loaded.showHighlights ?? true,
+      highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
+      highlighterOpacity: loaded.highlighterOpacity ?? 0.35,
+      showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
+    };
+  } catch (_) {
+    return DEFAULT_SETTINGS;
+  }
 }
 
 export async function saveSettings(settings: Partial<EngineSettings>): Promise<void> {
-  const current = await getSettings();
-  const updated = { ...current, ...settings };
-  await chrome.storage.local.set({ [STORAGE_KEY]: updated });
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) {
+    return;
+  }
+  try {
+    const current = await getSettings();
+    const updated = { ...current, ...settings };
+    await chrome.storage.local.set({ [STORAGE_KEY]: updated });
+  } catch (_) {}
 }
 
 export function subscribeToSettings(callback: (settings: EngineSettings) => void): () => void {
+  if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) {
+    return () => {};
+  }
   const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
     if (changes[STORAGE_KEY] && changes[STORAGE_KEY].newValue) {
       callback({ ...DEFAULT_SETTINGS, ...changes[STORAGE_KEY].newValue });
@@ -61,6 +76,8 @@ export function subscribeToSettings(callback: (settings: EngineSettings) => void
   };
   chrome.storage.onChanged.addListener(listener);
   return () => {
-    chrome.storage.onChanged.removeListener(listener);
+    try {
+      chrome.storage.onChanged.removeListener(listener);
+    } catch (_) {}
   };
 }

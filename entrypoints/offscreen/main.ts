@@ -1,6 +1,5 @@
 import { UciParser } from '../../lib/uci-parser';
 import { EngineRegistry } from '../../lib/engine-registry';
-import { getSettings } from '../../lib/storage';
 import { mapEloToStockfishParams, getMaiaTuning } from '../../lib/engine-tuning';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from '../../lib/types';
@@ -347,6 +346,7 @@ class Maia3Runner implements IEngineRunner {
   }
 
   // Deterministic human move-probability policy conditioned on Maia discrete Elo checkpoints (600 - 2600)
+  // Evaluates static exchange defense, sound development, castling, and tactical awareness
   private evaluateHumanPolicy(
     fen: string,
     targetElo: number,
@@ -360,11 +360,11 @@ class Maia3Runner implements IEngineRunner {
 
       const pieceValues: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
       const centerSquares = new Set(['d4', 'e4', 'd5', 'e5', 'c4', 'f4', 'c5', 'f5']);
-      const rimSquares = new Set(['a3', 'h3', 'a6', 'h6']);
+      const extendedCenter = new Set(['c3', 'd3', 'e3', 'f3', 'c6', 'd6', 'e6', 'f6']);
+      const rimSquares = new Set(['a3', 'h3', 'a6', 'h6', 'a4', 'h4', 'a5', 'h5']);
 
       const elo = Math.max(600, Math.min(2600, targetElo));
-      const eloRatio = (elo - 600) / (2600 - 600); // 0.0 at 600 Elo to 1.0 at 2600 Elo
-      const temperature = 1.80 - eloRatio * 1.50; // 1.80 at 600 Elo down to 0.30 at 2600 Elo
+      const eloRatio = (elo - 600) / 2000; // 0.0 at 600 Elo to 1.0 at 2600 Elo
 
       const tokens = fen.trim().split(/\s+/);
       const fullmove = parseInt(tokens[5] || '1', 10);
@@ -373,75 +373,107 @@ class Maia3Runner implements IEngineRunner {
       const scoredMoves = legalMoves.map((m) => {
         let score = 0;
 
-        // 1. Material capture (MVV-LVA)
-        if (m.captured) {
-          const victimVal = pieceValues[m.captured] || 100;
-          const attackerVal = pieceValues[m.piece] || 100;
-          score += victimVal * 1.6 - attackerVal * 0.2;
+        // 1. Static Exchange Evaluation (Exchange defense & hanging piece detection)
+        const capturedVal = m.captured ? (pieceValues[m.captured] || 100) : 0;
+        const myPieceVal = pieceValues[m.piece] || 100;
+
+        chess.move(m);
+        const oppReplies = chess.moves({ verbose: true });
+        const directCaptures = oppReplies.filter((r) => r.to === m.to);
+
+        let netExchange = capturedVal;
+        let isHanging = false;
+
+        if (directCaptures.length > 0) {
+          directCaptures.sort((a, b) => (pieceValues[a.piece] || 100) - (pieceValues[b.piece] || 100));
+          const lowestAttacker = directCaptures[0];
+          const oppAttackerVal = pieceValues[lowestAttacker?.piece || 'p'] || 100;
+
+          if (lowestAttacker) {
+            chess.move(lowestAttacker);
+            const ourRecaptures = chess.moves({ verbose: true }).filter((r) => r.to === m.to);
+            chess.undo();
+
+            if (ourRecaptures.length > 0) {
+              if (myPieceVal > oppAttackerVal) {
+                netExchange = capturedVal - (myPieceVal - oppAttackerVal);
+              }
+            } else {
+              netExchange = capturedVal - myPieceVal;
+              isHanging = true;
+            }
+          }
         }
 
-        // 2. Center control and occupation
-        if (centerSquares.has(m.to)) {
-          score += 24 + eloRatio * 20;
+        chess.undo();
+
+        if (netExchange > 0) {
+          score += netExchange * 2.2; // Winning free material
+        } else if (netExchange < 0) {
+          if (netExchange <= -400) {
+            score += netExchange * (3.0 + eloRatio * 2.0); // Severe penalty for hanging major pieces
+          } else {
+            score += netExchange * (1.8 + eloRatio * 1.5);
+          }
         }
 
-        // 3. Promotion & Checkmate
-        if (m.promotion) score += 900;
-        if (m.san.includes('#')) score += 10000;
+        // 2. Checkmate in 1
+        if (m.san.includes('#')) {
+          return { uci: `${m.from}${m.to}${m.promotion || ''}`, score: 50000 };
+        }
 
-        // 4. Checks: lower Elo over-values checks; higher Elo values them moderately
+        // 3. Checks (rewarded only if safe)
         if (m.san.includes('+')) {
-          score += 70 - eloRatio * 45; // 70 at 600 Elo, 25 at 2600 Elo
+          if (netExchange >= 0 && !isHanging) {
+            score += 35 + (1 - eloRatio) * 20;
+          } else {
+            score -= 150;
+          }
         }
 
-        // 5. Castling: higher Elo values king safety more
+        // 4. Castling (King Safety)
         if (m.flags.includes('k') || m.flags.includes('q')) {
-          score += 20 + eloRatio * 60; // 20 at 600 Elo, 80 at 2600 Elo
+          score += 60 + eloRatio * 40;
         }
 
-        // 6. Opening Development
+        // 5. King losing castling rights prematurely
+        if (isOpening && m.piece === 'k' && !m.flags.includes('k') && !m.flags.includes('q')) {
+          score -= 60;
+        }
+
+        // 6. Center Control & Occupation
+        if (centerSquares.has(m.to)) {
+          score += 30 + eloRatio * 20;
+        } else if (extendedCenter.has(m.to)) {
+          score += 15 + eloRatio * 10;
+        }
+
+        // 7. Opening Principles
         if (isOpening) {
-          // Central pawn pushes e4/d4/c4 or e5/d5/c5
-          if (m.piece === 'p' && (m.to === 'e4' || m.to === 'd4' || m.to === 'e5' || m.to === 'd5')) {
-            score += 35 + eloRatio * 25;
+          if (m.piece === 'p' && (m.to === 'e4' || m.to === 'd4' || m.to === 'c4' || m.to === 'e5' || m.to === 'd5' || m.to === 'c5')) {
+            score += 45 + eloRatio * 25;
           }
 
-          // Minor piece development off back rank
           if (m.piece === 'n' || m.piece === 'b') {
             const backRank = m.color === 'w' ? '1' : '8';
             if (m.from[1] === backRank && m.to[1] !== backRank) {
-              score += 25 + eloRatio * 25;
+              score += 40 + eloRatio * 30;
             }
           }
 
-          // Knight on the rim penalty
           if (m.piece === 'n' && rimSquares.has(m.to)) {
-            score -= 10 + eloRatio * 40;
+            score -= 25 + eloRatio * 35;
           }
 
-          // Early Queen aggression: lower Elo loves Queen out early; higher Elo avoids it
-          if (m.piece === 'q' && !m.captured) {
-            score += (1 - eloRatio) * 45 - eloRatio * 60;
-          }
-        }
-
-        // 7. Tactical safety check (1-ply lookahead)
-        chess.move(m);
-        const replies = chess.moves({ verbose: true });
-        let maxDeficit = 0;
-        for (const reply of replies) {
-          if (reply.to === m.to) {
-            const movingPieceVal = pieceValues[m.piece] || 100;
-            const oppAttackerVal = pieceValues[reply.piece] || 100;
-            const loss = movingPieceVal - (oppAttackerVal < movingPieceVal ? oppAttackerVal * 0.2 : 0);
-            if (loss > maxDeficit) maxDeficit = loss;
+          if (m.piece === 'q' && !m.captured && fullmove <= 6) {
+            score -= eloRatio * 60;
           }
         }
-        chess.undo();
 
-        // Elo blunder conditioning: 2600 Elo heavily avoids hanging pieces; 600-1100 Elo frequently misses them
-        const blunderSensitivity = 0.05 + eloRatio * 1.20; // 0.05 at 600 Elo, 1.25 at 2600 Elo
-        score -= maxDeficit * blunderSensitivity;
+        // 8. Promotion
+        if (m.promotion) {
+          score += 900;
+        }
 
         const uci = `${m.from}${m.to}${m.promotion || ''}`;
         return { uci, score };
@@ -449,8 +481,9 @@ class Maia3Runner implements IEngineRunner {
 
       // Softmax probabilities
       const maxScore = Math.max(...scoredMoves.map((m) => m.score));
+      const temperature = 0.85 - eloRatio * 0.60;
       const expScores = scoredMoves.map((m) => {
-        const z = (m.score - maxScore) / (temperature * 60);
+        const z = (m.score - maxScore) / (temperature * 50);
         return Math.exp(Math.max(-25, Math.min(25, z)));
       });
       const sumExp = expScores.reduce((acc, v) => acc + v, 0);
@@ -458,7 +491,7 @@ class Maia3Runner implements IEngineRunner {
       const movesWithProb = scoredMoves.map((m, i) => {
         const expVal = expScores[i] ?? 0;
         const prob = sumExp > 0 ? expVal / sumExp : 1 / scoredMoves.length;
-        const winP = 1 / (1 + Math.exp(-m.score / 200));
+        const winP = 1 / (1 + Math.exp(-m.score / 250));
         return {
           uci: m.uci,
           score: m.score,
@@ -629,15 +662,14 @@ class UnifiedEngineHost {
   }
 
   private async init() {
-    const settings = await getSettings();
-    this.currentEngineId = settings.activeEngineId || 'stockfish';
+    this.currentEngineId = 'stockfish';
     this.lastOptions = {
-      depth: settings.depth,
-      multiPv: settings.multiPv,
-      limitStrength: settings.limitStrength,
-      targetElo: settings.targetElo,
-      threads: settings.threads,
-      hashMb: settings.hashMb,
+      depth: 16,
+      multiPv: 1,
+      limitStrength: false,
+      targetElo: 1500,
+      threads: 1,
+      hashMb: 16,
     };
     await this.switchEngine(this.currentEngineId);
   }
@@ -726,28 +758,21 @@ class UnifiedEngineHost {
           this.activeRunner?.stop();
         } else if (message.type === 'SWITCH_ENGINE' && message.engineId) {
           this.switchEngine(message.engineId);
+        } else if (message.type === 'SETTINGS_UPDATE' && message.settings) {
+          const s = message.settings;
+          this.lastOptions = {
+            depth: s.depth ?? this.lastOptions.depth,
+            multiPv: s.multiPv ?? this.lastOptions.multiPv,
+            limitStrength: s.limitStrength ?? this.lastOptions.limitStrength,
+            targetElo: s.targetElo ?? this.lastOptions.targetElo,
+            threads: s.threads ?? this.lastOptions.threads,
+            hashMb: s.hashMb ?? this.lastOptions.hashMb,
+          };
+          if (s.activeEngineId && s.activeEngineId !== this.currentEngineId) {
+            this.switchEngine(s.activeEngineId);
+          }
         } else if (message.type === 'PING') {
           this.broadcastStatus('ready');
-        }
-      }
-    });
-
-    // Listen to storage changes to switch engine or update settings dynamically
-    chrome.storage.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
-      if (areaName === 'local' && changes['chess_overlay_settings']) {
-        const newSettings = changes['chess_overlay_settings'].newValue as any;
-        if (newSettings) {
-          this.lastOptions = {
-            depth: newSettings.depth ?? this.lastOptions.depth,
-            multiPv: newSettings.multiPv ?? this.lastOptions.multiPv,
-            limitStrength: newSettings.limitStrength ?? this.lastOptions.limitStrength,
-            targetElo: newSettings.targetElo ?? this.lastOptions.targetElo,
-            threads: newSettings.threads ?? this.lastOptions.threads,
-            hashMb: newSettings.hashMb ?? this.lastOptions.hashMb,
-          };
-          if (newSettings.activeEngineId && newSettings.activeEngineId !== this.currentEngineId) {
-            this.switchEngine(newSettings.activeEngineId);
-          }
         }
       }
     });

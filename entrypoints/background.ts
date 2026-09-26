@@ -46,6 +46,20 @@ export default defineBackground(() => {
     await ensureOffscreenDocument();
   });
 
+  // Forward settings updates from background service worker to offscreen document
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes['chess_overlay_settings']) {
+      const newSettings = changes['chess_overlay_settings'].newValue;
+      if (newSettings) {
+        chrome.runtime.sendMessage({
+          target: 'engine',
+          type: 'SETTINGS_UPDATE',
+          settings: newSettings,
+        }).catch(() => {});
+      }
+    }
+  });
+
   chrome.runtime.onMessage.addListener(
     (message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
       // 1. Target: Engine (request from Content Script or Popup)
