@@ -123,6 +123,7 @@ export class BoardParser {
 
     const isInitialPosition = this.checkInitialPosition(grid);
     const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board, grid);
+    const controlledColor: 'w' | 'b' = isFlipped ? 'b' : 'w';
     const castling = this.computeCastlingRights(grid);
     const placement = this.gridToPlacement(grid);
     const positionKey = `${placement} ${turn} ${castling} -`;
@@ -133,6 +134,7 @@ export class BoardParser {
       positionKey,
       isFlipped,
       turn,
+      controlledColor,
       pieceMap,
       boardElement: board,
     };
@@ -205,6 +207,7 @@ export class BoardParser {
   }
 
   private static detectSideToMove(board: HTMLElement, grid: string[][]): 'w' | 'b' {
+    // 1. Authoritative active clock turn
     const whiteClock = document.querySelector(
       '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
     );
@@ -214,39 +217,34 @@ export class BoardParser {
     if (whiteClock && !blackClock) return 'w';
     if (blackClock && !whiteClock) return 'b';
 
-    // Strictly exclude any overlay or AI highlights to prevent turn-oscillation feedback
-    const nativeHighlights = board.querySelectorAll(
-      '.highlight:not([class*="ai-"]):not([id*="ai-"])'
-    );
-    if (nativeHighlights.length >= 2) {
-      for (const hl of Array.from(nativeHighlights)) {
-        for (const cls of Array.from(hl.classList)) {
-          const match = cls.match(/^square-(\d)(\d)$/);
-          if (match && match[1] && match[2]) {
-            const file = parseInt(match[1], 10) - 1;
-            const rank = parseInt(match[2], 10) - 1;
-            const piece = grid[rank]?.[file];
-            if (piece) {
-              return piece === piece.toUpperCase() ? 'b' : 'w';
-            }
-          }
-        }
-      }
-    }
-
+    // 2. Authoritative move list history in sidebar
     const moveNodes = document.querySelectorAll(
-      '.move-list-row .node, vertical-move-list .node'
+      '.move-list-row .node, vertical-move-list .node, .game-history .node'
     );
     if (moveNodes.length > 0) {
       const lastNode = moveNodes[moveNodes.length - 1];
-      if (
-        lastNode &&
-        (lastNode.classList.contains('white-node') || lastNode.getAttribute('data-whole-move-number'))
-      ) {
-        const isWhite = lastNode.classList.contains('white-node') || !lastNode.previousElementSibling;
+      if (lastNode) {
+        const isWhite = lastNode.classList.contains('white-node') ||
+          lastNode.getAttribute('data-player') === 'white' ||
+          !lastNode.previousElementSibling;
         return isWhite ? 'b' : 'w';
       }
     }
+
+    // 3. Fallback: piece count parities
+    let whitePieces = 0;
+    let blackPieces = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        const p = grid[r]?.[f];
+        if (p) {
+          if (p === p.toUpperCase()) whitePieces++;
+          else blackPieces++;
+        }
+      }
+    }
+    if (whitePieces < blackPieces) return 'w';
+    if (blackPieces < whitePieces) return 'b';
 
     return 'w';
   }

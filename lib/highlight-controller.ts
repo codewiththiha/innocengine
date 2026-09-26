@@ -1,4 +1,5 @@
 import type { EngineCandidate, EngineEvaluation, EngineSettings, BoardState } from './types';
+import { OpeningBook } from './opening-book';
 
 export interface RenderSnapshot {
   candidates: EngineCandidate[];
@@ -11,7 +12,8 @@ export type HighlightRenderCallback = (snapshot: RenderSnapshot) => void;
 export class HighlightController {
   private currentBoardState: BoardState | null = null;
   private settings: EngineSettings;
-  private committedCandidates: EngineCandidate[] = [];
+  private latestEngineSnapshot: EngineEvaluation | null = null;
+  private committedDisplayCandidates: EngineCandidate[] = [];
   private candidatePendingSince: number = 0;
   private pendingCandidateKey: string = '';
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -27,7 +29,7 @@ export class HighlightController {
 
   public updateSettings(settings: EngineSettings) {
     this.settings = settings;
-    this.broadcastCurrentState();
+    this.recomputeAndRender(true);
   }
 
   public setBoardState(boardState: BoardState | null) {
@@ -39,8 +41,11 @@ export class HighlightController {
     if (this.activePositionKey !== boardState.positionKey) {
       this.activePositionKey = boardState.positionKey;
       this.clearPendingTimer();
-      this.committedCandidates = [];
-      this.broadcastCurrentState();
+      this.latestEngineSnapshot = null;
+      this.committedDisplayCandidates = [];
+      this.currentBoardState = boardState;
+      this.renderCallback({ candidates: [], isCommitted: true, depth: 0 });
+      return;
     }
 
     this.currentBoardState = boardState;
@@ -50,18 +55,18 @@ export class HighlightController {
     if (!this.settings.showHighlights) return;
     if (evaluation.positionKey !== this.activePositionKey) return;
 
-    // Filter and validate candidates with hard side-to-move gate
-    const validCandidates = this.validateCandidates(evaluation.candidates);
-    if (validCandidates.length === 0) return;
+    // Preserve raw engine state immutable
+    this.latestEngineSnapshot = evaluation;
 
-    const topCandidates = validCandidates.slice(0, Math.max(1, this.settings.multiPv));
+    const derivedCandidates = this.deriveDisplayCandidates(evaluation.candidates);
+    if (derivedCandidates.length === 0) return;
 
-    // If Stockfish completed calculation (bestmove arrived), commit atomically
+    // If calculation finished (bestmove arrived), commit atomically
     if (!evaluation.isCalculating) {
       this.clearPendingTimer();
-      this.committedCandidates = topCandidates;
+      this.committedDisplayCandidates = derivedCandidates;
       this.renderCallback({
-        candidates: topCandidates,
+        candidates: derivedCandidates,
         isCommitted: true,
         depth: evaluation.depth,
       });
@@ -69,10 +74,10 @@ export class HighlightController {
     }
 
     // While searching: apply candidate stability window before updating visual preview
-    const primaryCandidate = topCandidates[0];
-    if (!primaryCandidate) return;
+    const primary = derivedCandidates[0];
+    if (!primary) return;
 
-    const primaryMoveKey = `${primaryCandidate.from}-${primaryCandidate.to}`;
+    const primaryMoveKey = `${primary.from}-${primary.to}`;
     const now = Date.now();
 
     if (primaryMoveKey !== this.pendingCandidateKey) {
@@ -82,44 +87,106 @@ export class HighlightController {
       this.clearPendingTimer();
       this.stabilityTimer = setTimeout(() => {
         if (this.pendingCandidateKey === primaryMoveKey) {
-          this.committedCandidates = topCandidates;
+          this.committedDisplayCandidates = derivedCandidates;
           this.renderCallback({
-            candidates: topCandidates,
+            candidates: derivedCandidates,
             isCommitted: false,
             depth: evaluation.depth,
           });
         }
       }, this.STABILITY_WINDOW_MS);
     } else if (now - this.candidatePendingSince >= this.STABILITY_WINDOW_MS) {
-      // Already stable: update candidate metadata without re-animating
-      this.committedCandidates = topCandidates;
+      this.committedDisplayCandidates = derivedCandidates;
       this.renderCallback({
-        candidates: topCandidates,
+        candidates: derivedCandidates,
         isCommitted: false,
         depth: evaluation.depth,
       });
     }
   }
 
-  private validateCandidates(candidates: EngineCandidate[]): EngineCandidate[] {
+  private deriveDisplayCandidates(rawCandidates: EngineCandidate[]): EngineCandidate[] {
     if (!this.currentBoardState) return [];
 
-    const turn = this.currentBoardState.turn;
+    const effectiveControlled =
+      this.settings.controlledColor === 'auto'
+        ? this.currentBoardState.controlledColor
+        : this.settings.controlledColor;
+
     const pieceMap = this.currentBoardState.pieceMap;
 
-    return candidates.filter((candidate) => {
-      const piece = pieceMap.get(candidate.from);
-      if (!piece) return false;
+    let candidates: EngineCandidate[] = [];
 
-      // Invariant: source piece must match the side to move
+    for (const cand of rawCandidates) {
+      const piece = pieceMap.get(cand.from);
+      if (!piece) continue;
+
       const isWhitePiece = piece === piece.toUpperCase();
-      const pieceTurn = isWhitePiece ? 'w' : 'b';
+      const pieceSide = isWhitePiece ? 'w' : 'b';
+      const isOpponent = pieceSide !== effectiveControlled;
 
-      if (!this.settings.showOpponentMoves && pieceTurn !== turn) {
-        return false;
+      // Filter opponent moves unless explicitly enabled in presentation settings
+      if (!this.settings.showOpponentMoves && isOpponent) {
+        continue;
       }
 
-      return true;
+      candidates.push({
+        ...cand,
+        isOpponent,
+      });
+    }
+
+    // Soft opening repertoire blending
+    if (this.settings.opening.enabled && this.activePositionKey) {
+      const bookEntry = OpeningBook.lookupMove(this.activePositionKey, this.settings.opening.repertoireId);
+      if (bookEntry) {
+        const bookFrom = bookEntry.move.substring(0, 2);
+        const bookTo = bookEntry.move.substring(2, 4);
+
+        const matchIdx = candidates.findIndex((c) => c.from === bookFrom && c.to === bookTo);
+        const matched = candidates[matchIdx];
+        if (matchIdx !== -1 && matched) {
+          const bookCandidate: EngineCandidate = { ...matched, isBookMove: true };
+          if (this.settings.opening.mode === 'prefer' && matchIdx > 0) {
+            candidates.splice(matchIdx, 1);
+            candidates.unshift(bookCandidate);
+          } else {
+            candidates[matchIdx] = bookCandidate;
+          }
+        } else if (this.settings.opening.mode === 'book-only') {
+          candidates = [
+            {
+              pvId: 1,
+              from: bookFrom,
+              to: bookTo,
+              depth: 0,
+              scoreCp: 0,
+              scoreMate: null,
+              pv: [bookEntry.move],
+              isBookMove: true,
+              isOpponent: false,
+            },
+          ];
+        }
+      }
+    }
+
+    return candidates.slice(0, Math.max(1, this.settings.multiPv));
+  }
+
+  public recomputeAndRender(isCommitted: boolean = true) {
+    if (!this.settings.showHighlights || !this.latestEngineSnapshot) {
+      this.committedDisplayCandidates = [];
+      this.renderCallback({ candidates: [], isCommitted, depth: 0 });
+      return;
+    }
+
+    const derived = this.deriveDisplayCandidates(this.latestEngineSnapshot.candidates);
+    this.committedDisplayCandidates = derived;
+    this.renderCallback({
+      candidates: derived,
+      isCommitted,
+      depth: this.latestEngineSnapshot.depth,
     });
   }
 
@@ -132,20 +199,13 @@ export class HighlightController {
 
   public clear() {
     this.clearPendingTimer();
-    this.committedCandidates = [];
+    this.latestEngineSnapshot = null;
+    this.committedDisplayCandidates = [];
     this.pendingCandidateKey = '';
-    this.broadcastCurrentState();
-  }
-
-  private broadcastCurrentState() {
-    this.renderCallback({
-      candidates: this.committedCandidates,
-      isCommitted: true,
-      depth: 0,
-    });
+    this.renderCallback({ candidates: [], isCommitted: true, depth: 0 });
   }
 
   public getCommittedCandidates(): EngineCandidate[] {
-    return this.committedCandidates;
+    return this.committedDisplayCandidates;
   }
 }

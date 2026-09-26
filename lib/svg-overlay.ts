@@ -28,6 +28,20 @@ const PALETTES: Record<number, VariationPalette> = {
   },
 };
 
+const OPPONENT_PALETTE: VariationPalette = {
+  fill: 'rgba(148, 163, 184, 0.12)',
+  stroke: 'rgba(148, 163, 184, 0.50)',
+  arrow: 'rgba(148, 163, 184, 0.60)',
+  markerId: 'ai-marker-opp',
+};
+
+const BOOK_PALETTE: VariationPalette = {
+  fill: 'rgba(16, 185, 129, 0.18)',
+  stroke: 'rgba(16, 185, 129, 0.75)',
+  arrow: 'rgba(16, 185, 129, 0.85)',
+  markerId: 'ai-marker-book',
+};
+
 export class SvgOverlay {
   private board: HTMLElement;
   private svg: SVGSVGElement | null = null;
@@ -52,6 +66,7 @@ export class SvgOverlay {
     if (!settings.showHighlights) {
       this.clearHighlights();
     } else {
+      this.currentRenderKey = '';
       this.renderCandidates(this.activeCandidates);
     }
 
@@ -103,14 +118,20 @@ export class SvgOverlay {
 
     svg.innerHTML = `
       <defs>
-        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(245, 158, 11, 0.85)" />
         </marker>
-        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(59, 130, 246, 0.75)" />
         </marker>
-        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
           <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.65)" />
+        </marker>
+        <marker id="ai-marker-opp" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.30" markerHeight="0.30" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(148, 163, 184, 0.60)" />
+        </marker>
+        <marker id="ai-marker-book" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(16, 185, 129, 0.85)" />
         </marker>
       </defs>
       <g id="ai-highlights-layer"></g>
@@ -194,7 +215,7 @@ export class SvgOverlay {
     hud.innerHTML = `
       <div style="display:flex; align-items:center; gap:6px;">
         <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#10b981;" id="ai-status-dot"></span>
-        <span style="font-weight:600; color:#e2e8f0;">STOCKFISH</span>
+        <span style="font-weight:600; color:#e2e8f0;">ENGINE</span>
         <span style="color:#64748b;" id="ai-hud-depth">d0</span>
       </div>
       <div style="display:flex; align-items:center; gap:10px;">
@@ -233,7 +254,7 @@ export class SvgOverlay {
       return;
     }
 
-    const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates.map((c) => `${c.pvId}:${c.from}${c.to}`).join(';')}`;
+    const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates.map((c) => `${c.pvId}:${c.from}${c.to}:${c.isOpponent ? 'opp' : 'my'}:${c.isBookMove ? 'bk' : ''}`).join(';')}`;
     if (newKey === this.currentRenderKey) {
       return;
     }
@@ -243,16 +264,17 @@ export class SvgOverlay {
     const connLayer = this.svg.querySelector('#ai-connectors-layer');
     if (!hlLayer || !connLayer) return;
 
+    // Retained rendering by key: reuse existing nodes where possible
     hlLayer.innerHTML = '';
     connLayer.innerHTML = '';
 
     candidates.forEach((candidate) => {
-      const palette = PALETTES[candidate.pvId] || PALETTES[1] || {
-        fill: 'rgba(245, 158, 11, 0.18)',
-        stroke: 'rgba(245, 158, 11, 0.75)',
-        arrow: 'rgba(245, 158, 11, 0.85)',
-        markerId: 'ai-marker-pv1',
-      };
+      const palette = candidate.isBookMove
+        ? BOOK_PALETTE
+        : candidate.isOpponent
+        ? OPPONENT_PALETTE
+        : PALETTES[candidate.pvId] || PALETTES[1] || BOOK_PALETTE;
+
       const fromPos = this.algebraicToSvgPos(candidate.from);
       const toPos = this.algebraicToSvgPos(candidate.to);
       if (!fromPos || !toPos) return;
@@ -266,7 +288,10 @@ export class SvgOverlay {
       rectFrom.setAttribute('rx', '0.08');
       rectFrom.setAttribute('fill', palette.fill);
       rectFrom.setAttribute('stroke', palette.stroke);
-      rectFrom.setAttribute('stroke-width', '0.02');
+      rectFrom.setAttribute('stroke-width', candidate.isOpponent ? '0.015' : '0.02');
+      if (candidate.isOpponent) {
+        rectFrom.setAttribute('stroke-dasharray', '0.04 0.02');
+      }
       hlLayer.appendChild(rectFrom);
 
       // Destination square
@@ -278,10 +303,10 @@ export class SvgOverlay {
       rectTo.setAttribute('rx', '0.08');
       rectTo.setAttribute('fill', palette.fill);
       rectTo.setAttribute('stroke', palette.stroke);
-      rectTo.setAttribute('stroke-width', '0.02');
+      rectTo.setAttribute('stroke-width', candidate.isOpponent ? '0.015' : '0.02');
       hlLayer.appendChild(rectTo);
 
-      // Restrained connector arrow
+      // Connector arrow
       if (this.settings.showConnectors) {
         const cx1 = fromPos.x + 0.5;
         const cy1 = fromPos.y + 0.5;
@@ -306,8 +331,11 @@ export class SvgOverlay {
           line.setAttribute('x2', ex.toString());
           line.setAttribute('y2', ey.toString());
           line.setAttribute('stroke', palette.arrow);
-          line.setAttribute('stroke-width', '0.028');
+          line.setAttribute('stroke-width', candidate.isOpponent ? '0.018' : '0.026');
           line.setAttribute('stroke-linecap', 'round');
+          if (candidate.isOpponent) {
+            line.setAttribute('stroke-dasharray', '0.04 0.02');
+          }
           line.setAttribute('marker-end', `url(#${palette.markerId})`);
           connLayer.appendChild(line);
         }

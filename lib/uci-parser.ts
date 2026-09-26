@@ -1,4 +1,4 @@
-import type { MoveLine, EngineEvaluation, EngineCandidate } from './types';
+import type { MoveLine, EngineEvaluation, EngineCandidate, UciOption, EngineCapabilities } from './types';
 
 export class UciParser {
   private currentLines: Map<number, MoveLine> = new Map();
@@ -7,6 +7,10 @@ export class UciParser {
   private maxDepthSeen: number = 0;
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
+
+  private engineName: string = 'Stockfish';
+  private engineAuthor: string = 'Tord Romstad, Marco Costalba, Joona Kiiski, Gary Linscott';
+  private optionsMap: Map<string, UciOption> = new Map();
 
   public reset(fen: string, analysisId: number = 0, positionKey: string = '') {
     this.currentLines.clear();
@@ -26,6 +30,19 @@ export class UciParser {
   public parseLine(line: string): Partial<EngineEvaluation> | null {
     const trimmed = line.trim();
 
+    if (trimmed.startsWith('id name ')) {
+      this.engineName = trimmed.substring(8).trim();
+      return null;
+    }
+    if (trimmed.startsWith('id author ')) {
+      this.engineAuthor = trimmed.substring(10).trim();
+      return null;
+    }
+    if (trimmed.startsWith('option name ')) {
+      this.parseOptionLine(trimmed);
+      return null;
+    }
+
     if (trimmed.startsWith('info') && trimmed.includes(' score ')) {
       return this.parseInfoLine(trimmed);
     }
@@ -35,6 +52,45 @@ export class UciParser {
     }
 
     return null;
+  }
+
+  private parseOptionLine(line: string) {
+    const nameMatch = line.match(/^option name\s+(.+?)\s+type\s+(\w+)/);
+    if (!nameMatch || !nameMatch[1] || !nameMatch[2]) return;
+
+    const optName = nameMatch[1];
+    const optType = nameMatch[2] as 'check' | 'spin' | 'combo' | 'string' | 'button';
+
+    const defaultMatch = line.match(/\bdefault\s+([^\s]+)/);
+    const minMatch = line.match(/\bmin\s+(-?\d+)/);
+    const maxMatch = line.match(/\bmax\s+(-?\d+)/);
+
+    const option: UciOption = {
+      name: optName,
+      type: optType,
+      default: defaultMatch && defaultMatch[1] ? defaultMatch[1] : undefined,
+      min: minMatch && minMatch[1] ? parseInt(minMatch[1], 10) : undefined,
+      max: maxMatch && maxMatch[1] ? parseInt(maxMatch[1], 10) : undefined,
+    };
+
+    this.optionsMap.set(optName, option);
+  }
+
+  public getCapabilities(): EngineCapabilities {
+    const optionsObj: Record<string, UciOption> = {};
+    this.optionsMap.forEach((v, k) => {
+      optionsObj[k] = v;
+    });
+
+    return {
+      name: this.engineName,
+      author: this.engineAuthor,
+      hasElo: this.optionsMap.has('UCI_Elo') || this.optionsMap.has('UCI_LimitStrength'),
+      hasSkillLevel: this.optionsMap.has('Skill Level'),
+      hasThreads: this.optionsMap.has('Threads'),
+      hasHash: this.optionsMap.has('Hash'),
+      options: optionsObj,
+    };
   }
 
   private parseInfoLine(line: string): Partial<EngineEvaluation> {

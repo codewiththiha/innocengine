@@ -1,9 +1,11 @@
-import type { EngineEvaluation } from '../lib/types';
+import type { EngineEvaluation, EngineCapabilities, EngineTelemetry } from '../lib/types';
 import { getSettings } from '../lib/storage';
 
 export default defineBackground(() => {
   let creatingOffscreen: Promise<void> | null = null;
   let latestEvaluation: EngineEvaluation | null = null;
+  let latestCapabilities: EngineCapabilities | null = null;
+  let latestTelemetry: EngineTelemetry | null = null;
   let activeChessTabId: number | undefined;
 
   async function hasOffscreenDocument(): Promise<boolean> {
@@ -75,7 +77,6 @@ export default defineBackground(() => {
           chrome.tabs.sendMessage(targetTabId, message).catch(() => {});
         }
 
-        // Also broadcast to active tabs
         chrome.tabs.query({ active: true }, (tabs: chrome.tabs.Tab[]) => {
           tabs.forEach((tab: chrome.tabs.Tab) => {
             if (tab.id && tab.id !== targetTabId) {
@@ -86,10 +87,22 @@ export default defineBackground(() => {
         return false;
       }
 
-      // 3. Popup requests latest evaluation
-      if (message.target === 'popup' && message.type === 'GET_CURRENT_EVAL') {
-        sendResponse({ evaluation: latestEvaluation });
-        return true;
+      // 3. Target: Popup requests
+      if (message.target === 'popup') {
+        if (message.type === 'GET_CURRENT_EVAL') {
+          sendResponse({
+            evaluation: latestEvaluation,
+            capabilities: latestCapabilities,
+            telemetry: latestTelemetry,
+          });
+          return true;
+        }
+        if (message.type === 'ENGINE_CAPABILITIES') {
+          latestCapabilities = message.capabilities;
+        }
+        if (message.type === 'TELEMETRY_UPDATE') {
+          latestTelemetry = message.telemetry;
+        }
       }
 
       return false;

@@ -4,14 +4,25 @@ const STORAGE_KEY = 'chess_overlay_settings';
 
 export const DEFAULT_SETTINGS: EngineSettings = {
   depth: 16,
-  multiPv: 1,
+  multiPv: 2,
   threads: 1,
+  hashMb: 32,
+  limitStrength: false,
+  targetElo: 2000,
   showHighlights: true,
   showOpponentMoves: false,
   showConnectors: true,
   showEvalBar: true,
   showHud: true,
   autoAnalyze: true,
+  controlledColor: 'auto',
+  opening: {
+    enabled: true,
+    repertoireId: 'sicilian',
+    mode: 'prefer',
+    maxPlies: 12,
+  },
+  customOptions: {},
 };
 
 export async function getSettings(): Promise<EngineSettings> {
