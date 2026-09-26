@@ -122,7 +122,7 @@ export class BoardParser {
     });
 
     const isInitialPosition = this.checkInitialPosition(grid);
-    const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board);
+    const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board, grid);
     const castling = this.computeCastlingRights(grid);
     const placement = this.gridToPlacement(grid);
     const positionKey = `${placement} ${turn} ${castling} -`;
@@ -131,6 +131,7 @@ export class BoardParser {
     return {
       fen,
       positionKey,
+      placement,
       isFlipped,
       turn,
       controlledColor: 'auto',
@@ -205,8 +206,8 @@ export class BoardParser {
     return rights.length > 0 ? rights : '-';
   }
 
-  private static detectSideToMove(board: HTMLElement): 'w' | 'b' {
-    // 1. Authoritative active clock turn
+  private static detectSideToMove(board: HTMLElement, grid: string[][]): 'w' | 'b' {
+    // 1. Check running clock
     const whiteClock = document.querySelector(
       '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
     );
@@ -216,7 +217,27 @@ export class BoardParser {
     if (whiteClock && !blackClock) return 'w';
     if (blackClock && !whiteClock) return 'b';
 
-    // 2. Authoritative move list history in sidebar
+    // 2. Check native Chess.com move highlights (strictly excluding any AI overlay elements)
+    const nativeHighlights = board.querySelectorAll(
+      '.highlight:not([class*="ai-"]):not([id*="ai-"])'
+    );
+    if (nativeHighlights.length >= 2) {
+      for (const hl of Array.from(nativeHighlights)) {
+        for (const cls of Array.from(hl.classList)) {
+          const match = cls.match(/^square-(\d)(\d)$/);
+          if (match && match[1] && match[2]) {
+            const file = parseInt(match[1], 10) - 1;
+            const rank = parseInt(match[2], 10) - 1;
+            const piece = grid[rank]?.[file];
+            if (piece) {
+              return piece === piece.toUpperCase() ? 'b' : 'w';
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Check move list in sidebar
     const moveNodes = document.querySelectorAll(
       '.move-list-row .node, vertical-move-list .node, .game-history .node'
     );

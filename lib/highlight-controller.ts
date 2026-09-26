@@ -52,7 +52,13 @@ export class HighlightController {
   }
 
   public handleEvaluation(evaluation: EngineEvaluation) {
-    if (evaluation.positionKey !== this.activePositionKey) return;
+    if (evaluation.positionKey !== this.activePositionKey) {
+      console.warn('[AI TRACE] HighlightController: Dropping eval due to positionKey mismatch', {
+        evalPos: evaluation.positionKey,
+        activePos: this.activePositionKey,
+      });
+      return;
+    }
 
     // Retain immutable raw engine state
     this.latestEngineSnapshot = evaluation;
@@ -67,6 +73,16 @@ export class HighlightController {
       console.warn('[AI TRACE] Warning: All raw candidates were filtered out:', evaluation.candidates);
       return;
     }
+
+    console.log('[AI TRACE] HighlightController updating candidates:', {
+      depth: evaluation.depth,
+      isCommitted: !evaluation.isCalculating,
+      candidatesCount: derivedCandidates.length,
+      primaryMove: derivedCandidates[0] ? `${derivedCandidates[0].from}->${derivedCandidates[0].to}` : null,
+      opponentContinuation: derivedCandidates[0]?.continuation
+        ? `${derivedCandidates[0].continuation.from}->${derivedCandidates[0].continuation.to}`
+        : null,
+    });
 
     // Atomically commit when bestmove arrives
     if (!evaluation.isCalculating) {

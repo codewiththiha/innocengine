@@ -33,12 +33,26 @@ export class EngineClient {
 
           // Reject evaluations across engine switch boundaries
           const matchesEngine = !evalData.engineInstanceId || evalData.engineInstanceId === this.activeEngineInstanceId;
-          const matchesGeneration = evalData.analysisId === this.activeAnalysisId;
-          const matchesPosition = evalData.positionKey === this.activePositionKey ||
+          const matchesGeneration = !evalData.analysisId || evalData.analysisId === this.activeAnalysisId;
+          const matchesPosition =
+            !evalData.positionKey ||
+            evalData.positionKey === this.activePositionKey ||
             getPositionKey(evalData.fen) === this.activePositionKey;
 
           if (matchesEngine && matchesGeneration && matchesPosition) {
             this.onEvalCallbacks.forEach((cb) => cb(evalData));
+          } else {
+            console.warn('[AI TRACE] EngineClient: Rejecting stale evaluation', {
+              matchesEngine,
+              matchesGeneration,
+              matchesPosition,
+              evalInstance: evalData.engineInstanceId,
+              clientInstance: this.activeEngineInstanceId,
+              evalGen: evalData.analysisId,
+              clientGen: this.activeAnalysisId,
+              evalPos: evalData.positionKey,
+              clientPos: this.activePositionKey,
+            });
           }
         } else if (message.type === 'ENGINE_STATUS') {
           this.onStatusCallbacks.forEach((cb) => cb(message.status, message.message));
@@ -68,7 +82,7 @@ export class EngineClient {
         multiPv: settings.multiPv,
       });
     } catch (err) {
-      console.warn('[EngineClient] Error dispatching analyze message:', err);
+      console.warn('[AI TRACE] EngineClient: Error dispatching analyze message:', err);
     }
 
     return this.activeAnalysisId;
@@ -82,7 +96,7 @@ export class EngineClient {
         analysisId: this.activeAnalysisId,
       });
     } catch (err) {
-      console.warn('[EngineClient] Error dispatching stop message:', err);
+      console.warn('[AI TRACE] EngineClient: Error dispatching stop message:', err);
     }
   }
 

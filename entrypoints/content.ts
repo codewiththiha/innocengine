@@ -1,5 +1,4 @@
 import { BoardParser } from '../lib/board-parser';
-import { GameStateAdapter, type GameState } from '../lib/game-state-adapter';
 import { SvgOverlay } from '../lib/svg-overlay';
 import { EngineClient } from '../lib/engine-client';
 import { HighlightController } from '../lib/highlight-controller';
@@ -15,10 +14,10 @@ export default defineContentScript({
     let engineClient: EngineClient | null = null;
     let highlightController: HighlightController | null = null;
     let currentSettings: EngineSettings;
-    let lastBoardFingerprint: string = '';
     let lastPositionKey: string = '';
-    let lastFlipped: boolean = false;
+    let lastPlacement: string = '';
     let lastTurn: 'w' | 'b' = 'w';
+    let lastFlipped: boolean = false;
     let boardObserver: MutationObserver | null = null;
     let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
@@ -33,7 +32,7 @@ export default defineContentScript({
         // Throttled high-frequency updates for score text and HUD
         overlay.updateEvaluationMetadata(evaluation);
 
-        // Retained low-frequency candidate highlight commits
+        // Retained candidate highlight commits
         highlightController.handleEvaluation(evaluation);
       });
 
@@ -48,9 +47,9 @@ export default defineContentScript({
         if (lastPositionKey && engineClient && newSettings.autoAnalyze) {
           const board = currentBoard || BoardParser.findBoardElement();
           if (board) {
-            const gameState = GameStateAdapter.extractGameState(board, lastTurn);
-            if (gameState) {
-              engineClient.analyze(gameState.fen, currentSettings);
+            const state = BoardParser.extractBoardState(board);
+            if (state) {
+              engineClient.analyze(state.fen, currentSettings);
             }
           }
         }
@@ -121,7 +120,10 @@ export default defineContentScript({
       boardObserver = new MutationObserver((mutations) => {
         const isSelfMutation = mutations.every((m) => {
           const target = m.target as HTMLElement;
-          return target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar');
+          return (
+            target.id?.startsWith('chess-ai-') ||
+            target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar')
+          );
         });
         if (isSelfMutation) return;
 
@@ -145,40 +147,37 @@ export default defineContentScript({
     function handleBoardChange() {
       if (!currentBoard || !overlay || !engineClient || !highlightController) return;
 
-      const gameState: GameState | null = GameStateAdapter.extractGameState(currentBoard, lastTurn);
-      if (!gameState) return;
+      const state: BoardState | null = BoardParser.extractBoardState(currentBoard);
+      if (!state) return;
 
-      overlay.setFlipped(gameState.isFlipped);
+      overlay.setFlipped(state.isFlipped);
 
-      // Distinguish piece selection highlights from real position moves
-      const isSameFingerprint = gameState.boardFingerprint === lastBoardFingerprint;
-      const isSameOrientation = gameState.isFlipped === lastFlipped;
+      // Distinguish piece selection highlights from actual board moves
+      const isSamePlacement = state.placement === lastPlacement;
+      const isSameTurn = state.turn === lastTurn;
+      const isSameOrientation = state.isFlipped === lastFlipped;
 
-      if (isSameFingerprint && isSameOrientation && lastPositionKey) {
+      if (isSamePlacement && isSameTurn && isSameOrientation && lastPositionKey) {
+        // Selection or click without piece movement: preserve existing highlights, do not reset engine
         return;
       }
 
-      lastBoardFingerprint = gameState.boardFingerprint;
-      lastFlipped = gameState.isFlipped;
-      lastTurn = gameState.turn;
+      console.log('[AI TRACE] Board position changed:', {
+        positionKey: state.positionKey,
+        turn: state.turn,
+        isFlipped: state.isFlipped,
+      });
 
-      const boardState: BoardState = {
-        fen: gameState.fen,
-        positionKey: gameState.positionKey,
-        isFlipped: gameState.isFlipped,
-        turn: gameState.turn,
-        controlledColor: currentSettings.controlledColor,
-        pieceMap: gameState.pieceMap,
-        boardElement: currentBoard,
-      };
+      lastPlacement = state.placement || '';
+      lastTurn = state.turn;
+      lastFlipped = state.isFlipped;
+      lastPositionKey = state.positionKey;
 
-      highlightController.setBoardState(boardState);
+      highlightController.setBoardState(state);
 
-      if (gameState.positionKey !== lastPositionKey) {
-        lastPositionKey = gameState.positionKey;
-        if (currentSettings.autoAnalyze) {
-          engineClient.analyze(gameState.fen, currentSettings);
-        }
+      if (currentSettings.autoAnalyze) {
+        console.log('[AI TRACE] Dispatching engine analyze for FEN:', state.fen);
+        engineClient.analyze(state.fen, currentSettings);
       }
     }
 

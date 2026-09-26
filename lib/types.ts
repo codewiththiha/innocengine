@@ -111,6 +111,7 @@ export interface EngineEvaluation {
 export interface BoardState {
   fen: string;
   positionKey: string;
+  placement?: string;
   isFlipped: boolean;
   turn: 'w' | 'b';
   controlledColor: 'auto' | 'w' | 'b';

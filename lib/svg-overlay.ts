@@ -35,6 +35,8 @@ const PALETTES: Record<number, VariationPalette> = {
 };
 
 const OPPONENT_ARROW_PALETTE = {
+  fill: 'rgba(148, 163, 184, 0.12)',
+  stroke: 'rgba(148, 163, 184, 0.45)',
   arrow: 'rgba(148, 163, 184, 0.65)',
   markerId: 'ai-marker-opp',
 };
@@ -323,16 +325,31 @@ export class SvgOverlay {
         const oppToPos = this.algebraicToSvgPos(candidate.continuation.to);
 
         if (oppFromPos && oppToPos) {
+          // Highlight opponent destination square with subtle dashed border
+          const rectOppTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          rectOppTo.setAttribute('x', oppToPos.x.toString());
+          rectOppTo.setAttribute('y', oppToPos.y.toString());
+          rectOppTo.setAttribute('width', '1');
+          rectOppTo.setAttribute('height', '1');
+          rectOppTo.setAttribute('rx', '0.08');
+          rectOppTo.setAttribute('fill', OPPONENT_ARROW_PALETTE.fill);
+          rectOppTo.setAttribute('stroke', OPPONENT_ARROW_PALETTE.stroke);
+          rectOppTo.setAttribute('stroke-width', '0.02');
+          rectOppTo.setAttribute('stroke-dasharray', '0.08 0.04');
+          contLayer.appendChild(rectOppTo);
+
           // Render subtle, dashed continuation line from opponent's moving piece to target
-          this.renderArrowLine(
-            contLayer,
-            oppFromPos,
-            oppToPos,
-            OPPONENT_ARROW_PALETTE.arrow,
-            OPPONENT_ARROW_PALETTE.markerId,
-            '0.018',
-            '0.04 0.02'
-          );
+          if (this.settings.showConnectors) {
+            this.renderArrowLine(
+              contLayer,
+              oppFromPos,
+              oppToPos,
+              OPPONENT_ARROW_PALETTE.arrow,
+              OPPONENT_ARROW_PALETTE.markerId,
+              '0.018',
+              '0.04 0.02'
+            );
+          }
         }
       }
     });
