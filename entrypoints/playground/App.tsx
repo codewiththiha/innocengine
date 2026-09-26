@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Chess, type Square } from 'chess.js';
 import { RotateCw, Play, RotateCcw, Award, ChevronRight, Zap } from 'lucide-react';
-import type { EngineEvaluation, MoveLine } from '../../lib/types';
+import type { EngineEvaluation, MoveLine, EngineCandidate } from '../../lib/types';
 import './App.css';
 
 const UNICODE_PIECES: Record<string, string> = {
@@ -28,6 +28,12 @@ const PRESETS = [
   { name: 'Endgame: Rook Mate', fen: '8/8/8/4k3/8/8/3R4/4K3 w - - 0 1' },
 ];
 
+const VARIATION_COLORS: Record<number, { fill: string; stroke: string; line: string; label: string }> = {
+  1: { fill: 'rgba(245, 158, 11, 0.20)', stroke: 'rgba(245, 158, 11, 0.85)', line: '#f59e0b', label: 'Primary (Amber)' },
+  2: { fill: 'rgba(59, 130, 246, 0.16)', stroke: 'rgba(59, 130, 246, 0.75)', line: '#3b82f6', label: 'Alternative 2 (Blue)' },
+  3: { fill: 'rgba(168, 85, 247, 0.14)', stroke: 'rgba(168, 85, 247, 0.65)', line: '#a855f7', label: 'Alternative 3 (Violet)' },
+};
+
 export default function App() {
   const [chess, setChess] = useState<Chess>(new Chess());
   const [fen, setFen] = useState<string>(chess.fen());
@@ -35,21 +41,27 @@ export default function App() {
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [customFenInput, setCustomFenInput] = useState<string>('');
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
+  const [multiPvCount, setMultiPvCount] = useState<number>(2);
 
+  const [committedCandidates, setCommittedCandidates] = useState<EngineCandidate[]>([]);
   const [evalData, setEvalData] = useState<EngineEvaluation>({
+    analysisId: 1,
+    positionKey: '',
     fen: chess.fen(),
     depth: 0,
     scoreCp: 0,
     scoreMate: null,
     bestMove: null,
     multiPvLines: [],
+    candidates: [],
     isCalculating: false,
     timestamp: Date.now(),
   });
 
   const workerRef = useRef<Worker | null>(null);
+  const currentAnalysisIdRef = useRef<number>(1);
+  const stabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize self-contained Stockfish JS worker
   useEffect(() => {
     try {
       const workerUrl = chrome?.runtime?.getURL
@@ -67,7 +79,7 @@ export default function App() {
       worker.postMessage('uci');
       worker.postMessage('isready');
 
-      analyzePosition(chess.fen(), worker);
+      analyzePosition(chess.fen(), multiPvCount, worker);
     } catch (err) {
       console.warn('[Playground] Worker init error:', err);
     }
@@ -80,6 +92,34 @@ export default function App() {
   }, []);
 
   const handleEngineOutput = (line: string) => {
+    if (line.startsWith('bestmove')) {
+      // Atomic commit of final search decision
+      const parts = line.split(/\s+/);
+      const finalMove = parts[1];
+      if (finalMove && finalMove !== '(none)') {
+        setEvalData((prev) => {
+          const finalCandidate: EngineCandidate = {
+            pvId: 1,
+            from: finalMove.substring(0, 2),
+            to: finalMove.substring(2, 4),
+            depth: prev.depth,
+            scoreCp: prev.scoreCp,
+            scoreMate: prev.scoreMate,
+            pv: [finalMove],
+          };
+          const updatedCandidates = [finalCandidate, ...prev.candidates.filter((c) => c.pvId > 1)];
+          setCommittedCandidates(updatedCandidates);
+          return {
+            ...prev,
+            bestMove: finalMove,
+            isCalculating: false,
+            candidates: updatedCandidates,
+          };
+        });
+      }
+      return;
+    }
+
     if (!line.startsWith('info') || !line.includes(' score ')) return;
 
     const depthMatch = line.match(/\bdepth\s+(\d+)/);
@@ -105,7 +145,7 @@ export default function App() {
       if (pvMoves.length > 0 && pvMoves[0]) bestMove = pvMoves[0];
     }
 
-    if (bestMove) {
+    if (bestMove && bestMove.length >= 4) {
       setEvalData((prev) => {
         const existingLines = [...prev.multiPvLines];
         const lineIdx = existingLines.findIndex((l) => l.id === pvId);
@@ -127,6 +167,26 @@ export default function App() {
 
         const primary = existingLines[0] || newLine;
 
+        const candidateList: EngineCandidate[] = existingLines.map((l) => ({
+          pvId: l.id,
+          from: l.bestMove.substring(0, 2),
+          to: l.bestMove.substring(2, 4),
+          depth: l.depth,
+          scoreCp: l.scoreCp,
+          scoreMate: l.scoreMate,
+          pv: l.pv,
+        }));
+
+        // Apply stability filter before updating board highlights
+        if (depth >= 4 && candidateList.length > 0) {
+          if (!stabilityTimerRef.current) {
+            stabilityTimerRef.current = setTimeout(() => {
+              stabilityTimerRef.current = null;
+              setCommittedCandidates(candidateList);
+            }, 180);
+          }
+        }
+
         return {
           ...prev,
           depth: Math.max(prev.depth, depth),
@@ -134,26 +194,40 @@ export default function App() {
           scoreMate: primary.scoreMate,
           bestMove: primary.bestMove,
           multiPvLines: existingLines,
+          candidates: candidateList,
           isCalculating: true,
         };
       });
     }
   };
 
-  const analyzePosition = (fenStr: string, workerInstance?: Worker) => {
+  const analyzePosition = (fenStr: string, pvCount: number, workerInstance?: Worker) => {
     const w = workerInstance || workerRef.current;
     if (!w) return;
 
-    w.postMessage('stop');
-    w.postMessage(`position fen ${fenStr}`);
-    w.postMessage('go depth 14');
+    if (stabilityTimerRef.current) {
+      clearTimeout(stabilityTimerRef.current);
+      stabilityTimerRef.current = null;
+    }
 
+    currentAnalysisIdRef.current++;
+    const posKey = fenStr.split(' ').slice(0, 4).join(' ');
+
+    w.postMessage('stop');
+    w.postMessage(`setoption name MultiPV value ${pvCount}`);
+    w.postMessage(`position fen ${fenStr}`);
+    w.postMessage('go depth 16');
+
+    setCommittedCandidates([]);
     setEvalData((prev) => ({
       ...prev,
+      analysisId: currentAnalysisIdRef.current,
+      positionKey: posKey,
       fen: fenStr,
       depth: 0,
       bestMove: null,
       multiPvLines: [],
+      candidates: [],
       isCalculating: true,
     }));
   };
@@ -182,7 +256,7 @@ export default function App() {
           setFen(newFen);
           setLastMove({ from: move.from, to: move.to });
           setSelectedSquare(null);
-          analyzePosition(newFen);
+          analyzePosition(newFen, multiPvCount);
         } else {
           const piece = chess.get(square);
           if (piece && piece.color === chess.turn()) {
@@ -209,10 +283,15 @@ export default function App() {
       setFen(presetFen);
       setSelectedSquare(null);
       setLastMove(null);
-      analyzePosition(presetFen);
+      analyzePosition(presetFen, multiPvCount);
     } catch (err) {
       console.error('Invalid FEN:', err);
     }
+  };
+
+  const handleMultiPvChange = (newCount: number) => {
+    setMultiPvCount(newCount);
+    analyzePosition(chess.fen(), newCount);
   };
 
   const handleCustomFenSubmit = (e: React.FormEvent) => {
@@ -233,10 +312,9 @@ export default function App() {
     setFen(newFen);
     setSelectedSquare(null);
     setLastMove(null);
-    analyzePosition(newFen);
+    analyzePosition(newFen, multiPvCount);
   };
 
-  // Evaluation bar computation
   let evalScoreString = '0.0';
   let whiteWinPercent = 50;
   if (evalData.scoreMate !== null) {
@@ -249,19 +327,28 @@ export default function App() {
     whiteWinPercent = Math.max(5, Math.min(95, Math.round(winP * 100)));
   }
 
-  // Recommended move squares from Stockfish
-  const recommendedFrom = evalData.bestMove ? evalData.bestMove.substring(0, 2) : null;
-  const recommendedTo = evalData.bestMove ? evalData.bestMove.substring(2, 4) : null;
+  // Pre-calculate square candidate highlight styles
+  const squareHighlightStyles = new Map<string, { fill: string; stroke: string }>();
+  committedCandidates.forEach((candidate) => {
+    const pal = VARIATION_COLORS[candidate.pvId] || VARIATION_COLORS[1] || {
+      fill: 'rgba(245, 158, 11, 0.20)',
+      stroke: 'rgba(245, 158, 11, 0.85)',
+      line: '#f59e0b',
+      label: 'Primary',
+    };
+    squareHighlightStyles.set(candidate.from, { fill: pal.fill, stroke: pal.stroke });
+    squareHighlightStyles.set(candidate.to, { fill: pal.fill, stroke: pal.stroke });
+  });
 
   return (
     <div className="playground-root">
       <nav className="playground-nav">
         <div className="brand-section">
-          <div className="brand-logo">♔</div>
+          <div className="brand-logo" style={{ color: '#f59e0b' }}>♔</div>
           <div>
-            <h1 className="brand-title">Chess AI Move Square Highlighter</h1>
+            <h1 className="brand-title">Chess AI Move Overlay</h1>
             <p className="brand-subtitle">
-              Live Stockfish Engine: Highlights Piece in Charge (Azure) & Move Target (Emerald)
+              Board-First Architecture: 1 Color per Candidate Move Pair • Zero Flicker
             </p>
           </div>
         </div>
@@ -291,7 +378,8 @@ export default function App() {
               <span className="eval-bar-text">{evalScoreString}</span>
             </div>
 
-            <div className="board-container">
+            <div className="board-container" style={{ position: 'relative' }}>
+              {/* Board 8x8 squares */}
               {Array.from({ length: 64 }).map((_, idx) => {
                 const row = Math.floor(idx / 8);
                 const col = idx % 8;
@@ -305,10 +393,7 @@ export default function App() {
                 const isLight = (fileIdx + rankIdx) % 2 !== 0;
                 const isSelected = selectedSquare === sq;
                 const isLastMoveSq = lastMove?.from === sq || lastMove?.to === sq;
-
-                // Square highlights for best move
-                const isPieceInCharge = recommendedFrom === sq;
-                const isTargetSquare = recommendedTo === sq;
+                const hlStyle = squareHighlightStyles.get(sq);
 
                 return (
                   <div
@@ -318,30 +403,14 @@ export default function App() {
                     } ${isLastMoveSq ? 'square-last-move' : ''}`}
                     onClick={() => handleSquareClick(sq)}
                   >
-                    {/* Piece in Charge highlight (Azure Blue) */}
-                    {isPieceInCharge && (
+                    {hlStyle && (
                       <div
                         style={{
                           position: 'absolute',
                           inset: 0,
-                          backgroundColor: 'rgba(56, 189, 248, 0.55)',
-                          boxShadow: 'inset 0 0 0 3px #0284c7',
-                          borderRadius: 4,
-                          pointerEvents: 'none',
-                          zIndex: 2,
-                        }}
-                      />
-                    )}
-
-                    {/* Move Destination highlight (Emerald Green) */}
-                    {isTargetSquare && (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          inset: 0,
-                          backgroundColor: 'rgba(16, 185, 129, 0.55)',
-                          boxShadow: 'inset 0 0 0 3px #059669',
-                          borderRadius: 4,
+                          backgroundColor: hlStyle.fill,
+                          boxShadow: `inset 0 0 0 2px ${hlStyle.stroke}`,
+                          borderRadius: 3,
                           pointerEvents: 'none',
                           zIndex: 2,
                         }}
@@ -362,10 +431,79 @@ export default function App() {
                   </div>
                 );
               })}
+
+              {/* Restrained SVG Connector Layer */}
+              <svg
+                viewBox="0 0 8 8"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  pointerEvents: 'none',
+                  zIndex: 4,
+                }}
+              >
+                <defs>
+                  <marker id="pg-arrow-1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+                    <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="#f59e0b" />
+                  </marker>
+                  <marker id="pg-arrow-2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+                    <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="#3b82f6" />
+                  </marker>
+                  <marker id="pg-arrow-3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.32" markerHeight="0.32" orient="auto-start-reverse">
+                    <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="#a855f7" />
+                  </marker>
+                </defs>
+                {committedCandidates.map((candidate) => {
+                  const pal = VARIATION_COLORS[candidate.pvId] || VARIATION_COLORS[1] || {
+                    fill: 'rgba(245, 158, 11, 0.20)',
+                    stroke: 'rgba(245, 158, 11, 0.85)',
+                    line: '#f59e0b',
+                    label: 'Primary',
+                  };
+                  if (!candidate.from[1] || !candidate.to[1]) return null;
+                  const fromFile = candidate.from.charCodeAt(0) - 97;
+                  const fromRank = parseInt(candidate.from[1], 10) - 1;
+                  const toFile = candidate.to.charCodeAt(0) - 97;
+                  const toRank = parseInt(candidate.to[1], 10) - 1;
+
+                  const sx = isFlipped ? 7 - fromFile + 0.5 : fromFile + 0.5;
+                  const sy = isFlipped ? fromRank + 0.5 : 7 - fromRank + 0.5;
+                  const ex = isFlipped ? 7 - toFile + 0.5 : toFile + 0.5;
+                  const ey = isFlipped ? toRank + 0.5 : 7 - toRank + 0.5;
+
+                  const dx = ex - sx;
+                  const dy = ey - sy;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  if (dist < 0.4) return null;
+
+                  const offS = 0.22;
+                  const offE = 0.28;
+                  const lx1 = sx + (dx / dist) * offS;
+                  const ly1 = sy + (dy / dist) * offS;
+                  const lx2 = ex - (dx / dist) * offE;
+                  const ly2 = ey - (dy / dist) * offE;
+
+                  return (
+                    <line
+                      key={`${candidate.pvId}-${candidate.from}-${candidate.to}`}
+                      x1={lx1}
+                      y1={ly1}
+                      x2={lx2}
+                      y2={ly2}
+                      stroke={pal.line}
+                      strokeWidth="0.026"
+                      strokeLinecap="round"
+                      markerEnd={`url(#pg-arrow-${Math.min(3, candidate.pvId)})`}
+                    />
+                  );
+                })}
+              </svg>
             </div>
           </div>
 
-          {/* Color Legend */}
+          {/* Palette Legend */}
           <div style={{ display: 'flex', gap: 20, fontSize: 12, marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span
@@ -373,11 +511,11 @@ export default function App() {
                   width: 14,
                   height: 14,
                   borderRadius: 3,
-                  backgroundColor: 'rgba(56, 189, 248, 0.7)',
-                  border: '1px solid #0284c7',
+                  backgroundColor: 'rgba(245, 158, 11, 0.25)',
+                  border: '1px solid #f59e0b',
                 }}
               />
-              <span>Piece in Charge (Move From)</span>
+              <span>PV 1: Warm Amber (Primary Move)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span
@@ -385,11 +523,23 @@ export default function App() {
                   width: 14,
                   height: 14,
                   borderRadius: 3,
-                  backgroundColor: 'rgba(16, 185, 129, 0.7)',
-                  border: '1px solid #059669',
+                  backgroundColor: 'rgba(59, 130, 246, 0.25)',
+                  border: '1px solid #3b82f6',
                 }}
               />
-              <span>Target Move Square (Move To)</span>
+              <span>PV 2: Cool Steel Blue</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 3,
+                  backgroundColor: 'rgba(168, 85, 247, 0.25)',
+                  border: '1px solid #a855f7',
+                }}
+              />
+              <span>PV 3: Muted Violet</span>
             </div>
           </div>
         </div>
@@ -402,7 +552,7 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 11, color: '#94a3b8' }}>Evaluation</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: '#38bdf8' }}>{evalScoreString}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#f59e0b' }}>{evalScoreString}</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: '#94a3b8' }}>Search Depth</div>
@@ -419,11 +569,54 @@ export default function App() {
             </div>
 
             <div style={{ marginTop: 10, padding: 10, background: '#0f172a', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, color: '#94a3b8' }}>Recommended Move:</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#34d399', fontFamily: 'monospace' }}>
-                {evalData.bestMove
-                  ? `${evalData.bestMove.substring(0, 2)} → ${evalData.bestMove.substring(2, 4)}`
-                  : 'Calculating...'}
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Committed Candidates:</div>
+              {committedCandidates.length === 0 ? (
+                <div style={{ color: '#64748b', fontSize: 13 }}>Analyzing position...</div>
+              ) : (
+                committedCandidates.map((c) => {
+                  const pal = VARIATION_COLORS[c.pvId] || VARIATION_COLORS[1] || {
+                    fill: 'rgba(245, 158, 11, 0.20)',
+                    stroke: 'rgba(245, 158, 11, 0.85)',
+                    line: '#f59e0b',
+                    label: 'Primary',
+                  };
+                  return (
+                    <div
+                      key={`${c.pvId}-${c.from}${c.to}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: 14,
+                        fontFamily: 'monospace',
+                        color: pal.line,
+                        marginTop: 2,
+                      }}
+                    >
+                      <span>Line {c.pvId}: {c.from} → {c.to}</span>
+                      <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                        {c.scoreMate !== null ? `M${c.scoreMate}` : `${((c.scoreCp || 0) / 100).toFixed(2)}`}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                MultiPV Variations: {multiPvCount}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[1, 2, 3].map((cnt) => (
+                  <button
+                    key={cnt}
+                    type="button"
+                    className={`btn ${multiPvCount === cnt ? 'btn-primary' : ''}`}
+                    onClick={() => handleMultiPvChange(cnt)}
+                  >
+                    {cnt} {cnt === 1 ? 'Line' : 'Lines'}
+                  </button>
+                ))}
               </div>
             </div>
           </div>

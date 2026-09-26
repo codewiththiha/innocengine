@@ -1,19 +1,26 @@
-import type { MoveLine, EngineEvaluation } from './types';
+import type { MoveLine, EngineEvaluation, EngineCandidate } from './types';
 
 export class UciParser {
   private currentLines: Map<number, MoveLine> = new Map();
   private currentFen: string = '';
   private currentTurn: 'w' | 'b' = 'w';
   private maxDepthSeen: number = 0;
+  private currentAnalysisId: number = 0;
+  private currentPositionKey: string = '';
 
-  constructor() {}
-
-  public reset(fen: string) {
+  public reset(fen: string, analysisId: number = 0, positionKey: string = '') {
     this.currentLines.clear();
     this.currentFen = fen;
+    this.currentAnalysisId = analysisId;
+    this.currentPositionKey = positionKey || this.extractPositionKey(fen);
     this.maxDepthSeen = 0;
     const tokens = fen.trim().split(/\s+/);
     this.currentTurn = tokens.length > 1 && tokens[1] === 'b' ? 'b' : 'w';
+  }
+
+  public extractPositionKey(fen: string): string {
+    if (!fen) return '';
+    return fen.trim().split(/\s+/).slice(0, 4).join(' ');
   }
 
   public parseLine(line: string): Partial<EngineEvaluation> | null {
@@ -31,18 +38,15 @@ export class UciParser {
   }
 
   private parseInfoLine(line: string): Partial<EngineEvaluation> {
-    // Extract depth
     const depthMatch = line.match(/\bdepth\s+(\d+)/);
     const depth = depthMatch && depthMatch[1] ? parseInt(depthMatch[1], 10) : 0;
     if (depth > this.maxDepthSeen) {
       this.maxDepthSeen = depth;
     }
 
-    // Extract multipv index (default 1)
     const multiPvMatch = line.match(/\bmultipv\s+(\d+)/);
     const multiPvId = multiPvMatch && multiPvMatch[1] ? parseInt(multiPvMatch[1], 10) : 1;
 
-    // Extract score
     let scoreCp: number | null = null;
     let scoreMate: number | null = null;
 
@@ -58,7 +62,6 @@ export class UciParser {
       scoreMate = this.currentTurn === 'b' ? -rawMate : rawMate;
     }
 
-    // Extract nodes, nps, time
     const nodesMatch = line.match(/\bnodes\s+(\d+)/);
     const nodes = nodesMatch && nodesMatch[1] ? parseInt(nodesMatch[1], 10) : undefined;
 
@@ -68,7 +71,6 @@ export class UciParser {
     const timeMatch = line.match(/\btime\s+(\d+)/);
     const timeMs = timeMatch && timeMatch[1] ? parseInt(timeMatch[1], 10) : undefined;
 
-    // Extract PV (principal variation)
     const pvIndex = line.indexOf(' pv ');
     let pvMoves: string[] = [];
     let bestMove = '';
@@ -97,13 +99,29 @@ export class UciParser {
     const sortedLines = Array.from(this.currentLines.values()).sort((a, b) => a.id - b.id);
     const primaryLine = sortedLines[0] || moveLine;
 
+    const candidates: EngineCandidate[] = sortedLines
+      .filter((l) => l.bestMove && l.bestMove.length >= 4)
+      .map((l) => ({
+        pvId: l.id,
+        from: l.bestMove.substring(0, 2),
+        to: l.bestMove.substring(2, 4),
+        promotion: l.bestMove.length > 4 ? l.bestMove[4] : undefined,
+        depth: l.depth,
+        scoreCp: l.scoreCp,
+        scoreMate: l.scoreMate,
+        pv: l.pv,
+      }));
+
     return {
+      analysisId: this.currentAnalysisId,
+      positionKey: this.currentPositionKey,
       fen: this.currentFen,
       depth: this.maxDepthSeen,
       scoreCp: primaryLine.scoreCp,
       scoreMate: primaryLine.scoreMate,
       bestMove: primaryLine.bestMove,
       multiPvLines: sortedLines,
+      candidates,
       nodes,
       nps,
       timeMs,
@@ -118,13 +136,29 @@ export class UciParser {
     const sortedLines = Array.from(this.currentLines.values()).sort((a, b) => a.id - b.id);
     const primaryLine = sortedLines[0];
 
+    const candidates: EngineCandidate[] = sortedLines
+      .filter((l) => l.bestMove && l.bestMove.length >= 4)
+      .map((l) => ({
+        pvId: l.id,
+        from: l.bestMove.substring(0, 2),
+        to: l.bestMove.substring(2, 4),
+        promotion: l.bestMove.length > 4 ? l.bestMove[4] : undefined,
+        depth: l.depth,
+        scoreCp: l.scoreCp,
+        scoreMate: l.scoreMate,
+        pv: l.pv,
+      }));
+
     return {
+      analysisId: this.currentAnalysisId,
+      positionKey: this.currentPositionKey,
       fen: this.currentFen,
       depth: this.maxDepthSeen,
       scoreCp: primaryLine ? primaryLine.scoreCp : null,
       scoreMate: primaryLine ? primaryLine.scoreMate : null,
       bestMove: bestMove !== '(none)' ? bestMove : primaryLine ? primaryLine.bestMove : null,
       multiPvLines: sortedLines,
+      candidates,
       isCalculating: false,
       timestamp: Date.now(),
     };

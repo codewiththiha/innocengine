@@ -1,4 +1,32 @@
-import type { EngineEvaluation, EngineSettings } from './types';
+import type { EngineCandidate, EngineEvaluation, EngineSettings } from './types';
+
+interface VariationPalette {
+  fill: string;
+  stroke: string;
+  arrow: string;
+  markerId: string;
+}
+
+const PALETTES: Record<number, VariationPalette> = {
+  1: {
+    fill: 'rgba(245, 158, 11, 0.18)',
+    stroke: 'rgba(245, 158, 11, 0.75)',
+    arrow: 'rgba(245, 158, 11, 0.85)',
+    markerId: 'ai-marker-pv1',
+  },
+  2: {
+    fill: 'rgba(59, 130, 246, 0.14)',
+    stroke: 'rgba(59, 130, 246, 0.65)',
+    arrow: 'rgba(59, 130, 246, 0.75)',
+    markerId: 'ai-marker-pv2',
+  },
+  3: {
+    fill: 'rgba(168, 85, 247, 0.12)',
+    stroke: 'rgba(168, 85, 247, 0.55)',
+    arrow: 'rgba(168, 85, 247, 0.65)',
+    markerId: 'ai-marker-pv3',
+  },
+};
 
 export class SvgOverlay {
   private board: HTMLElement;
@@ -7,9 +35,11 @@ export class SvgOverlay {
   private evalBarFill: HTMLElement | null = null;
   private evalScoreText: HTMLElement | null = null;
   private hudElement: HTMLElement | null = null;
-  private domHighlights: HTMLElement[] = [];
   private isFlipped: boolean = false;
   private settings: EngineSettings;
+  private activeCandidates: EngineCandidate[] = [];
+  private currentRenderKey: string = '';
+  private rafScheduled: boolean = false;
 
   constructor(board: HTMLElement, settings: EngineSettings) {
     this.board = board;
@@ -21,7 +51,10 @@ export class SvgOverlay {
     this.settings = settings;
     if (!settings.showHighlights) {
       this.clearHighlights();
+    } else {
+      this.renderCandidates(this.activeCandidates);
     }
+
     if (this.evalBarContainer) {
       this.evalBarContainer.style.display = settings.showEvalBar ? 'flex' : 'none';
     }
@@ -31,7 +64,11 @@ export class SvgOverlay {
   }
 
   public setFlipped(flipped: boolean) {
-    this.isFlipped = flipped;
+    if (this.isFlipped !== flipped) {
+      this.isFlipped = flipped;
+      this.currentRenderKey = '';
+      this.renderCandidates(this.activeCandidates);
+    }
   }
 
   private init() {
@@ -55,7 +92,7 @@ export class SvgOverlay {
 
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.id = 'chess-ai-svg-overlay';
-    svg.setAttribute('viewBox', '0 0 800 800');
+    svg.setAttribute('viewBox', '0 0 8 8');
     svg.style.position = 'absolute';
     svg.style.top = '0';
     svg.style.left = '0';
@@ -66,11 +103,18 @@ export class SvgOverlay {
 
     svg.innerHTML = `
       <defs>
-        <filter id="ai-glow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.6"/>
-        </filter>
+        <marker id="ai-marker-pv1" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(245, 158, 11, 0.85)" />
+        </marker>
+        <marker id="ai-marker-pv2" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(59, 130, 246, 0.75)" />
+        </marker>
+        <marker id="ai-marker-pv3" viewBox="0 0 6 6" refX="4.5" refY="3" markerWidth="0.35" markerHeight="0.35" orient="auto-start-reverse">
+          <path d="M 0 0.5 L 5 3 L 0 5.5 z" fill="rgba(168, 85, 247, 0.65)" />
+        </marker>
       </defs>
       <g id="ai-highlights-layer"></g>
+      <g id="ai-connectors-layer"></g>
     `;
 
     this.board.appendChild(svg);
@@ -78,21 +122,20 @@ export class SvgOverlay {
   }
 
   private createEvalBar() {
-    const existing = document.querySelector('#chess-ai-eval-bar');
+    const existing = this.board.querySelector('#chess-ai-eval-bar');
     if (existing) existing.remove();
 
     const bar = document.createElement('div');
     bar.id = 'chess-ai-eval-bar';
     bar.style.position = 'absolute';
     bar.style.top = '0';
-    bar.style.left = '-34px';
-    bar.style.width = '24px';
+    bar.style.left = '-26px';
+    bar.style.width = '18px';
     bar.style.height = '100%';
-    bar.style.borderRadius = '6px';
+    bar.style.borderRadius = '4px';
     bar.style.overflow = 'hidden';
     bar.style.backgroundColor = '#1e293b';
-    bar.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4)';
-    bar.style.border = '1px solid rgba(255,255,255,0.15)';
+    bar.style.border = '1px solid rgba(255, 255, 255, 0.12)';
     bar.style.display = this.settings.showEvalBar ? 'flex' : 'none';
     bar.style.flexDirection = 'column-reverse';
     bar.style.zIndex = '30';
@@ -101,19 +144,19 @@ export class SvgOverlay {
     fill.id = 'chess-ai-eval-fill';
     fill.style.width = '100%';
     fill.style.height = '50%';
-    fill.style.backgroundColor = '#f8fafc';
-    fill.style.transition = 'height 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
+    fill.style.backgroundColor = '#f1f5f9';
+    fill.style.transition = 'height 0.25s ease-out';
 
     const score = document.createElement('div');
     score.id = 'chess-ai-eval-score';
     score.style.position = 'absolute';
     score.style.width = '100%';
     score.style.textAlign = 'center';
-    score.style.fontSize = '10px';
+    score.style.fontSize = '9px';
     score.style.fontWeight = '700';
-    score.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+    score.style.fontFamily = 'monospace';
     score.style.color = '#0f172a';
-    score.style.bottom = '6px';
+    score.style.bottom = '4px';
     score.style.pointerEvents = 'none';
     score.innerText = '0.0';
 
@@ -127,38 +170,36 @@ export class SvgOverlay {
   }
 
   private createHudElement() {
-    const existing = document.querySelector('#chess-ai-hud');
+    const existing = this.board.querySelector('#chess-ai-hud');
     if (existing) existing.remove();
 
     const hud = document.createElement('div');
     hud.id = 'chess-ai-hud';
     hud.style.position = 'absolute';
-    hud.style.top = '-42px'; // Position above board to avoid covering player avatar
+    hud.style.top = '-34px';
     hud.style.left = '0';
     hud.style.right = '0';
     hud.style.display = this.settings.showHud ? 'flex' : 'none';
     hud.style.alignItems = 'center';
     hud.style.justifyContent = 'space-between';
-    hud.style.padding = '8px 14px';
-    hud.style.background = 'rgba(15, 23, 42, 0.92)';
-    hud.style.backdropFilter = 'blur(8px)';
-    hud.style.borderRadius = '8px';
-    hud.style.border = '1px solid rgba(255, 255, 255, 0.15)';
-    hud.style.color = '#f8fafc';
-    hud.style.fontFamily = 'system-ui, -apple-system, sans-serif';
-    hud.style.fontSize = '12px';
-    hud.style.boxShadow = '0 6px 18px rgba(0, 0, 0, 0.35)';
+    hud.style.padding = '4px 10px';
+    hud.style.background = 'rgba(15, 23, 42, 0.88)';
+    hud.style.borderRadius = '4px';
+    hud.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+    hud.style.color = '#cbd5e1';
+    hud.style.fontFamily = 'ui-monospace, monospace';
+    hud.style.fontSize = '11px';
     hud.style.zIndex = '35';
 
     hud.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981;" id="ai-status-dot"></span>
-        <span style="font-weight:700; color:#38bdf8;">Stockfish AI</span>
-        <span style="color:#94a3b8;" id="ai-hud-depth">Depth: -</span>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#10b981;" id="ai-status-dot"></span>
+        <span style="font-weight:600; color:#e2e8f0;">STOCKFISH</span>
+        <span style="color:#64748b;" id="ai-hud-depth">d0</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 14px;">
-        <span style="font-weight:700; color:#e2e8f0;" id="ai-hud-best">Best Move: -</span>
-        <span style="color:#a855f7; font-weight:700;" id="ai-hud-eval">0.00</span>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="color:#94a3b8;" id="ai-hud-best">-</span>
+        <span style="color:#38bdf8; font-weight:700;" id="ai-hud-eval">0.00</span>
       </div>
     `;
 
@@ -176,29 +217,113 @@ export class SvgOverlay {
   }
 
   public clearHighlights() {
-    // 1. Clear SVG layer highlights
+    this.activeCandidates = [];
+    this.currentRenderKey = '';
     if (this.svg) {
       const hlLayer = this.svg.querySelector('#ai-highlights-layer');
+      const connLayer = this.svg.querySelector('#ai-connectors-layer');
       if (hlLayer) hlLayer.innerHTML = '';
+      if (connLayer) connLayer.innerHTML = '';
     }
-
-    // 2. Clear injected DOM highlight elements
-    this.domHighlights.forEach((el) => el.remove());
-    this.domHighlights = [];
-    const oldEls = this.board.querySelectorAll('.ai-best-move-highlight');
-    oldEls.forEach((el) => el.remove());
   }
 
-  public renderEvaluation(evaluation: EngineEvaluation) {
-    if (!this.svg) this.createSvgElement();
-    this.clearHighlights();
-
-    this.updateEvalBar(evaluation);
-    this.updateHud(evaluation);
-
-    if (this.settings.showHighlights && evaluation.bestMove && evaluation.bestMove.length >= 4) {
-      this.drawMoveHighlights(evaluation.bestMove);
+  public renderCandidates(candidates: EngineCandidate[]) {
+    this.activeCandidates = candidates;
+    if (!this.settings.showHighlights || !this.svg) {
+      return;
     }
+
+    const newKey = `${this.isFlipped ? 'F' : 'N'}_${candidates.map((c) => `${c.pvId}:${c.from}${c.to}`).join(';')}`;
+    if (newKey === this.currentRenderKey) {
+      return;
+    }
+    this.currentRenderKey = newKey;
+
+    const hlLayer = this.svg.querySelector('#ai-highlights-layer');
+    const connLayer = this.svg.querySelector('#ai-connectors-layer');
+    if (!hlLayer || !connLayer) return;
+
+    hlLayer.innerHTML = '';
+    connLayer.innerHTML = '';
+
+    candidates.forEach((candidate) => {
+      const palette = PALETTES[candidate.pvId] || PALETTES[1] || {
+        fill: 'rgba(245, 158, 11, 0.18)',
+        stroke: 'rgba(245, 158, 11, 0.75)',
+        arrow: 'rgba(245, 158, 11, 0.85)',
+        markerId: 'ai-marker-pv1',
+      };
+      const fromPos = this.algebraicToSvgPos(candidate.from);
+      const toPos = this.algebraicToSvgPos(candidate.to);
+      if (!fromPos || !toPos) return;
+
+      // Source square
+      const rectFrom = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rectFrom.setAttribute('x', fromPos.x.toString());
+      rectFrom.setAttribute('y', fromPos.y.toString());
+      rectFrom.setAttribute('width', '1');
+      rectFrom.setAttribute('height', '1');
+      rectFrom.setAttribute('rx', '0.08');
+      rectFrom.setAttribute('fill', palette.fill);
+      rectFrom.setAttribute('stroke', palette.stroke);
+      rectFrom.setAttribute('stroke-width', '0.02');
+      hlLayer.appendChild(rectFrom);
+
+      // Destination square
+      const rectTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rectTo.setAttribute('x', toPos.x.toString());
+      rectTo.setAttribute('y', toPos.y.toString());
+      rectTo.setAttribute('width', '1');
+      rectTo.setAttribute('height', '1');
+      rectTo.setAttribute('rx', '0.08');
+      rectTo.setAttribute('fill', palette.fill);
+      rectTo.setAttribute('stroke', palette.stroke);
+      rectTo.setAttribute('stroke-width', '0.02');
+      hlLayer.appendChild(rectTo);
+
+      // Restrained connector arrow
+      if (this.settings.showConnectors) {
+        const cx1 = fromPos.x + 0.5;
+        const cy1 = fromPos.y + 0.5;
+        const cx2 = toPos.x + 0.5;
+        const cy2 = toPos.y + 0.5;
+
+        const dx = cx2 - cx1;
+        const dy = cy2 - cy1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 0.4) {
+          const offsetStart = 0.22;
+          const offsetEnd = 0.28;
+          const sx = cx1 + (dx / dist) * offsetStart;
+          const sy = cy1 + (dy / dist) * offsetStart;
+          const ex = cx2 - (dx / dist) * offsetEnd;
+          const ey = cy2 - (dy / dist) * offsetEnd;
+
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', sx.toString());
+          line.setAttribute('y1', sy.toString());
+          line.setAttribute('x2', ex.toString());
+          line.setAttribute('y2', ey.toString());
+          line.setAttribute('stroke', palette.arrow);
+          line.setAttribute('stroke-width', '0.028');
+          line.setAttribute('stroke-linecap', 'round');
+          line.setAttribute('marker-end', `url(#${palette.markerId})`);
+          connLayer.appendChild(line);
+        }
+      }
+    });
+  }
+
+  public updateEvaluationMetadata(evaluation: EngineEvaluation) {
+    if (this.rafScheduled) return;
+    this.rafScheduled = true;
+
+    requestAnimationFrame(() => {
+      this.rafScheduled = false;
+      this.updateEvalBar(evaluation);
+      this.updateHud(evaluation);
+    });
   }
 
   private updateEvalBar(evalData: EngineEvaluation) {
@@ -223,11 +348,11 @@ export class SvgOverlay {
 
     if (fillPercent > 50) {
       this.evalScoreText.style.color = '#0f172a';
-      this.evalScoreText.style.bottom = '6px';
+      this.evalScoreText.style.bottom = '4px';
       this.evalScoreText.style.top = 'auto';
     } else {
-      this.evalScoreText.style.color = '#f8fafc';
-      this.evalScoreText.style.top = '6px';
+      this.evalScoreText.style.color = '#f1f5f9';
+      this.evalScoreText.style.top = '4px';
       this.evalScoreText.style.bottom = 'auto';
     }
   }
@@ -240,17 +365,17 @@ export class SvgOverlay {
     const evalEl = this.hudElement.querySelector('#ai-hud-eval') as HTMLElement;
     const dotEl = this.hudElement.querySelector('#ai-status-dot') as HTMLElement;
 
-    if (depthEl) depthEl.innerText = `Depth: ${evalData.depth || 0}`;
-    if (bestEl) bestEl.innerText = `Move: ${evalData.bestMove ? this.formatUciMove(evalData.bestMove) : '-'}`;
+    if (depthEl) depthEl.innerText = `d${evalData.depth || 0}`;
+    if (bestEl) bestEl.innerText = evalData.bestMove ? this.formatUciMove(evalData.bestMove) : '-';
 
     if (evalEl) {
       if (evalData.scoreMate !== null) {
         evalEl.innerText = `M${evalData.scoreMate > 0 ? '+' : ''}${evalData.scoreMate}`;
-        evalEl.style.color = '#ec4899';
+        evalEl.style.color = '#f43f5e';
       } else if (evalData.scoreCp !== null) {
         const p = (evalData.scoreCp / 100).toFixed(2);
         evalEl.innerText = `${evalData.scoreCp > 0 ? '+' : ''}${p}`;
-        evalEl.style.color = evalData.scoreCp >= 0 ? '#38bdf8' : '#f87171';
+        evalEl.style.color = evalData.scoreCp >= 0 ? '#38bdf8' : '#cbd5e1';
       }
     }
 
@@ -259,112 +384,22 @@ export class SvgOverlay {
     }
   }
 
-  /**
-   * Colors both the piece in charge (from square) and the destination square (to square)
-   */
-  private drawMoveHighlights(move: string) {
-    const fromSquare = move.substring(0, 2);
-    const toSquare = move.substring(2, 4);
-
-    const fromFile = fromSquare.charCodeAt(0) - 97 + 1; // 1-8
-    const fromRank = fromSquare[1] ? parseInt(fromSquare[1], 10) : 1;
-    const toFile = toSquare.charCodeAt(0) - 97 + 1; // 1-8
-    const toRank = toSquare[1] ? parseInt(toSquare[1], 10) : 1;
-
-    // 1. Inject native-style DOM highlighters into wc-chess-board
-    this.createDomHighlight(fromFile, fromRank, 'from');
-    this.createDomHighlight(toFile, toRank, 'to');
-
-    // 2. Render SVG overlay rects for absolute positioning guarantee
-    if (this.svg) {
-      const hlLayer = this.svg.querySelector('#ai-highlights-layer');
-      if (hlLayer) {
-        const fromCoord = this.squareToSquareBox(fromSquare);
-        const toCoord = this.squareToSquareBox(toSquare);
-
-        if (fromCoord) {
-          // Origin piece in charge: vibrant azure halo with border
-          const rectFrom = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          rectFrom.setAttribute('x', fromCoord.x.toString());
-          rectFrom.setAttribute('y', fromCoord.y.toString());
-          rectFrom.setAttribute('width', '100');
-          rectFrom.setAttribute('height', '100');
-          rectFrom.setAttribute('rx', '8');
-          rectFrom.setAttribute('fill', 'rgba(56, 189, 248, 0.40)');
-          rectFrom.setAttribute('stroke', '#0284c7');
-          rectFrom.setAttribute('stroke-width', '4');
-          hlLayer.appendChild(rectFrom);
-        }
-
-        if (toCoord) {
-          // Destination square: vibrant emerald target with solid border
-          const rectTo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          rectTo.setAttribute('x', toCoord.x.toString());
-          rectTo.setAttribute('y', toCoord.y.toString());
-          rectTo.setAttribute('width', '100');
-          rectTo.setAttribute('height', '100');
-          rectTo.setAttribute('rx', '8');
-          rectTo.setAttribute('fill', 'rgba(16, 185, 129, 0.45)');
-          rectTo.setAttribute('stroke', '#10b981');
-          rectTo.setAttribute('stroke-width', '4');
-          hlLayer.appendChild(rectTo);
-        }
-      }
-    }
-  }
-
-  private createDomHighlight(file: number, rank: number, type: 'from' | 'to') {
-    const el = document.createElement('div');
-    el.className = `highlight ai-best-move-highlight square-${file}${rank}`;
-    el.style.position = 'absolute';
-    el.style.pointerEvents = 'none';
-    el.style.zIndex = '5';
-    el.style.borderRadius = '4px';
-
-    if (type === 'from') {
-      // Piece in charge square: Azure / Cyan
-      el.style.backgroundColor = 'rgba(56, 189, 248, 0.55)';
-      el.style.boxShadow = 'inset 0 0 0 3px #0284c7';
-    } else {
-      // Target destination square: Emerald Green
-      el.style.backgroundColor = 'rgba(16, 185, 129, 0.55)';
-      el.style.boxShadow = 'inset 0 0 0 3px #059669';
-    }
-
-    // Set fallback transform position if Chess.com square-xy CSS isn't applied
-    const colIdx = this.isFlipped ? 8 - file : file - 1;
-    const rowIdx = this.isFlipped ? rank - 1 : 8 - rank;
-    el.style.left = `${colIdx * 12.5}%`;
-    el.style.top = `${rowIdx * 12.5}%`;
-    el.style.width = '12.5%';
-    el.style.height = '12.5%';
-
-    this.board.appendChild(el);
-    this.domHighlights.push(el);
-  }
-
-  private squareToSquareBox(square: string): { x: number; y: number } | null {
-    if (square.length < 2 || !square[1]) return null;
+  private algebraicToSvgPos(square: string): { x: number; y: number } | null {
+    if (!square || square.length < 2 || !square[1]) return null;
     const file = square.charCodeAt(0) - 97;
     const rank = parseInt(square[1], 10) - 1;
-    if (file < 0 || file > 7 || rank < 0 || rank > 7) return null;
+    if (file < 0 || file > 7 || rank < 0 || rank > 7 || isNaN(rank)) return null;
 
     if (!this.isFlipped) {
-      return {
-        x: file * 100,
-        y: (7 - rank) * 100,
-      };
+      return { x: file, y: 7 - rank };
     } else {
-      return {
-        x: (7 - file) * 100,
-        y: rank * 100,
-      };
+      return { x: 7 - file, y: rank };
     }
   }
 
   private formatUciMove(uci: string): string {
     if (!uci || uci.length < 4) return uci;
-    return `${uci.substring(0, 2)} → ${uci.substring(2, 4)}${uci.length > 4 ? `(${uci[4]?.toUpperCase()})` : ''}`;
+    return `${uci.substring(0, 2)} → ${uci.substring(2, 4)}`;
   }
 
   public destroy() {

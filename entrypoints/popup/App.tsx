@@ -9,6 +9,7 @@ import {
   Sparkles,
   Activity,
   CheckCircle2,
+  GitFork,
 } from 'lucide-react';
 import './App.css';
 
@@ -65,11 +66,11 @@ export default function App() {
       <header className="popup-header">
         <div className="popup-title-group">
           <div className="logo-icon">
-            <Sparkles size={18} color="#38bdf8" />
+            <Sparkles size={18} color="#f59e0b" />
           </div>
           <div>
             <h1 className="popup-title">Chess AI Overlay</h1>
-            <p className="popup-subtitle">Square Highlighter & Stockfish</p>
+            <p className="popup-subtitle">Board-First Move Analysis</p>
           </div>
         </div>
         <div className={`status-badge status-${engineStatus}`}>
@@ -129,20 +130,61 @@ export default function App() {
             <span>Deep (22)</span>
           </div>
         </div>
+
+        <div className="setting-item">
+          <div className="setting-label-row">
+            <span className="setting-label">Candidate Variations (MultiPV)</span>
+            <span className="setting-value">{settings.multiPv}</span>
+          </div>
+          <input
+            type="range"
+            min="1"
+            max="3"
+            step="1"
+            value={settings.multiPv}
+            onChange={(e) => updateSetting('multiPv', parseInt(e.target.value, 10))}
+            className="slider"
+          />
+          <div className="slider-hints">
+            <span>1 Line (Amber)</span>
+            <span>2 Lines (+Blue)</span>
+            <span>3 Lines (+Violet)</span>
+          </div>
+        </div>
       </div>
 
       <div className="settings-section">
         <div className="section-title">
-          <Eye size={14} /> Square Highlights & Visuals
+          <Eye size={14} /> Visual Highlights & HUD
         </div>
 
         <div className="toggle-list">
           <label className="toggle-row">
-            <span className="toggle-label">Piece Move Square Highlights</span>
+            <span className="toggle-label">Move Candidate Highlights</span>
             <input
               type="checkbox"
               checked={settings.showHighlights}
               onChange={(e) => updateSetting('showHighlights', e.target.checked)}
+              className="toggle-switch"
+            />
+          </label>
+
+          <label className="toggle-row">
+            <span className="toggle-label">Subtle Move Connectors</span>
+            <input
+              type="checkbox"
+              checked={settings.showConnectors}
+              onChange={(e) => updateSetting('showConnectors', e.target.checked)}
+              className="toggle-switch"
+            />
+          </label>
+
+          <label className="toggle-row">
+            <span className="toggle-label">Show Opponent Moves</span>
+            <input
+              type="checkbox"
+              checked={settings.showOpponentMoves}
+              onChange={(e) => updateSetting('showOpponentMoves', e.target.checked)}
               className="toggle-switch"
             />
           </label>
@@ -158,7 +200,7 @@ export default function App() {
           </label>
 
           <label className="toggle-row">
-            <span className="toggle-label">Top Analysis HUD</span>
+            <span className="toggle-label">Compact Board HUD</span>
             <input
               type="checkbox"
               checked={settings.showHud}

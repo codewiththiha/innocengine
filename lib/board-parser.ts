@@ -16,9 +16,6 @@ const PIECE_MAP: Record<string, string> = {
 };
 
 export class BoardParser {
-  /**
-   * Find the chessboard container element on Chess.com
-   */
   public static findBoardElement(): HTMLElement | null {
     const selectors = [
       'wc-chess-board',
@@ -37,9 +34,6 @@ export class BoardParser {
     return null;
   }
 
-  /**
-   * Determine if the board is flipped (Black perspective)
-   */
   public static isBoardFlipped(board: HTMLElement): boolean {
     if (board.classList.contains('flipped') || board.hasAttribute('flipped')) {
       return true;
@@ -51,31 +45,29 @@ export class BoardParser {
     return false;
   }
 
-  /**
-   * Extract board pieces, turn, and generate full FEN string
-   */
   public static extractBoardState(board: HTMLElement): BoardState | null {
     const isFlipped = this.isBoardFlipped(board);
-    const pieces = board.querySelectorAll<HTMLElement>('.piece');
+    const pieces = board.querySelectorAll<HTMLElement>('.piece:not([class*="ai-"])');
     if (!pieces || pieces.length === 0) {
       return null;
     }
 
-    // 8x8 grid: grid[rank][file] where rank 0 = 1st rank, file 0 = 'a'
     const grid: string[][] = Array(8)
       .fill(null)
       .map(() => Array(8).fill(''));
 
+    const pieceMap = new Map<string, string>();
     const boardRect = board.getBoundingClientRect();
     const squareWidth = boardRect.width / 8;
     const squareHeight = boardRect.height / 8;
 
     pieces.forEach((pieceEl) => {
+      if (pieceEl.closest('#chess-ai-svg-overlay')) return;
+
       let pieceType: string | null = null;
       let file: number | null = null;
       let rank: number | null = null;
 
-      // Extract piece type from classList
       for (const cls of Array.from(pieceEl.classList)) {
         if (PIECE_MAP[cls]) {
           pieceType = PIECE_MAP[cls];
@@ -83,7 +75,6 @@ export class BoardParser {
         }
       }
 
-      // If not in classList, try dataset or child SVG/img
       if (!pieceType) {
         const pieceData = pieceEl.dataset.piece;
         if (pieceData && PIECE_MAP[pieceData]) {
@@ -93,27 +84,23 @@ export class BoardParser {
 
       if (!pieceType) return;
 
-      // Method 1: Extract square from class (e.g. square-52 -> file 4, rank 1)
       for (const cls of Array.from(pieceEl.classList)) {
         const match = cls.match(/^square-(\d)(\d)$/);
         if (match && match[1] && match[2]) {
-          file = parseInt(match[1], 10) - 1; // 1-8 -> 0-7
-          rank = parseInt(match[2], 10) - 1; // 1-8 -> 0-7
+          file = parseInt(match[1], 10) - 1;
+          rank = parseInt(match[2], 10) - 1;
           break;
         }
       }
 
-      // Method 2: Extract from style transform (translate)
       if ((file === null || rank === null) && pieceEl.style.transform && squareWidth > 0) {
         const transform = pieceEl.style.transform;
         const matchPx = transform.match(/translate\(\s*(-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/);
         const matchPercent = transform.match(/translate\(\s*(-?\d+(?:\.\d+)?)%,\s*(-?\d+(?:\.\d+)?)%\)/);
 
         if (matchPx && matchPx[1] && matchPx[2]) {
-          const pxX = parseFloat(matchPx[1]);
-          const pxY = parseFloat(matchPx[2]);
-          const col = Math.round(pxX / squareWidth);
-          const row = Math.round(pxY / squareHeight);
+          const col = Math.round(parseFloat(matchPx[1]) / squareWidth);
+          const row = Math.round(parseFloat(matchPx[2]) / squareHeight);
           file = isFlipped ? 7 - col : col;
           rank = isFlipped ? row : 7 - row;
         } else if (matchPercent && matchPercent[1] && matchPercent[2]) {
@@ -129,31 +116,24 @@ export class BoardParser {
         if (rowArr) {
           rowArr[file] = pieceType;
         }
+        const sqName = `${String.fromCharCode(97 + file)}${rank + 1}`;
+        pieceMap.set(sqName, pieceType);
       }
     });
 
-    // Check if initial position
     const isInitialPosition = this.checkInitialPosition(grid);
-
-    // Determine Turn
-    let turn: 'w' | 'b' = 'w';
-    if (isInitialPosition) {
-      turn = 'w';
-    } else {
-      turn = this.detectSideToMove(board, grid);
-    }
-
-    // Compute Castling rights
+    const turn: 'w' | 'b' = isInitialPosition ? 'w' : this.detectSideToMove(board, grid);
     const castling = this.computeCastlingRights(grid);
-
-    // Generate FEN placement
     const placement = this.gridToPlacement(grid);
-    const fen = `${placement} ${turn} ${castling} - 0 1`;
+    const positionKey = `${placement} ${turn} ${castling} -`;
+    const fen = `${positionKey} 0 1`;
 
     return {
       fen,
+      positionKey,
       isFlipped,
       turn,
+      pieceMap,
       boardElement: board,
     };
   }
@@ -213,12 +193,10 @@ export class BoardParser {
     const row0 = grid[0];
     const row7 = grid[7];
 
-    // White King on e1
     if (row0 && row0[4] === 'K') {
       if (row0[7] === 'R') rights += 'K';
       if (row0[0] === 'R') rights += 'Q';
     }
-    // Black King on e8
     if (row7 && row7[4] === 'k') {
       if (row7[7] === 'r') rights += 'k';
       if (row7[0] === 'r') rights += 'q';
@@ -226,20 +204,22 @@ export class BoardParser {
     return rights.length > 0 ? rights : '-';
   }
 
-  /**
-   * Determine whose turn it is using active clock or last move highlight
-   */
   private static detectSideToMove(board: HTMLElement, grid: string[][]): 'w' | 'b' {
-    // 1. Check active clock on page
-    const whiteClock = document.querySelector('.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running');
-    const blackClock = document.querySelector('.player-component.black .clock-player-turn, .clock-black.running, [data-cy="black-clock"].running');
+    const whiteClock = document.querySelector(
+      '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
+    );
+    const blackClock = document.querySelector(
+      '.player-component.black .clock-player-turn, .clock-black.running, [data-cy="black-clock"].running'
+    );
     if (whiteClock && !blackClock) return 'w';
     if (blackClock && !whiteClock) return 'b';
 
-    // 2. Check highlighted move squares
-    const highlights = board.querySelectorAll('.highlight');
-    if (highlights.length >= 2) {
-      for (const hl of Array.from(highlights)) {
+    // Strictly exclude any overlay or AI highlights to prevent turn-oscillation feedback
+    const nativeHighlights = board.querySelectorAll(
+      '.highlight:not([class*="ai-"]):not([id*="ai-"])'
+    );
+    if (nativeHighlights.length >= 2) {
+      for (const hl of Array.from(nativeHighlights)) {
         for (const cls of Array.from(hl.classList)) {
           const match = cls.match(/^square-(\d)(\d)$/);
           if (match && match[1] && match[2]) {
@@ -247,19 +227,22 @@ export class BoardParser {
             const rank = parseInt(match[2], 10) - 1;
             const piece = grid[rank]?.[file];
             if (piece) {
-              const isWhitePiece = piece === piece.toUpperCase();
-              return isWhitePiece ? 'b' : 'w';
+              return piece === piece.toUpperCase() ? 'b' : 'w';
             }
           }
         }
       }
     }
 
-    // 3. Check move list in sidebar
-    const moveNodes = document.querySelectorAll('.move-list-row .node, vertical-move-list .node');
+    const moveNodes = document.querySelectorAll(
+      '.move-list-row .node, vertical-move-list .node'
+    );
     if (moveNodes.length > 0) {
       const lastNode = moveNodes[moveNodes.length - 1];
-      if (lastNode && (lastNode.classList.contains('white-node') || lastNode.getAttribute('data-whole-move-number'))) {
+      if (
+        lastNode &&
+        (lastNode.classList.contains('white-node') || lastNode.getAttribute('data-whole-move-number'))
+      ) {
         const isWhite = lastNode.classList.contains('white-node') || !lastNode.previousElementSibling;
         return isWhite ? 'b' : 'w';
       }

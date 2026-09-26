@@ -3,7 +3,15 @@ import type { EngineEvaluation, EngineSettings } from './types';
 export type EvalCallback = (evalData: EngineEvaluation) => void;
 export type StatusCallback = (status: 'loading' | 'ready' | 'analyzing' | 'error', message?: string) => void;
 
+export function getPositionKey(fen: string): string {
+  if (!fen) return '';
+  const parts = fen.trim().split(/\s+/);
+  return parts.slice(0, 4).join(' ');
+}
+
 export class EngineClient {
+  private activeAnalysisId: number = 0;
+  private activePositionKey: string = '';
   private currentFen: string = '';
   private onEvalCallbacks: Set<EvalCallback> = new Set();
   private onStatusCallbacks: Set<StatusCallback> = new Set();
@@ -21,8 +29,13 @@ export class EngineClient {
       if (message.target === 'content') {
         if (message.type === 'EVAL_UPDATE' && message.evaluation) {
           const evalData: EngineEvaluation = message.evaluation;
-          // Only deliver if matches current FEN
-          if (this.normalizeFen(evalData.fen) === this.normalizeFen(this.currentFen)) {
+
+          // Reject stale evaluation generations or position mismatches
+          const matchesGeneration = evalData.analysisId === this.activeAnalysisId;
+          const matchesPosition = evalData.positionKey === this.activePositionKey ||
+            getPositionKey(evalData.fen) === this.activePositionKey;
+
+          if (matchesGeneration && matchesPosition) {
             this.onEvalCallbacks.forEach((cb) => cb(evalData));
           }
         } else if (message.type === 'ENGINE_STATUS') {
@@ -32,21 +45,26 @@ export class EngineClient {
     });
   }
 
-  public analyze(fen: string, settings: EngineSettings) {
+  public analyze(fen: string, settings: EngineSettings): number {
+    this.activeAnalysisId++;
     this.currentFen = fen;
+    this.activePositionKey = getPositionKey(fen);
 
-    // Send request to background/offscreen engine
     try {
       chrome.runtime.sendMessage({
         target: 'engine',
         type: 'ANALYZE',
+        analysisId: this.activeAnalysisId,
+        positionKey: this.activePositionKey,
         fen,
         depth: settings.depth,
         multiPv: settings.multiPv,
       });
     } catch (err) {
-      console.warn('[EngineClient] Error sending analyze message to background:', err);
+      console.warn('[EngineClient] Error dispatching analyze message:', err);
     }
+
+    return this.activeAnalysisId;
   }
 
   public stop() {
@@ -54,10 +72,19 @@ export class EngineClient {
       chrome.runtime.sendMessage({
         target: 'engine',
         type: 'STOP',
+        analysisId: this.activeAnalysisId,
       });
     } catch (err) {
-      console.warn('[EngineClient] Error sending stop message to background:', err);
+      console.warn('[EngineClient] Error dispatching stop message:', err);
     }
+  }
+
+  public getActiveAnalysisId(): number {
+    return this.activeAnalysisId;
+  }
+
+  public getActivePositionKey(): string {
+    return this.activePositionKey;
   }
 
   public onEvaluation(cb: EvalCallback): () => void {
@@ -68,12 +95,5 @@ export class EngineClient {
   public onStatus(cb: StatusCallback): () => void {
     this.onStatusCallbacks.add(cb);
     return () => this.onStatusCallbacks.delete(cb);
-  }
-
-  private normalizeFen(fen: string): string {
-    if (!fen) return '';
-    // Compare piece placement and turn
-    const parts = fen.trim().split(/\s+/);
-    return parts.slice(0, 2).join(' ');
   }
 }

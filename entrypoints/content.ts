@@ -1,8 +1,9 @@
 import { BoardParser } from '../lib/board-parser';
 import { SvgOverlay } from '../lib/svg-overlay';
 import { EngineClient } from '../lib/engine-client';
+import { HighlightController } from '../lib/highlight-controller';
 import { getSettings, subscribeToSettings } from '../lib/storage';
-import type { EngineSettings } from '../lib/types';
+import type { EngineSettings, BoardState } from '../lib/types';
 
 export default defineContentScript({
   matches: ['*://*.chess.com/*'],
@@ -11,18 +12,24 @@ export default defineContentScript({
     let currentBoard: HTMLElement | null = null;
     let overlay: SvgOverlay | null = null;
     let engineClient: EngineClient | null = null;
+    let highlightController: HighlightController | null = null;
     let currentSettings: EngineSettings;
-    let lastFen: string = '';
+    let lastPositionKey: string = '';
     let boardObserver: MutationObserver | null = null;
+    let pendingScanRaf: number | null = null;
 
     async function init() {
       currentSettings = await getSettings();
       engineClient = new EngineClient();
 
       engineClient.onEvaluation((evaluation) => {
-        if (overlay && currentSettings.showHighlights) {
-          overlay.renderEvaluation(evaluation);
-        }
+        if (!overlay || !highlightController) return;
+
+        // Throttled high-frequency updates for evaluation score and HUD
+        overlay.updateEvaluationMetadata(evaluation);
+
+        // Low-frequency stabilized candidate commit for chessboard highlights
+        highlightController.handleEvaluation(evaluation);
       });
 
       subscribeToSettings((newSettings) => {
@@ -30,8 +37,17 @@ export default defineContentScript({
         if (overlay) {
           overlay.updateSettings(newSettings);
         }
-        if (lastFen && engineClient && newSettings.autoAnalyze) {
-          engineClient.analyze(lastFen, currentSettings);
+        if (highlightController) {
+          highlightController.updateSettings(newSettings);
+        }
+        if (lastPositionKey && engineClient && newSettings.autoAnalyze) {
+          const board = currentBoard || BoardParser.findBoardElement();
+          if (board) {
+            const state = BoardParser.extractBoardState(board);
+            if (state) {
+              engineClient.analyze(state.fen, currentSettings);
+            }
+          }
         }
       });
 
@@ -39,13 +55,11 @@ export default defineContentScript({
     }
 
     function startBoardScanner() {
-      // Check immediately
       const initialBoard = BoardParser.findBoardElement();
       if (initialBoard) {
         attachToBoard(initialBoard);
       }
 
-      // Continuous scanner for SPA view switches
       setInterval(() => {
         const board = BoardParser.findBoardElement();
         if (board && board !== currentBoard) {
@@ -70,14 +84,34 @@ export default defineContentScript({
       }
       overlay = new SvgOverlay(board, currentSettings);
 
+      highlightController = new HighlightController(currentSettings, (snapshot) => {
+        if (overlay) {
+          overlay.renderCandidates(snapshot.candidates);
+        }
+      });
+
       if (boardObserver) {
         boardObserver.disconnect();
       }
 
       handleBoardChange();
 
-      boardObserver = new MutationObserver(() => {
-        handleBoardChange();
+      boardObserver = new MutationObserver((mutations) => {
+        // Guard against feedback loops caused by our own overlay DOM nodes
+        const isSelfMutation = mutations.every((m) => {
+          const target = m.target as HTMLElement;
+          return target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar');
+        });
+        if (isSelfMutation) return;
+
+        // Debounce board extraction to ensure pieces have settled
+        if (pendingScanRaf !== null) {
+          cancelAnimationFrame(pendingScanRaf);
+        }
+        pendingScanRaf = requestAnimationFrame(() => {
+          pendingScanRaf = null;
+          handleBoardChange();
+        });
       });
 
       boardObserver.observe(board, {
@@ -89,20 +123,16 @@ export default defineContentScript({
     }
 
     function handleBoardChange() {
-      if (!currentBoard || !overlay || !engineClient) return;
+      if (!currentBoard || !overlay || !engineClient || !highlightController) return;
 
-      const state = BoardParser.extractBoardState(currentBoard);
+      const state: BoardState | null = BoardParser.extractBoardState(currentBoard);
       if (!state) return;
 
       overlay.setFlipped(state.isFlipped);
+      highlightController.setBoardState(state);
 
-      const normalizedCurrent = state.fen.split(' ').slice(0, 2).join(' ');
-      const normalizedLast = lastFen.split(' ').slice(0, 2).join(' ');
-
-      if (normalizedCurrent !== normalizedLast) {
-        lastFen = state.fen;
-        overlay.clearHighlights();
-
+      if (state.positionKey !== lastPositionKey) {
+        lastPositionKey = state.positionKey;
         if (currentSettings.autoAnalyze) {
           engineClient.analyze(state.fen, currentSettings);
         }

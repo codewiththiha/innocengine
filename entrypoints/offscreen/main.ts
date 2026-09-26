@@ -7,7 +7,8 @@ class StockfishEngineHost {
   private isReady: boolean = false;
   private currentSenderTabId: number | undefined;
   private currentFen: string = '';
-  private currentEvaluation: EngineEvaluation | null = null;
+  private currentAnalysisId: number = 0;
+  private currentPositionKey: string = '';
 
   constructor() {
     this.parser = new UciParser();
@@ -17,7 +18,6 @@ class StockfishEngineHost {
 
   private initEngine() {
     try {
-      // Use self-contained single-threaded Stockfish engine for cross-environment reliability
       const workerUrl = chrome.runtime.getURL('engine/stockfish.js');
       this.worker = new Worker(workerUrl);
 
@@ -30,7 +30,6 @@ class StockfishEngineHost {
         console.error('[EngineHost] Stockfish worker failed:', err);
       };
 
-      // Initialize UCI session
       this.worker.postMessage('uci');
       this.worker.postMessage('isready');
       this.worker.postMessage('setoption name Hash value 32');
@@ -48,20 +47,24 @@ class StockfishEngineHost {
 
     const partialEval = this.parser.parseLine(line);
     if (partialEval && partialEval.bestMove) {
-      this.currentEvaluation = {
+      const evaluation: EngineEvaluation = {
+        analysisId: partialEval.analysisId || this.currentAnalysisId,
+        positionKey: partialEval.positionKey || this.currentPositionKey,
         fen: partialEval.fen || this.currentFen,
         depth: partialEval.depth || 0,
         scoreCp: partialEval.scoreCp ?? null,
         scoreMate: partialEval.scoreMate ?? null,
         bestMove: partialEval.bestMove,
         multiPvLines: partialEval.multiPvLines || [],
+        candidates: partialEval.candidates || [],
         nodes: partialEval.nodes,
         nps: partialEval.nps,
+        timeMs: partialEval.timeMs,
         isCalculating: partialEval.isCalculating ?? true,
         timestamp: Date.now(),
       };
 
-      this.broadcastEvaluation(this.currentEvaluation);
+      this.broadcastEvaluation(evaluation);
     }
   }
 
@@ -94,6 +97,8 @@ class StockfishEngineHost {
         if (message.type === 'ANALYZE' && message.fen) {
           this.analyzePosition(
             message.fen,
+            message.analysisId || 0,
+            message.positionKey || '',
             message.depth || 16,
             message.multiPv || 1,
             message.senderTabId
@@ -107,14 +112,22 @@ class StockfishEngineHost {
     });
   }
 
-  public analyzePosition(fen: string, depth: number, multiPv: number, senderTabId?: number) {
+  public analyzePosition(
+    fen: string,
+    analysisId: number,
+    positionKey: string,
+    depth: number,
+    multiPv: number,
+    senderTabId?: number
+  ) {
     if (!this.worker) return;
 
     this.currentSenderTabId = senderTabId;
     this.currentFen = fen;
-    this.parser.reset(fen);
+    this.currentAnalysisId = analysisId;
+    this.currentPositionKey = positionKey;
+    this.parser.reset(fen, analysisId, positionKey);
 
-    // Stop active search before setting next position
     this.worker.postMessage('stop');
     this.worker.postMessage(`setoption name MultiPV value ${multiPv}`);
     this.worker.postMessage(`position fen ${fen}`);
