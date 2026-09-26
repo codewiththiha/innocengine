@@ -26,7 +26,7 @@ export const BUILTIN_MAIA3: CustomEngineMeta = {
   id: 'maia3',
   name: 'Maia-3 (Chessformer Human Policy)',
   author: 'CSSLab / University of Toronto',
-  sizeBytes: 26214400,
+  sizeBytes: 0,
   dateAdded: 0,
   isBuiltIn: true,
 };
@@ -35,7 +35,7 @@ export const BUILTIN_MAIA2: CustomEngineMeta = {
   id: 'maia2',
   name: 'Maia-2 (Unified Human Model)',
   author: 'CSSLab / University of Toronto',
-  sizeBytes: 24117248,
+  sizeBytes: 0,
   dateAdded: 0,
   isBuiltIn: true,
 };

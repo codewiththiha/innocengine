@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
 import { EngineRegistry, type BUILTIN_STOCKFISH } from '../../lib/engine-registry';
+import { capsFor } from '../../lib/engine-capabilities';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
 import { getEngineStrengthDescription, mapEloToPatriciaSkill } from '../../lib/engine-tuning';
 import type {
@@ -44,6 +45,7 @@ export default function App() {
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeCaps = capsFor(settings.activeEngineId, capabilities);
 
   useEffect(() => {
     getSettings().then((s) => setSettings(s));
@@ -440,7 +442,7 @@ export default function App() {
             <Sliders size={14} /> Search Budget & Variations
           </div>
 
-          {(settings.activeEngineId === 'stockfish' || settings.activeEngineId === 'patricia') ? (
+          {activeCaps.hasDepth ? (
             <div className="setting-item">
               <div className="setting-label-row">
                 <span className="setting-label">Calculation Depth</span>
@@ -461,7 +463,7 @@ export default function App() {
                 <span>Deep (24)</span>
               </div>
             </div>
-          ) : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? (
+          ) : (
             <div
               className="setting-item"
               style={{
@@ -475,10 +477,10 @@ export default function App() {
                 <Sparkles size={13} /> Direct Neural Policy Model
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                {settings.activeEngineId === 'maia2' ? 'Maia-2' : 'Maia-3'} predicts human candidate moves in a single neural network inference pass (nodes: 1). Tree-search depth is not applicable.
+                {activeCaps.name} predicts human candidate moves in a single neural network inference pass (nodes: 1). Tree-search depth is not applicable.
               </div>
             </div>
-          ) : null}
+          )}
 
           <div className="setting-item">
             <div className="setting-label-row">
@@ -556,19 +558,21 @@ export default function App() {
               </div>
 
               {/* Human Strength Limiter (UCI_LimitStrength & UCI_Elo) */}
-              <div className="setting-item" style={{ marginTop: 12 }}>
-                <label className="toggle-row">
-                  <span className="toggle-label">Enable Human Mode (UCI_LimitStrength)</span>
-                  <input
-                    type="checkbox"
-                    checked={settings.patriciaLimitStrength ?? (settings.patriciaPersonality === 'human')}
-                    onChange={(e) => updateSetting('patriciaLimitStrength', e.target.checked)}
-                    className="toggle-switch"
-                  />
-                </label>
-              </div>
+              {settings.patriciaPersonality !== 'full_strength' && (
+                <div className="setting-item" style={{ marginTop: 12 }}>
+                  <label className="toggle-row">
+                    <span className="toggle-label">Enable Human Mode (UCI_LimitStrength)</span>
+                    <input
+                      type="checkbox"
+                      checked={settings.patriciaLimitStrength ?? (settings.patriciaPersonality === 'human')}
+                      onChange={(e) => updateSetting('patriciaLimitStrength', e.target.checked)}
+                      className="toggle-switch"
+                    />
+                  </label>
+                </div>
+              )}
 
-              {(settings.patriciaLimitStrength || settings.patriciaPersonality === 'human') && (
+              {settings.patriciaPersonality !== 'full_strength' && (settings.patriciaLimitStrength || settings.patriciaPersonality === 'human') && (
                 <div className="setting-item" style={{ marginTop: 8 }}>
                   <div className="setting-label-row">
                     <span className="setting-label">Target Human Elo (UCI_Elo)</span>
@@ -641,6 +645,20 @@ export default function App() {
                   <span className="setting-label">Target Human Elo Rating</span>
                   <span className="setting-value">{Math.max(1100, Math.min(1900, Math.round((settings.targetElo || 1500) / 100) * 100))} Elo</span>
                 </div>
+
+                <div className="elo-pills">
+                  {[1100, 1300, 1500, 1700, 1900].map((elo) => (
+                    <button
+                      key={elo}
+                      type="button"
+                      className={`elo-pill ${Math.round((settings.targetElo || 1500) / 100) * 100 === elo ? 'active' : ''}`}
+                      onClick={() => updateSetting('targetElo', elo)}
+                    >
+                      {elo}
+                    </button>
+                  ))}
+                </div>
+
                 <input
                   type="range"
                   min="1100"
@@ -687,6 +705,20 @@ export default function App() {
                   <span className="setting-label">Target Human Elo Rating</span>
                   <span className="setting-value">{Math.round((settings.targetElo || 1500) / 100) * 100} Elo</span>
                 </div>
+
+                <div className="elo-pills">
+                  {[600, 1100, 1300, 1500, 1700, 1900, 2200, 2600].map((elo) => (
+                    <button
+                      key={elo}
+                      type="button"
+                      className={`elo-pill ${Math.round((settings.targetElo || 1500) / 100) * 100 === elo ? 'active' : ''}`}
+                      onClick={() => updateSetting('targetElo', elo)}
+                    >
+                      {elo}
+                    </button>
+                  ))}
+                </div>
+
                 <input
                   type="range"
                   min="600"
@@ -825,6 +857,42 @@ export default function App() {
             </div>
           </div>
 
+          {activeCaps.hasHash && (
+            <div className="setting-item" style={{ marginTop: 12 }}>
+              <div className="setting-label-row">
+                <span className="setting-label">Hash Table Size (RAM)</span>
+                <span className="setting-value">{settings.hashMb} MB</span>
+              </div>
+              <input
+                type="range"
+                min="16"
+                max="256"
+                step="16"
+                value={settings.hashMb}
+                onChange={(e) => updateSetting('hashMb', parseInt(e.target.value, 10))}
+                className="slider"
+              />
+            </div>
+          )}
+
+          {activeCaps.hasThreads && (
+            <div className="setting-item">
+              <div className="setting-label-row">
+                <span className="setting-label">Search Threads</span>
+                <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max={maxHardwareThreads}
+                step="1"
+                value={settings.threads}
+                onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
+                className="slider"
+              />
+            </div>
+          )}
+
           {settings.activeEngineId === 'patricia' ? (
             <div
               style={{
@@ -859,7 +927,7 @@ export default function App() {
                 Runs safely in a dedicated Web Worker (1 thread, 16 MB Hash). Worker thread allocation and hash size are managed without sending unsupported UCI commands that stall the engine.
               </div>
             </div>
-          ) : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? (
+          ) : (
             <div
               style={{
                 marginTop: 12,
@@ -870,46 +938,12 @@ export default function App() {
               }}
             >
               <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
-                {settings.activeEngineId === 'maia2' ? 'Maia-2' : 'Maia-3'} Execution Profile
+                {activeCaps.name} Execution Profile
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                Direct neural policy execution in memory (~12 MB weights buffer). Instantaneous inference without tree search threads or transposition tables.
+                Direct neural policy execution in memory. Instantaneous 1-node inference without tree search threads or transposition tables.
               </div>
             </div>
-          ) : (
-            <>
-              <div className="setting-item" style={{ marginTop: 12 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Hash Table Size (RAM)</span>
-                  <span className="setting-value">{settings.hashMb} MB</span>
-                </div>
-                <input
-                  type="range"
-                  min="16"
-                  max="256"
-                  step="16"
-                  value={settings.hashMb}
-                  onChange={(e) => updateSetting('hashMb', parseInt(e.target.value, 10))}
-                  className="slider"
-                />
-              </div>
-
-              <div className="setting-item">
-                <div className="setting-label-row">
-                  <span className="setting-label">Search Threads</span>
-                  <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max={maxHardwareThreads}
-                  step="1"
-                  value={settings.threads}
-                  onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
-                  className="slider"
-                />
-              </div>
-            </>
           )}
         </div>
       )}

@@ -20,6 +20,12 @@ export interface EngineCapabilities {
   hasSkillLevel: boolean;
   hasThreads: boolean;
   hasHash: boolean;
+  hasDepth?: boolean;
+  hasMultiPv?: boolean;
+  hasPersonality?: boolean;
+  eloMin?: number;
+  eloMax?: number;
+  eloStep?: number;
   options: Record<string, UciOption>;
 }
 

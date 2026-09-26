@@ -487,7 +487,7 @@ export class SvgOverlay {
   private updateEvalBar(evalData: EngineEvaluation) {
     if (!this.evalBarFill || !this.evalScoreText) return;
 
-    let evalScoreString = '0.0';
+    let evalScoreString = '—';
     let whiteWinPercent = 50;
 
     const isBlack = evalData.fen.split(' ')[1] === 'b';
@@ -529,7 +529,11 @@ export class SvgOverlay {
     const sideEl = this.hudElement.querySelector('#ai-hud-side') as HTMLElement;
     const engineEl = this.hudElement.querySelector('#ai-hud-engine') as HTMLElement;
 
-    if (depthEl) depthEl.innerText = `d${evalData.depth || 0}`;
+    if (depthEl) {
+      depthEl.innerText = (evalData.scoreCp === null && evalData.scoreMate === null)
+        ? 'POLICY'
+        : `d${evalData.depth || 0}`;
+    }
     if (engineEl) engineEl.innerText = (evalData.engineInstanceId || 'SF').toUpperCase();
 
     const playerColor = this.settings.controlledColor === 'auto'
@@ -558,6 +562,9 @@ export class SvgOverlay {
         const p = (whiteCp / 100).toFixed(2);
         evalEl.innerText = `${whiteCp > 0 ? '+' : ''}${p}`;
         evalEl.style.color = whiteCp >= 0 ? '#38bdf8' : '#f87171';
+      } else {
+        evalEl.innerText = 'POLICY';
+        evalEl.style.color = '#a78bfa';
       }
     }
 

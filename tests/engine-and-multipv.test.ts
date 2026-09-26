@@ -824,4 +824,108 @@ console.log('\n12. Testing HighlightController board defense against stale move 
   console.log('   ✓ Stale moves for already moved pieces are strictly rejected by pieceMap defense');
 }
 
+// --------------------------------------------------------------------------
+// 13. Immediate Blunder Cost & Queen Hang Elimination
+// --------------------------------------------------------------------------
+console.log('\n13. Testing immediateBlunderCost and Queen hang elimination...');
+{
+  const { immediateBlunderCost, predictRanked } = await import('../lib/maia-policy');
+
+  // Position: Black Queen on d5 is under direct attack by White Knight on c3
+  // fen: 'r1b1kbnr/ppp1pppp/8/3q4/8/2N5/PPPP1PPP/R1BQKBNR b KQkq - 1 3'
+  const queenHangFen = 'r1b1kbnr/ppp1pppp/8/3q4/8/2N5/PPPP1PPP/R1BQKBNR b KQkq - 1 3';
+  const chess = new Chess(queenHangFen);
+
+  // Pawn move c7c5 leaves the Queen completely hanging for free
+  const hangCostC5 = immediateBlunderCost(chess, 'c7c5');
+  assert.strictEqual(hangCostC5, 900, 'Blundering Queen on d5 with c7c5 must cost 900 centipawns');
+
+  // Safe escape moves must have 0 blunder cost
+  assert.strictEqual(immediateBlunderCost(chess, 'd5a5'), 0, 'Qa5 must have 0 blunder cost');
+  assert.strictEqual(immediateBlunderCost(chess, 'd5d6'), 0, 'Qd6 must have 0 blunder cost');
+  assert.strictEqual(immediateBlunderCost(chess, 'd5e5'), 0, 'Qe5+ must have 0 blunder cost');
+  assert.strictEqual(immediateBlunderCost(chess, 'd5d8'), 0, 'Qd8 must have 0 blunder cost');
+
+  // Over multiple ranked predictions at Club/Master Elo (1500+), Queen must never be hung
+  for (let trial = 0; trial < 10; trial++) {
+    const predictions = predictRanked(queenHangFen, 1800, 3);
+    assert(predictions.length > 0, 'Must return predictions');
+    const topMove = predictions[0]!;
+    assert(
+      topMove.uci.startsWith('d5'),
+      `Top move at 1800 Elo must save the attacked Queen, got ${topMove.san} (${topMove.uci})`
+    );
+    assert.notStrictEqual(topMove.uci, 'c7c5', 'Must NEVER recommend c7c5 hanging the Queen');
+  }
+
+  console.log('   ✓ immediateBlunderCost correctly identifies 900cp Queen hangs and eliminates them');
+}
+
+// --------------------------------------------------------------------------
+// 14. Monotonic Elo Blunder Scaling & Softmax Calibration
+// --------------------------------------------------------------------------
+console.log('\n14. Testing monotonic Elo blunder scaling and softmax temperature floor...');
+{
+  const { blunderBudget, blunderRate } = await import('../lib/maia-policy');
+
+  // 1. Blunder budget monotonicity
+  let prevBudget = Infinity;
+  for (let elo = 600; elo <= 2600; elo += 100) {
+    const budget = blunderBudget(elo);
+    assert(budget <= prevBudget, `Blunder budget must be monotonically non-increasing at Elo ${elo}`);
+    prevBudget = budget;
+  }
+  assert.strictEqual(blunderBudget(600), 900, '600 Elo budget must be 900 cp');
+  assert(blunderBudget(2600) <= 40, '2600 Elo budget must be <= 40 cp');
+
+  // 2. Blunder rate monotonicity
+  let prevRate = Infinity;
+  for (let elo = 600; elo <= 2600; elo += 100) {
+    const rate = blunderRate(elo);
+    assert(rate <= prevRate, `Blunder rate must be monotonically non-increasing at Elo ${elo}`);
+    prevRate = rate;
+  }
+  assert(blunderRate(600) >= 0.40, '600 Elo blunder rate must allow beginner mistakes (~47%)');
+  assert(blunderRate(2600) <= 0.05, '2600 Elo blunder rate must be minimal (<= 5%)');
+
+  console.log('   ✓ Blunder budget and blunder rate are strictly monotonic from 600 to 2600 Elo');
+}
+
+// --------------------------------------------------------------------------
+// 15. Engine Capability Matrix Gating
+// --------------------------------------------------------------------------
+console.log('\n15. Testing Engine Capability Matrix gating and capsFor fallback...');
+{
+  const { ENGINE_CAPABILITIES, capsFor } = await import('../lib/engine-capabilities');
+
+  // Stockfish capabilities
+  const sfCaps = capsFor('stockfish');
+  assert.strictEqual(sfCaps.hasDepth, true, 'Stockfish supports search depth');
+  assert.strictEqual(sfCaps.hasHash, true, 'Stockfish supports Hash');
+  assert.strictEqual(sfCaps.hasThreads, true, 'Stockfish supports Threads');
+  assert.strictEqual(sfCaps.hasLimitStrength, true, 'Stockfish supports LimitStrength');
+  assert.strictEqual(sfCaps.hasPersonality, false);
+
+  // Patricia capabilities
+  const patCaps = capsFor('patricia');
+  assert.strictEqual(patCaps.hasDepth, true, 'Patricia supports search depth');
+  assert.strictEqual(patCaps.hasHash, true, 'Patricia supports Hash');
+  assert.strictEqual(patCaps.hasThreads, false, 'Patricia runs single-threaded in MV3');
+  assert.strictEqual(patCaps.hasPersonality, true, 'Patricia supports playstyle personality');
+
+  // Maia-3 & Maia-2 capabilities
+  const m3Caps = capsFor('maia3');
+  assert.strictEqual(m3Caps.hasDepth, false, 'Maia-3 must hide depth slider (nodes: 1)');
+  assert.strictEqual(m3Caps.hasHash, false, 'Maia-3 must hide Hash slider');
+  assert.strictEqual(m3Caps.hasThreads, false, 'Maia-3 must hide Threads slider');
+  assert.strictEqual(m3Caps.hasLimitStrength, false);
+
+  const m2Caps = capsFor('maia2');
+  assert.strictEqual(m2Caps.hasDepth, false, 'Maia-2 must hide depth slider');
+  assert.strictEqual(m2Caps.hasHash, false, 'Maia-2 must hide Hash slider');
+  assert.strictEqual(m2Caps.hasThreads, false, 'Maia-2 must hide Threads slider');
+
+  console.log('   ✓ Engine capability matrix accurately gates UI features per engine');
+}
+
 console.log('\n=== ALL TESTS PASSED SUCCESSFULLY ===');

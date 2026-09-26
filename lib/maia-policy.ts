@@ -10,8 +10,8 @@ export interface HumanPolicyCandidate {
 
 export const PIECE_VALUES: Record<string, number> = {
   p: 100,
-  n: 320,
-  b: 330,
+  n: 300,
+  b: 320,
   r: 500,
   q: 900,
   k: 20000,
@@ -69,6 +69,32 @@ export function extractBoardTensor(chessInstance: Chess): Float32Array {
 }
 
 /**
+ * Calculates worst immediate material loss (cp) if opponent gets one free reply after `uci`.
+ */
+export function immediateBlunderCost(chess: Chess, uci: string): number {
+  const from = uci.slice(0, 2);
+  const to = uci.slice(2, 4);
+  const promotion = uci[4];
+  const mv = chess.move({ from, to, promotion });
+  if (!mv) return Infinity; // illegal -> never playable
+  let worst = 0;
+  const oppCaptures = chess.moves({ verbose: true }).filter((r) => r.captured);
+  for (const reply of oppCaptures) {
+    if (!reply.captured) continue;
+    const victim = PIECE_VALUES[reply.captured] ?? 0;
+    if (victim <= worst) continue;
+    const attacker = PIECE_VALUES[reply.piece] ?? 0;
+    chess.move(reply);
+    const canRecap = chess.moves({ verbose: true }).some((m) => m.to === reply.to);
+    chess.undo();
+    const loss = canRecap ? Math.max(0, victim - attacker) : victim;
+    if (loss > worst) worst = loss;
+  }
+  chess.undo();
+  return worst;
+}
+
+/**
  * Calculates total material value of pieces currently hanging/attacked for a side.
  * Evaluates whether pieces left behind are attacked by lower-value pieces or completely undefended.
  */
@@ -120,14 +146,24 @@ export function calculateHangingThreats(chess: Chess, sideToDefend: 'w' | 'b'): 
 }
 
 /**
+ * Elo-calibrated blunder budget: defines maximum centipawn loss a player at given Elo might overlook.
+ * 600 Elo overlooks up to ~900cp; 2600 Elo overlooks <= ~40cp.
+ */
+export function blunderBudget(elo: number): number {
+  const t = Math.max(0, Math.min(1, (elo - 600) / (2600 - 600)));
+  return 900 - t * 860;
+}
+
+/**
+ * Probability of an unforced tactical blunder occurring at a given rating.
+ */
+export function blunderRate(elo: number): number {
+  const t = Math.max(0, Math.min(1, (elo - 600) / (2600 - 600)));
+  return 0.45 * (1 - t) * (1 - t) + 0.02;
+}
+
+/**
  * Evaluates human move policy conditioned on target Elo and position features.
- * Features:
- * 1. Zero-search lookahead (nodes: 1)
- * 2. Static Exchange Evaluation (SEE) defense against blunders
- * 3. Repetition & Draw Avoidance: Refuses 3-fold repetition when ahead in material
- * 4. Stalemate Prevention: Strictly penalizes stalemate when holding a decisive advantage
- * 5. Endgame Mating Drive: Directs friendly King opposition, corners enemy King, and restricts mobility
- * 6. Global Board Threat & Hanging Piece Defense: Never ignores attacked Queens or major pieces
  */
 export function evaluateHumanPolicy(
   fen: string,
@@ -181,15 +217,24 @@ export function evaluateHumanPolicy(
 
       // Checkmate in 1 (highest priority)
       if (m.san.includes('#')) {
-        return { uci, san: m.san, score: 50000 };
+        return { uci, san: m.san, score: 50000, hang: 0 };
       }
+
+      // Material capture value
+      if (m.captured) {
+        score += (PIECE_VALUES[m.captured] ?? 0) * 0.9;
+      }
+
+      // Immediate 1-ply blunder cost (hanging the moved piece)
+      const hang = immediateBlunderCost(chess, uci);
+      score -= hang * (0.75 + 0.25 * eloRatio);
 
       // Simulate move to evaluate post-move state
       chess.move(m);
 
-      // CRITICAL: Evaluate hanging threats across ALL friendly pieces after move 'm'
-      // This prevents blundering an attacked Queen/Rook by moving another piece elsewhere
+      // Global board threat check (leaving other friendly pieces hanging)
       const postMoveThreats = calculateHangingThreats(chess, turn);
+      score -= postMoveThreats * (0.85 + 0.35 * eloRatio);
 
       const isStalemate = chess.isStalemate();
       const nextPosKey = chess.fen().split(' ').slice(0, 4).join(' ');
@@ -199,131 +244,78 @@ export function evaluateHumanPolicy(
       if (isStalemate) {
         chess.undo();
         if (isDecisiveAdvantage) {
-          return { uci, san: m.san, score: -50000 }; // Never stalemate when winning!
+          return { uci, san: m.san, score: -50000, hang: 99999 };
         }
         if (materialDiff <= -200) {
-          return { uci, san: m.san, score: 15000 }; // Stalemate swindle when losing is great
+          return { uci, san: m.san, score: 15000, hang: 0 };
         }
       }
 
       // 2. Threefold repetition / draw avoidance
       if (isRepetition) {
         if (isDecisiveAdvantage) {
-          score -= 35000; // Strictly avoid repeating moves when winning!
+          score -= 35000;
         } else if (materialDiff <= -200) {
-          score += 12000; // Welcome draw by repetition when losing
+          score += 12000;
         }
       }
 
-      // 3. Static Exchange Evaluation (SEE) defense against blunders
-      const capturedVal = m.captured ? (PIECE_VALUES[m.captured] || 100) : 0;
-      const myPieceVal = PIECE_VALUES[m.piece] || 100;
-      const oppReplies = chess.moves({ verbose: true });
-      const directCaptures = oppReplies.filter((r) => r.to === m.to);
-
-      let netExchange = capturedVal;
-      let isHanging = false;
-
-      if (directCaptures.length > 0) {
-        directCaptures.sort((a, b) => (PIECE_VALUES[a.piece] || 100) - (PIECE_VALUES[b.piece] || 100));
-        const lowestAttacker = directCaptures[0];
-        const oppAttackerVal = PIECE_VALUES[lowestAttacker?.piece || 'p'] || 100;
-
-        if (lowestAttacker) {
-          chess.move(lowestAttacker);
-          const ourRecaptures = chess.moves({ verbose: true }).filter((r) => r.to === m.to);
-          chess.undo();
-
-          if (ourRecaptures.length > 0) {
-            if (myPieceVal > oppAttackerVal) {
-              netExchange = capturedVal - (myPieceVal - oppAttackerVal);
-            }
-          } else {
-            netExchange = capturedVal - myPieceVal;
-            isHanging = true;
-          }
-        }
-      }
-
-      if (netExchange > 0) {
-        score += netExchange * 2.2;
-      } else if (netExchange < 0) {
-        if (netExchange <= -400) {
-          score += netExchange * (3.0 + eloRatio * 2.0);
-        } else {
-          score += netExchange * (1.8 + eloRatio * 1.5);
-        }
-      }
-
-      // Heavily penalize moves that leave hanging pieces behind (e.g. leaving Queen under attack)
-      score -= postMoveThreats * 2.5;
-
-      // 4. Winning Endgame Heuristics (Converting advantage, opposition, mating net)
+      // 3. Winning Endgame Heuristics (Converting advantage, opposition, mating net)
       if (isEndgame && isDecisiveAdvantage) {
         const myKing = findKingPosition(chess, turn);
         const oppKing = findKingPosition(chess, oppColor);
 
         if (myKing && oppKing) {
-          // King Proximity (Opposition): Friendly king marches to help checkmate
           const kingDist = Math.max(Math.abs(myKing.file - oppKing.file), Math.abs(myKing.rank - oppKing.rank));
           score += (7 - kingDist) * 45;
 
-          // Cornering the enemy king towards the board edge
           const oppEdgeDist = Math.min(oppKing.file, 7 - oppKing.file, oppKing.rank, 7 - oppKing.rank);
           score += (3 - oppEdgeDist) * 55;
 
-          // Restricting enemy king escape squares
-          const oppKingLegalMoves = oppReplies.filter((r) => r.piece === 'k').length;
+          const oppKingLegalMoves = chess.moves({ verbose: true }).filter((r) => r.piece === 'k').length;
           score += (8 - oppKingLegalMoves) * 25;
         }
 
-        // Passed pawn advancement towards 8th rank
         if (m.piece === 'p') {
           const toRank = parseInt(m.to[1] ?? '1', 10);
           const rankFrom0 = turn === 'w' ? (toRank - 1) : (8 - toRank);
           score += rankFrom0 * 40;
         }
 
-        // Smart endgame checks: Only give check if enemy King is already on the edge or restricted
         if (m.san.includes('+')) {
           const currentOppKing = findKingPosition(chess, oppColor);
           const edgeDist = currentOppKing
             ? Math.min(currentOppKing.file, 7 - currentOppKing.file, currentOppKing.rank, 7 - currentOppKing.rank)
             : 2;
           if (edgeDist === 0) {
-            score += 70; // Check on the edge converges into mate
+            score += 70;
           } else {
-            score -= 60; // Do NOT spam aimless checks in open center that allow King to flee
+            score -= 60;
           }
         }
       } else {
-        // Middlegame / Opening safe check reward
         if (m.san.includes('+')) {
-          if (netExchange >= 0 && !isHanging) {
-            score += 35 + (1 - eloRatio) * 20;
+          if (hang === 0 && postMoveThreats === 0) {
+            score += 25 + (1 - eloRatio) * 15;
           } else {
             score -= 150;
           }
         }
 
-        // Castling (King Safety)
         if (m.flags.includes('k') || m.flags.includes('q')) {
           score += 60 + eloRatio * 40;
         }
 
-        // Premature King move in opening
         if (isOpening && m.piece === 'k' && !m.flags.includes('k') && !m.flags.includes('q')) {
           score -= 60;
         }
 
-        // Center Control & Occupation
         if (CENTER_SQUARES.has(m.to)) {
           score += 30 + eloRatio * 20;
         } else if (EXTENDED_CENTER.has(m.to)) {
           score += 15 + eloRatio * 10;
         }
 
-        // Opening Principles
         if (isOpening) {
           if (
             m.piece === 'p' &&
@@ -349,27 +341,32 @@ export function evaluateHumanPolicy(
         }
       }
 
-      // Promotion bonus
       if (m.promotion) {
         score += 900;
       }
 
       chess.undo();
-      return { uci, san: m.san, score };
+      return { uci, san: m.san, score, hang: Math.max(hang, postMoveThreats) };
     });
 
+    // Filter using Elo-calibrated blunder budget
+    const budget = blunderBudget(elo);
+    const allowedBlunder = Math.random() < blunderRate(elo);
+    const safe = scoredMoves.filter((m) => m.hang <= budget || (allowedBlunder && m.hang <= budget + 250));
+    const pool = safe.length > 0 ? safe : scoredMoves.sort((a, b) => a.hang - b.hang).slice(0, 3);
+
     // Softmax probabilities
-    const maxScore = Math.max(...scoredMoves.map((m) => m.score));
-    const temperature = 0.85 - eloRatio * 0.60;
-    const expScores = scoredMoves.map((m) => {
-      const z = (m.score - maxScore) / (temperature * 50);
-      return Math.exp(Math.max(-25, Math.min(25, z)));
+    const maxScore = Math.max(...pool.map((m) => m.score));
+    const temperature = 0.10 + 0.55 * (1 - eloRatio);
+    const expScores = pool.map((m) => {
+      const z = (m.score - maxScore) / (temperature * 100);
+      return Math.exp(Math.max(-30, Math.min(0, z)));
     });
     const sumExp = expScores.reduce((acc, v) => acc + v, 0);
 
-    const movesWithProb: HumanPolicyCandidate[] = scoredMoves.map((m, i) => {
+    const movesWithProb: HumanPolicyCandidate[] = pool.map((m, i) => {
       const expVal = expScores[i] ?? 0;
-      const prob = sumExp > 0 ? expVal / sumExp : 1 / scoredMoves.length;
+      const prob = sumExp > 0 ? expVal / sumExp : 1 / pool.length;
       const winP = 1 / (1 + Math.exp(-m.score / 250));
       return {
         uci: m.uci,
@@ -385,4 +382,42 @@ export function evaluateHumanPolicy(
   } catch (_) {
     return [];
   }
+}
+
+/**
+ * Predicts human moves via a single ranked pass without replacement.
+ * Guarantees that candidates and bestMove are strictly consistent.
+ */
+export function predictRanked(
+  fen: string,
+  targetElo: number,
+  multiPv: number = 1,
+  recentPositions: string[] = []
+): HumanPolicyCandidate[] {
+  const pool = evaluateHumanPolicy(fen, targetElo, 100, recentPositions);
+  if (pool.length === 0) return [];
+
+  const out: HumanPolicyCandidate[] = [];
+  const remaining = [...pool];
+
+  while (out.length < multiPv && remaining.length > 0) {
+    const totalProb = remaining.reduce((s, m) => s + m.probability, 0);
+    if (totalProb <= 0) {
+      out.push(remaining.shift()!);
+      continue;
+    }
+    let r = Math.random() * totalProb;
+    let idx = 0;
+    for (let i = 0; i < remaining.length; i++) {
+      r -= remaining[i]!.probability;
+      if (r <= 0) {
+        idx = i;
+        break;
+      }
+    }
+    const [chosen] = remaining.splice(idx, 1);
+    if (chosen) out.push(chosen);
+  }
+
+  return out;
 }

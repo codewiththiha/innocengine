@@ -1,7 +1,7 @@
 import { UciParser } from '../../lib/uci-parser';
 import { EngineRegistry } from '../../lib/engine-registry';
 import { mapEloToStockfishParams, getMaiaTuning, getPatriciaTuning } from '../../lib/engine-tuning';
-import { evaluateHumanPolicy } from '../../lib/maia-policy';
+import { evaluateHumanPolicy, predictRanked } from '../../lib/maia-policy';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from '../../lib/types';
 
@@ -238,7 +238,7 @@ class MaiaRunner implements IEngineRunner {
     const posKey = fen.split(' ').slice(0, 4).join(' ');
     if (!this.recentPositions.includes(posKey)) {
       this.recentPositions.push(posKey);
-      if (this.recentPositions.length > 24) {
+      if (this.recentPositions.length > 64) {
         this.recentPositions.shift();
       }
     }
@@ -273,53 +273,44 @@ class MaiaRunner implements IEngineRunner {
     );
     const targetElo = maiaTuning.targetElo;
     const multiPv = Math.max(1, Math.min(4, maiaTuning.multiPv));
-    const isBlack = fen.split(' ')[1] === 'b';
 
-    const candidateList = evaluateHumanPolicy(fen, targetElo, multiPv, this.recentPositions);
+    // Single ranked pass without replacement guarantees candidates and bestMove match
+    const candidateList = predictRanked(fen, targetElo, multiPv, this.recentPositions);
     if (candidateList.length === 0 || this.isDestroyed || this.currentAnalysisId !== analysisId) {
       return;
     }
 
     const bestMoveUci = candidateList[0]?.uci || '';
 
-    // Build candidates and multiPvLines with depth 1 / nodes 1 (zero-search human policy)
+    // Human policy engine: honest null centipawns (no fake numerical score)
     const candidates: EngineCandidate[] = candidateList.slice(0, multiPv).map((item, idx) => {
       const from = item.uci.substring(0, 2);
       const to = item.uci.substring(2, 4);
-      const winP = item.winProb;
-      const scoreCp = Math.round(Math.log(Math.max(0.01, Math.min(0.99, winP)) / (1 - winP)) / 0.00368208);
 
       return {
         pvId: idx + 1,
         from,
         to,
         depth: 1, // 1-node policy depth
-        scoreCp,
+        scoreCp: null,
         scoreMate: null,
         pv: [item.uci],
       };
     });
 
     const multiPvLines: MoveLine[] = candidateList.slice(0, multiPv).map((item, idx) => {
-      const winP = item.winProb;
-      const scoreCp = Math.round(Math.log(Math.max(0.01, Math.min(0.99, winP)) / (1 - winP)) / 0.00368208);
-      const whiteScoreCp = isBlack ? -scoreCp : scoreCp;
-
       return {
         id: idx + 1,
         depth: 1,
         nodes: 1,
-        scoreCp,
+        scoreCp: null,
         scoreMate: null,
-        whiteScoreCp,
+        whiteScoreCp: null,
         whiteScoreMate: null,
         bestMove: item.uci,
         pv: [item.uci],
       };
     });
-
-    const primaryScore = candidates[0]?.scoreCp ?? 0;
-    const whiteScoreCp = isBlack ? -primaryScore : primaryScore;
 
     const evaluation: EngineEvaluation = {
       engineInstanceId: this.id,
@@ -328,9 +319,9 @@ class MaiaRunner implements IEngineRunner {
       fen,
       depth: 1,
       nodes: 1,
-      scoreCp: primaryScore,
+      scoreCp: null,
       scoreMate: null,
-      whiteScoreCp,
+      whiteScoreCp: null,
       whiteScoreMate: null,
       bestMove: bestMoveUci,
       multiPvLines,
