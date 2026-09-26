@@ -753,8 +753,10 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   // Engine chose the human blunder / alternate candidate e1g1
   const finalEval = parser.parseLine('bestmove e1g1');
   assert(finalEval && finalEval.candidates && finalEval.candidates.length > 0);
+  const primaryCandidate = finalEval.candidates[0];
+  assert(primaryCandidate, 'Primary candidate must exist');
   assert.strictEqual(
-    `${finalEval.candidates[0].from}${finalEval.candidates[0].to}`,
+    `${primaryCandidate.from}${primaryCandidate.to}`,
     'e1g1',
     'Authoritative bestmove e1g1 must be promoted to candidate 0 for on-board highlight'
   );

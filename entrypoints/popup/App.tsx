@@ -5,7 +5,7 @@ import { capsFor } from '../../lib/engine-capabilities';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
 import { OPENING_CATALOG } from '../../lib/openings/catalog';
 import OpeningBrowser from './components/OpeningBrowser';
-import { getEngineStrengthDescription, mapEloToPatriciaSkill } from '../../lib/engine-tuning';
+import { getEngineStrengthDescription, mapEloToPatriciaSkill, getPatriciaTuning } from '../../lib/engine-tuning';
 import type {
   EngineSettings,
   EngineEvaluation,
