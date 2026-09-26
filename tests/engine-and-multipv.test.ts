@@ -640,4 +640,80 @@ console.log('\n9. Testing Maia stalemate prevention when holding decisive advant
   console.log('   ✓ Stalemate prevention strictly active');
 }
 
+// --------------------------------------------------------------------------
+// 10. Patricia 5.1 Aggressive & Human Tuning Tests
+// --------------------------------------------------------------------------
+console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and personality modes...');
+{
+  const { mapEloToPatriciaSkill, getPatriciaTuning, PATRICIA_SKILL_LEVELS } = await import(
+    '../lib/engine-tuning'
+  );
+
+  // Discrete skill levels span 500 to 3000 Elo (20 levels)
+  assert.strictEqual(PATRICIA_SKILL_LEVELS.length, 20);
+  assert.strictEqual(PATRICIA_SKILL_LEVELS[0], 500);
+  assert.strictEqual(PATRICIA_SKILL_LEVELS[19], 3000);
+
+  // Exact mappings
+  const p500 = mapEloToPatriciaSkill(500);
+  assert.strictEqual(p500.skillLevel, 1, '500 Elo should map to Skill Level 1');
+
+  const p1500 = mapEloToPatriciaSkill(1500);
+  assert.strictEqual(p1500.skillLevel, 7, '1500 Elo should map to Skill Level 7');
+
+  const p2500 = mapEloToPatriciaSkill(2500);
+  assert.strictEqual(p2500.skillLevel, 17, '2500 Elo should map to Skill Level 17');
+  assert.strictEqual(p2500.cpLoss, 20, '2500 Elo should have 20 cp_loss target');
+
+  const p3000 = mapEloToPatriciaSkill(3000);
+  assert.strictEqual(p3000.skillLevel, 20, '3000 Elo should map to Skill Level 20');
+  assert.strictEqual(p3000.cpLoss, 0, '3000 Elo should have 0 cp_loss target');
+
+  // Full Strength (Skill Level 21)
+  const fullTuning = getPatriciaTuning({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'full_strength',
+    patriciaLimitStrength: false,
+  });
+  assert.strictEqual(fullTuning.isHuman, false);
+  assert.strictEqual(fullTuning.skillLevel, 21, 'Full strength must set Skill_Level 21');
+  assert.strictEqual(fullTuning.targetElo, 3500);
+
+  // Human Mode at 2500 Elo (with recommended depth 14 ply)
+  const human2500Tuning = getPatriciaTuning({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'human',
+    patriciaLimitStrength: true,
+    patriciaElo: 2500,
+  });
+  assert.strictEqual(human2500Tuning.isHuman, true);
+  assert.strictEqual(human2500Tuning.skillLevel, 17);
+  assert.strictEqual(human2500Tuning.targetElo, 2500);
+  assert(human2500Tuning.recommendedDepth >= 12 && human2500Tuning.recommendedDepth <= 15);
+
+  // Aggressive Personality Description
+  const aggDesc = getEngineStrengthDescription({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'aggressive',
+    patriciaLimitStrength: false,
+  });
+  assert(aggDesc.detail.includes('EAS 430,000'), 'Should highlight EAS 430,000 aggression score');
+
+  // Human Mode Description
+  const humanDesc = getEngineStrengthDescription({
+    ...DEFAULT_SETTINGS,
+    activeEngineId: 'patricia',
+    patriciaPersonality: 'human',
+    patriciaLimitStrength: true,
+    patriciaElo: 2500,
+  });
+  assert(humanDesc.badge.includes('2500'), 'Badge should show 2500 Elo');
+  assert(humanDesc.detail.includes('Skill Level 17'), 'Detail should show Skill Level 17');
+
+  console.log('   ✓ Patricia 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');
+}
+
 console.log('\n=== ALL TESTS PASSED SUCCESSFULLY ===');

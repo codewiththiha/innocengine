@@ -1,6 +1,6 @@
 import { UciParser } from '../../lib/uci-parser';
 import { EngineRegistry } from '../../lib/engine-registry';
-import { mapEloToStockfishParams, getMaiaTuning } from '../../lib/engine-tuning';
+import { mapEloToStockfishParams, getMaiaTuning, getPatriciaTuning } from '../../lib/engine-tuning';
 import { evaluateHumanPolicy } from '../../lib/maia-policy';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from '../../lib/types';
@@ -14,6 +14,9 @@ export interface EngineRunOptions {
   hashMb?: number;
   senderTabId?: number;
   maxNodes?: number;
+  patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  patriciaLimitStrength?: boolean;
+  patriciaElo?: number;
 }
 
 export interface IEngineRunner {
@@ -359,7 +362,175 @@ class MaiaRunner implements IEngineRunner {
 }
 
 // --------------------------------------------------------------------------
-// 3. Custom WASM Engine Runner
+// 3. Patricia WASM Engine Runner (Aggressive & Human Mode)
+// --------------------------------------------------------------------------
+class PatriciaRunner implements IEngineRunner {
+  public readonly id = 'patricia';
+  public readonly name = 'Patricia 5.1 (Aggressive & Human)';
+
+  private worker: Worker | null = null;
+  private parser: UciParser;
+  private isReady: boolean = false;
+  private currentFen: string = '';
+  private currentAnalysisId: number = 0;
+  private currentPositionKey: string = '';
+  private currentMultiPv: number = 1;
+  private currentSkillLevel: number = -1;
+  private senderTabId?: number;
+  private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
+  private onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void;
+
+  constructor(
+    onEval: (evalData: EngineEvaluation, tabId?: number) => void,
+    onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void
+  ) {
+    this.parser = new UciParser();
+    this.onEval = onEval;
+    this.onStatus = onStatus;
+  }
+
+  public async init(): Promise<void> {
+    try {
+      this.onStatus('loading', 'Initializing Patricia WASM...');
+      const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
+      this.worker = new Worker(workerUrl);
+
+      this.worker.onmessage = (event: MessageEvent) => {
+        const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
+        this.handleLine(line);
+      };
+
+      this.worker.onerror = (err) => {
+        console.error('[PatriciaRunner] Worker error:', err);
+        this.onStatus('error', 'Patricia worker failed');
+      };
+
+      this.worker.postMessage('uci');
+      this.worker.postMessage('isready');
+      this.worker.postMessage('setoption name Hash value 32');
+      this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
+    } catch (err) {
+      console.error('[PatriciaRunner] Initialization failed:', err);
+      this.onStatus('error', 'Failed to launch Patricia worker');
+    }
+  }
+
+  private handleLine(line: string) {
+    if (line === 'uciok' || line === 'readyok') {
+      this.isReady = true;
+      this.onStatus('ready', 'Patricia 5.1 Ready');
+      return;
+    }
+
+    const partialEval = this.parser.parseLine(line);
+    if (partialEval && partialEval.bestMove) {
+      if (!partialEval.isCalculating && (!partialEval.candidates || partialEval.candidates.length === 0)) {
+        return;
+      }
+
+      const isBlack = (partialEval.fen || this.currentFen).split(' ')[1] === 'b';
+      const whiteCp =
+        partialEval.scoreCp !== null && partialEval.scoreCp !== undefined
+          ? isBlack
+            ? -partialEval.scoreCp
+            : partialEval.scoreCp
+          : null;
+      const whiteMate =
+        partialEval.scoreMate !== null && partialEval.scoreMate !== undefined
+          ? isBlack
+            ? -partialEval.scoreMate
+            : partialEval.scoreMate
+          : null;
+
+      const evalData: EngineEvaluation = {
+        engineInstanceId: 'patricia',
+        analysisId: partialEval.analysisId || this.currentAnalysisId,
+        positionKey: partialEval.positionKey || this.currentPositionKey,
+        fen: partialEval.fen || this.currentFen,
+        depth: partialEval.depth || 0,
+        scoreCp: partialEval.scoreCp ?? null,
+        scoreMate: partialEval.scoreMate ?? null,
+        whiteScoreCp: whiteCp,
+        whiteScoreMate: whiteMate,
+        bestMove: partialEval.bestMove,
+        multiPvLines: partialEval.multiPvLines || [],
+        candidates: partialEval.candidates || [],
+        nodes: partialEval.nodes,
+        nps: partialEval.nps,
+        timeMs: partialEval.timeMs,
+        isCalculating: partialEval.isCalculating ?? false,
+        timestamp: Date.now(),
+      };
+
+      this.onEval(evalData, this.senderTabId);
+
+      if (!partialEval.isCalculating) {
+        this.onStatus('ready', 'Patricia Ready', this.senderTabId);
+      }
+    }
+  }
+
+  public analyze(fen: string, analysisId: number, positionKey: string, options: EngineRunOptions) {
+    if (!this.worker || !this.isReady) return;
+
+    this.currentFen = fen;
+    this.currentAnalysisId = analysisId;
+    this.currentPositionKey = positionKey;
+    this.senderTabId = options.senderTabId;
+    this.parser.reset(fen, analysisId, positionKey);
+
+    // Dynamic MultiPV
+    const targetMultiPv = Math.max(1, Math.min(4, options.multiPv || 1));
+    if (this.currentMultiPv !== targetMultiPv) {
+      this.worker.postMessage(`setoption name MultiPV value ${targetMultiPv}`);
+      this.currentMultiPv = targetMultiPv;
+    }
+
+    // Configure Patricia Human / Aggressive Tuning
+    const tuning = getPatriciaTuning({
+      patriciaPersonality: options.patriciaPersonality,
+      patriciaLimitStrength: options.patriciaLimitStrength,
+      patriciaElo: options.patriciaElo ?? options.targetElo,
+      depth: options.depth,
+      multiPv: options.multiPv,
+    } as any);
+
+    if (this.currentSkillLevel !== tuning.skillLevel) {
+      this.worker.postMessage(`setoption name Skill_Level value ${tuning.skillLevel}`);
+      this.currentSkillLevel = tuning.skillLevel;
+    }
+
+    const targetDepth = tuning.isHuman
+      ? (options.depth || tuning.recommendedDepth)
+      : (options.depth || 16);
+
+    this.worker.postMessage('stop');
+    this.worker.postMessage(`position fen ${fen}`);
+    this.worker.postMessage(`go depth ${targetDepth}`);
+    this.onStatus('analyzing', undefined, this.senderTabId);
+  }
+
+  public stop() {
+    if (this.worker) {
+      this.worker.postMessage('stop');
+      this.onStatus('ready');
+    }
+  }
+
+  public destroy() {
+    if (this.worker) {
+      try {
+        this.worker.postMessage('quit');
+        this.worker.terminate();
+      } catch (_) {}
+      this.worker = null;
+    }
+    this.isReady = false;
+  }
+}
+
+// --------------------------------------------------------------------------
+// 4. Custom WASM Engine Runner
 // --------------------------------------------------------------------------
 class CustomWasmRunner implements IEngineRunner {
   public readonly id: string;
@@ -516,7 +687,12 @@ class UnifiedEngineHost {
 
     this.currentEngineId = engineId;
 
-    if (engineId === 'maia2') {
+    if (engineId === 'patricia') {
+      this.activeRunner = new PatriciaRunner(
+        (ev, tabId) => this.broadcastEvaluation(ev, tabId),
+        (st, msg, tabId) => this.broadcastStatus(st, msg, tabId)
+      );
+    } else if (engineId === 'maia2') {
       this.activeRunner = new MaiaRunner(
         'maia2',
         'Maia-2 (Unified Model)',
@@ -568,6 +744,9 @@ class UnifiedEngineHost {
             multiPv: message.multiPv || 1,
             limitStrength: message.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: message.targetElo ?? this.lastOptions.targetElo,
+            patriciaPersonality: message.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
+            patriciaLimitStrength: message.patriciaLimitStrength ?? this.lastOptions.patriciaLimitStrength,
+            patriciaElo: message.patriciaElo ?? this.lastOptions.patriciaElo,
             threads: message.threads,
             hashMb: message.hashMb,
             senderTabId: message.senderTabId,
@@ -608,6 +787,9 @@ class UnifiedEngineHost {
             multiPv: s.multiPv ?? this.lastOptions.multiPv,
             limitStrength: s.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: s.targetElo ?? this.lastOptions.targetElo,
+            patriciaPersonality: s.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
+            patriciaLimitStrength: s.patriciaLimitStrength ?? this.lastOptions.patriciaLimitStrength,
+            patriciaElo: s.patriciaElo ?? this.lastOptions.patriciaElo,
             threads: s.threads ?? this.lastOptions.threads,
             hashMb: s.hashMb ?? this.lastOptions.hashMb,
           };

@@ -46,6 +46,9 @@ export interface EngineSettings {
   hashMb: number;
   limitStrength: boolean;
   targetElo: number;
+  patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  patriciaLimitStrength?: boolean;
+  patriciaElo?: number;
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
   highlightOpponentMoves: boolean;

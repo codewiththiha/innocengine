@@ -13,6 +13,74 @@ export interface MaiaTuning {
   maxNodes: number; // Force 1 node search (zero-search human policy)
 }
 
+export const PATRICIA_SKILL_LEVELS = [
+  500, 800, 1000, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
+  1900, 2000, 2100, 2200, 2300, 2400, 2500, 2650, 2800, 3000,
+];
+
+export interface PatriciaTuning {
+  isHuman: boolean;
+  skillLevel: number; // 1..20 for human mode, 21 for full strength
+  targetElo: number;
+  recommendedDepth: number;
+  personality: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  multiPv: number;
+  cpLoss: number;
+}
+
+export function mapEloToPatriciaSkill(targetElo: number): {
+  skillLevel: number;
+  clampedElo: number;
+  cpLoss: number;
+} {
+  let closestIdx = 0;
+  let minDiff = Infinity;
+  for (let i = 0; i < PATRICIA_SKILL_LEVELS.length; i++) {
+    const diff = Math.abs(PATRICIA_SKILL_LEVELS[i]! - targetElo);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestIdx = i;
+    }
+  }
+  const clampedElo = PATRICIA_SKILL_LEVELS[closestIdx] ?? 2500;
+  const skillLevel = closestIdx + 1; // 1-based (1..20)
+  const cpLoss = Math.max(0, 120 - Math.floor(clampedElo / 25));
+  return { skillLevel, clampedElo, cpLoss };
+}
+
+export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
+  const personality = settings.patriciaPersonality || 'aggressive';
+  const limitStrength = settings.patriciaLimitStrength ?? (personality === 'human');
+  const rawElo = settings.patriciaElo || 2500;
+  const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
+
+  if (!limitStrength && personality !== 'human') {
+    return {
+      isHuman: false,
+      skillLevel: 21,
+      targetElo: 3500,
+      recommendedDepth: settings.depth || 16,
+      personality,
+      multiPv,
+      cpLoss: 0,
+    };
+  }
+
+  const { skillLevel, clampedElo, cpLoss } = mapEloToPatriciaSkill(rawElo);
+  // For 2500 Elo human-like play: depth 10–14 is ideal
+  const recommendedDepth = Math.max(8, Math.min(18, Math.round(8 + ((clampedElo - 500) / 2500) * 8)));
+
+  return {
+    isHuman: true,
+    skillLevel,
+    targetElo: clampedElo,
+    recommendedDepth,
+    personality,
+    multiPv,
+    cpLoss,
+  };
+}
+
 /**
  * Maps a target Elo rating (800 - 3000) smoothly into Stockfish native parameters:
  * 1. Skill Level (0 - 20)
@@ -107,6 +175,22 @@ export function getEngineStrengthDescription(settings: EngineSettings): {
       badge: `Maia-2 (${maia.targetElo})`,
       detail: `Maia-2 (NeurIPS 2024): ${maia.targetElo} Elo • Zero-Search (nodes: 1)`,
       subtext: `Unified skill-aware human move prediction conditioned on human games at ~${maia.targetElo} rating (1100–1900). Tree search disabled to preserve human play.`,
+    };
+  }
+
+  if (settings.activeEngineId === 'patricia') {
+    const patricia = getPatriciaTuning(settings);
+    if (!patricia.isHuman) {
+      return {
+        badge: 'Patricia 5.1 (CCRL ~3500+)',
+        detail: 'Skill Level 21 • Full Strength (EAS 430,000 Aggressive)',
+        subtext: "Adam Kulju's romantic aggressive engine at maximum tactical strength. High draw contempt and ruthless piece sacrifices.",
+      };
+    }
+    return {
+      badge: `Patricia Human (${patricia.targetElo})`,
+      detail: `Skill Level ${patricia.skillLevel} / 20 (${patricia.targetElo} Elo) • cp_loss: ${patricia.cpLoss}`,
+      subtext: `Calibrated human blunder rate with MultiPV error distribution. Recommended depth: ${patricia.recommendedDepth} ply for ~${patricia.targetElo} Elo play.`,
     };
   }
 

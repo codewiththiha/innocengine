@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
 import { EngineRegistry, type BUILTIN_STOCKFISH } from '../../lib/engine-registry';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
-import { getEngineStrengthDescription } from '../../lib/engine-tuning';
+import { getEngineStrengthDescription, mapEloToPatriciaSkill } from '../../lib/engine-tuning';
 import type {
   EngineSettings,
   EngineEvaluation,
@@ -25,6 +25,7 @@ import {
   Server,
   UploadCloud,
   Lock,
+  Flame,
 } from 'lucide-react';
 import './App.css';
 
@@ -317,6 +318,12 @@ export default function App() {
               <span style={{ color: '#38bdf8', fontWeight: 600 }}>Maia-2 Unified Model Active:</span> NeurIPS 2024 unified human-AI chess policy modeling natural human play from 1100 to 1900 Elo.
             </div>
           )}
+
+          {settings.activeEngineId === 'patricia' && (
+            <div style={{ marginTop: 10, padding: 8, background: 'rgba(244, 63, 94, 0.08)', borderRadius: 6, border: '1px solid rgba(244, 63, 94, 0.25)', fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+              <span style={{ color: '#f43f5e', fontWeight: 600 }}>Patricia 5.1 Active:</span> Adam Kulju’s romantic aggressive engine (EAS 430,000) with calibrated human blunder simulation and tactical piece sacrifices.
+            </div>
+          )}
         </div>
       )}
 
@@ -433,7 +440,7 @@ export default function App() {
             <Sliders size={14} /> Search Budget & Variations
           </div>
 
-          {settings.activeEngineId === 'stockfish' ? (
+          {(settings.activeEngineId === 'stockfish' || settings.activeEngineId === 'patricia') ? (
             <div className="setting-item">
               <div className="setting-label-row">
                 <span className="setting-label">Calculation Depth</span>
@@ -450,7 +457,7 @@ export default function App() {
               />
               <div className="slider-hints">
                 <span>Fast (8)</span>
-                <span>Balanced (16)</span>
+                <span>{settings.activeEngineId === 'patricia' ? 'Human 2500 (12)' : 'Balanced (16)'}</span>
                 <span>Deep (24)</span>
               </div>
             </div>
@@ -510,7 +517,120 @@ export default function App() {
       {/* Tab: Strength */}
       {activeTab === 'strength' && (
         <div className="settings-section">
-          {settings.activeEngineId === 'maia2' ? (
+          {settings.activeEngineId === 'patricia' ? (
+            <>
+              <div className="section-title">
+                <Flame size={14} color="#f43f5e" /> Patricia 5.1 Style & Strength Settings
+              </div>
+
+              {/* Personality / Playstyle Mode */}
+              <div className="setting-item" style={{ marginTop: 8 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Personality / Playstyle</span>
+                  <span className="setting-value" style={{ textTransform: 'capitalize' }}>
+                    {settings.patriciaPersonality === 'human'
+                      ? 'Human-Like'
+                      : settings.patriciaPersonality === 'full_strength'
+                      ? 'Full Strength (3500+)'
+                      : settings.patriciaPersonality === 'solid'
+                      ? 'Solid Positional'
+                      : 'Aggressive (EAS 430k)'}
+                  </span>
+                </div>
+                <select
+                  className="select-dropdown"
+                  value={settings.patriciaPersonality || 'aggressive'}
+                  onChange={(e) => updateSetting('patriciaPersonality', e.target.value as any)}
+                >
+                  <option value="aggressive">Aggressive (EAS 430,000 Sacrificial)</option>
+                  <option value="human">Human-Like (Calibrated Elo Model)</option>
+                  <option value="full_strength">Full Strength (CCRL 3500+ Grandmaster)</option>
+                  <option value="solid">Solid / Classical (Controlled Aggression)</option>
+                </select>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                  {settings.patriciaPersonality === 'aggressive' && 'Patricia’s signature romantic play: searches for tactical piece sacrifices, avoids draws with high contempt, and hunts the king.'}
+                  {settings.patriciaPersonality === 'human' && 'Weakens search using MultiPV 5 error distribution and human blunder probabilities calibrated across rating bands.'}
+                  {settings.patriciaPersonality === 'full_strength' && 'Maximum tactical computation (3500+ Elo CCRL Blitz rating) without blunder handicapping.'}
+                  {settings.patriciaPersonality === 'solid' && 'Balanced attacking style with lower blunder variance and sound opening structures.'}
+                </div>
+              </div>
+
+              {/* Human Strength Limiter (UCI_LimitStrength & UCI_Elo) */}
+              <div className="setting-item" style={{ marginTop: 12 }}>
+                <label className="toggle-row">
+                  <span className="toggle-label">Enable Human Mode (UCI_LimitStrength)</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.patriciaLimitStrength ?? (settings.patriciaPersonality === 'human')}
+                    onChange={(e) => updateSetting('patriciaLimitStrength', e.target.checked)}
+                    className="toggle-switch"
+                  />
+                </label>
+              </div>
+
+              {(settings.patriciaLimitStrength || settings.patriciaPersonality === 'human') && (
+                <div className="setting-item" style={{ marginTop: 8 }}>
+                  <div className="setting-label-row">
+                    <span className="setting-label">Target Human Elo (UCI_Elo)</span>
+                    <span className="setting-value">
+                      {mapEloToPatriciaSkill(settings.patriciaElo || 2500).clampedElo} Elo (Skill {mapEloToPatriciaSkill(settings.patriciaElo || 2500).skillLevel}/20)
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="500"
+                    max="3000"
+                    step="50"
+                    value={settings.patriciaElo || 2500}
+                    onChange={(e) => updateSetting('patriciaElo', parseInt(e.target.value, 10))}
+                    className="slider"
+                  />
+                  <div className="slider-hints">
+                    <span>500 (Novice)</span>
+                    <span>1500 (Club)</span>
+                    <span>2000 (Expert)</span>
+                    <span>2500 (Master)</span>
+                    <span>3000 (Super-GM)</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Depth Guide (Specifically answering Lucas Chess 2500 Elo question) */}
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: '1px solid rgba(244, 63, 94, 0.25)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
+                  <Sparkles size={12} /> Recommended 2500 Elo Depth Guide
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                  For authentic human-like ~2500 Elo play, set fixed depth to <b>12 ply</b> (or movetime <b>1000–1500ms</b>). This allows Patricia to calculate MultiPV 5 tactical lines without machine-like 20+ ply perfection.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#38bdf8', marginBottom: 4 }}>
+                  {getEngineStrengthDescription(settings).detail}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                  {getEngineStrengthDescription(settings).subtext}
+                </div>
+              </div>
+            </>
+          ) : settings.activeEngineId === 'maia2' ? (
             <>
               <div className="section-title">
                 <ShieldAlert size={14} /> Maia-2 Human Policy Rating Checkpoint
@@ -680,10 +800,18 @@ export default function App() {
             <div className="res-card">
               <span className="res-label">Estimated Memory</span>
               <span className="res-val">
-                {(settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? '~12 MB' : `~${settings.hashMb + 48} MB`}
+                {settings.activeEngineId === 'patricia'
+                  ? '~64 MB'
+                  : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2')
+                  ? '~12 MB'
+                  : `~${settings.hashMb + 48} MB`}
               </span>
               <span className="res-sub">
-                {(settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2') ? 'Model Weights' : `Hash: ${settings.hashMb} MB`}
+                {settings.activeEngineId === 'patricia'
+                  ? 'Dual NNUE + Hash'
+                  : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2')
+                  ? 'Model Weights'
+                  : `Hash: ${settings.hashMb} MB`}
               </span>
             </div>
             <div className="res-card">
@@ -697,7 +825,24 @@ export default function App() {
             </div>
           </div>
 
-          {settings.activeEngineId === 'stockfish' ? (
+          {settings.activeEngineId === 'patricia' ? (
+            <div
+              style={{
+                marginTop: 12,
+                padding: '10px 12px',
+                borderRadius: 6,
+                background: 'rgba(30, 41, 59, 0.5)',
+                border: '1px solid rgba(244, 63, 94, 0.25)',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
+                Patricia 5.1 WASM Execution Profile
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                Dual NNUE perspective networks (768x2-&gt;768-&gt;1) trained on aggressive filtered positions. Features asymmetric sacrifice evaluation, 30cp draw contempt, and MultiPV 5 human simulation.
+              </div>
+            </div>
+          ) : settings.activeEngineId === 'stockfish' ? (
             <div
               style={{
                 marginTop: 12,
