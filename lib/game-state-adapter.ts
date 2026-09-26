@@ -108,22 +108,8 @@ export class GameStateAdapter {
     return fallbackTurn;
   }
 
-  private static extractMoveHistoryFromDom(): string[] {
-    const nodes = document.querySelectorAll<HTMLElement>(
-      '.move-list-row .node, vertical-move-list .node, .game-history .node, wc-move-list .node'
-    );
-    if (!nodes || nodes.length === 0) return [];
-
-    const moves: string[] = [];
-    nodes.forEach((node) => {
-      const text = node.innerText.trim();
-      const match = text.match(/^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[\+#]?|^O-O(?:-O)?[\+#]?/);
-      if (match && match[0]) {
-        moves.push(match[0]);
-      }
-    });
-
-    return moves;
+  public static extractMoveHistoryFromDom(): string[] {
+    return BoardParser.extractMoveHistoryFromDom();
   }
 
   private static verifyPieceMatch(chess: Chess, pieceMap: Map<string, string>): boolean {

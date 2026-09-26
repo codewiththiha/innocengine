@@ -1,6 +1,7 @@
 import { UciParser } from '../../lib/uci-parser';
 import { EngineRegistry } from '../../lib/engine-registry';
 import { getSettings } from '../../lib/storage';
+import { mapEloToStockfishParams } from '../../lib/engine-tuning';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from '../../lib/types';
 
@@ -37,6 +38,7 @@ class StockfishRunner implements IEngineRunner {
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
   private currentMultiPv: number = 1;
+  private currentSkillLevel: number = -1;
   private senderTabId?: number;
   private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
   private onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void;
@@ -68,8 +70,10 @@ class StockfishRunner implements IEngineRunner {
 
       this.worker.postMessage('uci');
       this.worker.postMessage('isready');
-      this.worker.postMessage('setoption name Hash value 32');
+      this.worker.postMessage('setoption name Hash value 16');
       this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
+      this.worker.postMessage('setoption name Skill Level value 20');
+      this.currentSkillLevel = 20;
     } catch (err) {
       console.error('[StockfishRunner] Initialization failed:', err);
       this.onStatus('error', 'Failed to launch Stockfish worker');
@@ -128,35 +132,33 @@ class StockfishRunner implements IEngineRunner {
 
     this.worker.postMessage('stop');
 
-    // MultiPV configuration
-    const targetMultiPv = Math.max(1, Math.min(5, options.multiPv));
+    // MultiPV configuration (1 - 4 lines)
+    const targetMultiPv = Math.max(1, Math.min(4, options.multiPv));
     if (this.currentMultiPv !== targetMultiPv) {
       this.currentMultiPv = targetMultiPv;
       this.worker.postMessage(`setoption name MultiPV value ${targetMultiPv}`);
     }
 
-    // Elo rating limiter: Send UCI_LimitStrength, UCI_Elo, and Skill Level
+    // Determine target Skill Level and Depth based on limitStrength & targetElo
+    let targetSkill = 20;
+    let targetDepth = options.depth || 16;
+
     if (options.limitStrength) {
-      const elo = Math.max(1320, Math.min(3190, options.targetElo));
-      this.worker.postMessage('setoption name UCI_LimitStrength value true');
-      this.worker.postMessage(`setoption name UCI_Elo value ${elo}`);
-      const skill = Math.max(0, Math.min(20, Math.round(((elo - 1320) / (3190 - 1320)) * 20)));
-      this.worker.postMessage(`setoption name Skill Level value ${skill}`);
-    } else {
-      this.worker.postMessage('setoption name UCI_LimitStrength value false');
-      this.worker.postMessage('setoption name Skill Level value 20');
+      const { skillLevel, maxDepth } = mapEloToStockfishParams(options.targetElo || 1500, options.depth || 16);
+      targetSkill = skillLevel;
+      targetDepth = maxDepth;
     }
 
-    if (options.hashMb) {
-      this.worker.postMessage(`setoption name Hash value ${options.hashMb}`);
-    }
-    if (options.threads) {
-      this.worker.postMessage(`setoption name Threads value ${options.threads}`);
+    if (this.currentSkillLevel !== targetSkill) {
+      this.currentSkillLevel = targetSkill;
+      this.worker.postMessage(`setoption name Skill Level value ${targetSkill}`);
     }
 
-    this.worker.postMessage('isready');
+    // Note: Never send Threads or Hash commands during analyze.
+    // In this WASM build, Threads is fixed to 1 and sending Threads deadlocks the runtime.
+    // Hash re-allocates transposition table memory mid-search.
     this.worker.postMessage(`position fen ${fen}`);
-    this.worker.postMessage(`go depth ${options.depth}`);
+    this.worker.postMessage(`go depth ${targetDepth}`);
     this.onStatus('analyzing', undefined, this.senderTabId);
   }
 
@@ -597,7 +599,7 @@ class UnifiedEngineHost {
     if (this.lastFen && this.lastPositionKey) {
       this.activeRunner.analyze(
         this.lastFen,
-        this.lastAnalysisId + 1,
+        this.lastAnalysisId,
         this.lastPositionKey,
         this.lastOptions
       );
@@ -656,8 +658,18 @@ class UnifiedEngineHost {
     chrome.storage.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
       if (areaName === 'local' && changes['chess_overlay_settings']) {
         const newSettings = changes['chess_overlay_settings'].newValue as any;
-        if (newSettings && newSettings.activeEngineId && newSettings.activeEngineId !== this.currentEngineId) {
-          this.switchEngine(newSettings.activeEngineId);
+        if (newSettings) {
+          this.lastOptions = {
+            depth: newSettings.depth ?? this.lastOptions.depth,
+            multiPv: newSettings.multiPv ?? this.lastOptions.multiPv,
+            limitStrength: newSettings.limitStrength ?? this.lastOptions.limitStrength,
+            targetElo: newSettings.targetElo ?? this.lastOptions.targetElo,
+            threads: newSettings.threads ?? this.lastOptions.threads,
+            hashMb: newSettings.hashMb ?? this.lastOptions.hashMb,
+          };
+          if (newSettings.activeEngineId && newSettings.activeEngineId !== this.currentEngineId) {
+            this.switchEngine(newSettings.activeEngineId);
+          }
         }
       }
     });

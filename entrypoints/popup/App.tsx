@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
 import { EngineRegistry, type BUILTIN_STOCKFISH } from '../../lib/engine-registry';
 import { REPERTOIRE_LIST } from '../../lib/opening-book';
+import { getEngineStrengthDescription } from '../../lib/engine-tuning';
 import type {
   EngineSettings,
   EngineEvaluation,
@@ -77,34 +78,35 @@ export default function App() {
     setInstalledEngines(list);
   };
 
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const updateSettingsBatch = async (patch: Partial<EngineSettings>) => {
-    setSettings((prev) => {
-      const updated = { ...prev, ...patch };
-      saveSettings(patch);
-      return updated;
-    });
+    setSettings((prev) => ({ ...prev, ...patch }));
 
     if (patch.activeEngineId) {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(patch.activeEngineId) });
     }
-    if (patch.hashMb !== undefined) {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Hash', value: Number(patch.hashMb) });
-    }
-    if (patch.threads !== undefined) {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'Threads', value: Number(patch.threads) });
-    }
-    if (patch.limitStrength !== undefined) {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'UCI_LimitStrength', value: Boolean(patch.limitStrength) });
-    }
-    if (patch.targetElo !== undefined) {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SET_OPTION', name: 'UCI_Elo', value: Number(patch.targetElo) });
-    }
 
+    await saveSettings(patch);
     showSavedNotification();
   };
 
-  const updateSetting = async <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
-    await updateSettingsBatch({ [key]: value });
+  const updateSetting = <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
+    // Instant local state update for 60fps slider feedback
+    setSettings((prev) => ({ ...prev, [key]: value }));
+
+    if (key === 'activeEngineId') {
+      chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(value) });
+    }
+
+    // Debounce storage persist to avoid flooding engine worker during slider dragging
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(async () => {
+      await saveSettings({ [key]: value });
+      showSavedNotification();
+    }, 100);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -422,29 +424,48 @@ export default function App() {
       {activeTab === 'analysis' && (
         <div className="settings-section">
           <div className="section-title">
-            <Sliders size={14} /> Search Budget
+            <Sliders size={14} /> Search Budget & Variations
           </div>
 
-          <div className="setting-item">
-            <div className="setting-label-row">
-              <span className="setting-label">Calculation Depth</span>
-              <span className="setting-value">{settings.depth} ply</span>
+          {settings.activeEngineId === 'stockfish' ? (
+            <div className="setting-item">
+              <div className="setting-label-row">
+                <span className="setting-label">Calculation Depth</span>
+                <span className="setting-value">{settings.depth} ply</span>
+              </div>
+              <input
+                type="range"
+                min="8"
+                max="24"
+                step="1"
+                value={settings.depth}
+                onChange={(e) => updateSetting('depth', parseInt(e.target.value, 10))}
+                className="slider"
+              />
+              <div className="slider-hints">
+                <span>Fast (8)</span>
+                <span>Balanced (16)</span>
+                <span>Deep (24)</span>
+              </div>
             </div>
-            <input
-              type="range"
-              min="8"
-              max="24"
-              step="1"
-              value={settings.depth}
-              onChange={(e) => updateSetting('depth', parseInt(e.target.value, 10))}
-              className="slider"
-            />
-            <div className="slider-hints">
-              <span>Fast (8)</span>
-              <span>Balanced (16)</span>
-              <span>Deep (24)</span>
+          ) : settings.activeEngineId === 'maia3' ? (
+            <div
+              className="setting-item"
+              style={{
+                background: 'rgba(30, 41, 59, 0.4)',
+                padding: '10px 12px',
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#38bdf8' }}>
+                <Sparkles size={13} /> Direct Neural Policy Model
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                Maia-3 predicts human candidate moves in a single neural network inference pass. Tree-search depth is not applicable.
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="setting-item">
             <div className="setting-label-row">
@@ -483,47 +504,116 @@ export default function App() {
       {/* Tab: Strength */}
       {activeTab === 'strength' && (
         <div className="settings-section">
-          <div className="section-title">
-            <ShieldAlert size={14} /> Engine Strength & Elo Limiter
-          </div>
+          {settings.activeEngineId === 'maia3' ? (
+            <>
+              <div className="section-title">
+                <ShieldAlert size={14} /> Maia-3 Human Policy Rating Checkpoint
+              </div>
 
-          <label className="toggle-row">
-            <span className="toggle-label">Limit Engine Strength</span>
-            <input
-              type="checkbox"
-              checked={settings.limitStrength}
-              onChange={(e) => updateSetting('limitStrength', e.target.checked)}
-              className="toggle-switch"
-            />
-          </label>
+              <div className="setting-item" style={{ marginTop: 8 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Target Human Elo Rating</span>
+                  <span className="setting-value">{Math.round((settings.targetElo || 1500) / 100) * 100} Elo</span>
+                </div>
+                <input
+                  type="range"
+                  min="1100"
+                  max="1900"
+                  step="100"
+                  value={Math.round((settings.targetElo || 1500) / 100) * 100}
+                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+                <div className="slider-hints">
+                  <span>1100</span>
+                  <span>1300</span>
+                  <span>1500</span>
+                  <span>1700</span>
+                  <span>1900</span>
+                </div>
+              </div>
 
-          <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Target Elo Rating</span>
-              <span className="setting-value">{settings.targetElo} Elo</span>
-            </div>
-            <input
-              type="range"
-              min="1100"
-              max="3190"
-              step="25"
-              disabled={!settings.limitStrength}
-              value={settings.targetElo}
-              onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
-              className="slider"
-            />
-            <div className="slider-hints">
-              <span>Novice (1200)</span>
-              <span>Club (1600)</span>
-              <span>Master (2200)</span>
-              <span>GM (2800+)</span>
-            </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8, lineHeight: 1.4 }}>
-              {settings.activeEngineId === 'maia3'
-                ? 'Calibrates Maia-3 neural move predictor to human games played at this Elo rating.'
-                : 'Configures UCI_Elo, UCI_LimitStrength, and Skill Level in Stockfish WASM to throttle engine strength.'}
-            </div>
-          </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#38bdf8', marginBottom: 4 }}>
+                  {getEngineStrengthDescription(settings).detail}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                  {getEngineStrengthDescription(settings).subtext}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="section-title">
+                <ShieldAlert size={14} /> Stockfish WASM Strength Limiter
+              </div>
+
+              <label className="toggle-row">
+                <span className="toggle-label">Limit Engine Strength</span>
+                <input
+                  type="checkbox"
+                  checked={settings.limitStrength}
+                  onChange={(e) => updateSetting('limitStrength', e.target.checked)}
+                  className="toggle-switch"
+                />
+              </label>
+
+              <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Target Elo Rating</span>
+                  <span className="setting-value">{settings.targetElo} Elo</span>
+                </div>
+                <input
+                  type="range"
+                  min="800"
+                  max="3000"
+                  step="25"
+                  disabled={!settings.limitStrength}
+                  value={settings.targetElo}
+                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+                <div className="slider-hints">
+                  <span>Novice (1000)</span>
+                  <span>Club (1500)</span>
+                  <span>Master (2200)</span>
+                  <span>GM (2800+)</span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: `1px solid ${settings.limitStrength ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: settings.limitStrength ? '#f59e0b' : '#10b981',
+                    marginBottom: 4,
+                  }}
+                >
+                  {getEngineStrengthDescription(settings).detail}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                  {getEngineStrengthDescription(settings).subtext}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -537,8 +627,12 @@ export default function App() {
           <div className="resource-strip">
             <div className="res-card">
               <span className="res-label">Estimated Memory</span>
-              <span className="res-val">~{settings.hashMb + 48} MB</span>
-              <span className="res-sub">Hash: {settings.hashMb} MB</span>
+              <span className="res-val">
+                {settings.activeEngineId === 'maia3' ? '~12 MB' : `~${settings.hashMb + 48} MB`}
+              </span>
+              <span className="res-sub">
+                {settings.activeEngineId === 'maia3' ? 'Model Weights' : `Hash: ${settings.hashMb} MB`}
+              </span>
             </div>
             <div className="res-card">
               <span className="res-label">Engine Activity</span>
@@ -547,41 +641,79 @@ export default function App() {
                   <span key={i} className="spark-bar" style={{ height: `${Math.min(100, h * 4)}%` }} />
                 ))}
               </div>
-              <span className="res-sub">Search active</span>
+              <span className="res-sub">Active Worker</span>
             </div>
           </div>
 
-          <div className="setting-item" style={{ marginTop: 12 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Hash Table Size (RAM)</span>
-              <span className="setting-value">{settings.hashMb} MB</span>
+          {settings.activeEngineId === 'stockfish' ? (
+            <div
+              style={{
+                marginTop: 12,
+                padding: '10px 12px',
+                borderRadius: 6,
+                background: 'rgba(30, 41, 59, 0.5)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
+                Stockfish WASM Execution Profile
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                Runs safely in a dedicated Web Worker (1 thread, 16 MB Hash). Worker thread allocation and hash size are managed without sending unsupported UCI commands that stall the engine.
+              </div>
             </div>
-            <input
-              type="range"
-              min="16"
-              max="256"
-              step="16"
-              value={settings.hashMb}
-              onChange={(e) => updateSetting('hashMb', parseInt(e.target.value, 10))}
-              className="slider"
-            />
-          </div>
+          ) : settings.activeEngineId === 'maia3' ? (
+            <div
+              style={{
+                marginTop: 12,
+                padding: '10px 12px',
+                borderRadius: 6,
+                background: 'rgba(30, 41, 59, 0.5)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
+                Maia-3 Execution Profile
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                Direct neural policy execution in memory (~12 MB weights buffer). Instantaneous inference without tree search threads or transposition tables.
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="setting-item" style={{ marginTop: 12 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Hash Table Size (RAM)</span>
+                  <span className="setting-value">{settings.hashMb} MB</span>
+                </div>
+                <input
+                  type="range"
+                  min="16"
+                  max="256"
+                  step="16"
+                  value={settings.hashMb}
+                  onChange={(e) => updateSetting('hashMb', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+              </div>
 
-          <div className="setting-item">
-            <div className="setting-label-row">
-              <span className="setting-label">Search Threads</span>
-              <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
-            </div>
-            <input
-              type="range"
-              min="1"
-              max={maxHardwareThreads}
-              step="1"
-              value={settings.threads}
-              onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
-              className="slider"
-            />
-          </div>
+              <div className="setting-item">
+                <div className="setting-label-row">
+                  <span className="setting-label">Search Threads</span>
+                  <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max={maxHardwareThreads}
+                  step="1"
+                  value={settings.threads}
+                  onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+              </div>
+            </>
+          )}
         </div>
       )}
 

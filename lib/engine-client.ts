@@ -31,7 +31,7 @@ export class EngineClient {
           const evalData: EngineEvaluation = message.evaluation;
 
           // Reject stale evaluation generations or position mismatches
-          const matchesGeneration = evalData.analysisId === this.activeAnalysisId;
+          const matchesGeneration = evalData.analysisId >= this.activeAnalysisId;
           const matchesPosition =
             evalData.positionKey === this.activePositionKey ||
             getPositionKey(evalData.fen) === this.activePositionKey;

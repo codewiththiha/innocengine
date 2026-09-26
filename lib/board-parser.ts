@@ -310,8 +310,34 @@ export class BoardParser {
     return rights.length > 0 ? rights : '-';
   }
 
+  public static extractMoveHistoryFromDom(): string[] {
+    const nodes = document.querySelectorAll<HTMLElement>(
+      '.move-list-row .node, vertical-move-list .node, .game-history .node, wc-move-list .node, .move-node'
+    );
+    if (!nodes || nodes.length === 0) return [];
+
+    const moves: string[] = [];
+    nodes.forEach((node) => {
+      const text = node.innerText.trim();
+      // Skip turn numbers like "1.", "2."
+      if (/^\d+\.?$/.test(text)) return;
+      const match = text.match(/^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[\+#]?|^O-O(?:-O)?[\+#]?/);
+      if (match && match[0]) {
+        moves.push(match[0]);
+      }
+    });
+
+    return moves;
+  }
+
   private static detectSideToMove(board: HTMLElement, grid: string[][]): 'w' | 'b' {
-    // 1. Check running clock
+    // 1. Authoritative move count from move history
+    const moveHistory = this.extractMoveHistoryFromDom();
+    if (moveHistory.length > 0) {
+      return moveHistory.length % 2 === 0 ? 'w' : 'b';
+    }
+
+    // 2. Check running clock
     const whiteClock = document.querySelector(
       '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
     );
@@ -321,11 +347,14 @@ export class BoardParser {
     if (whiteClock && !blackClock) return 'w';
     if (blackClock && !whiteClock) return 'b';
 
-    // 2. Check native Chess.com move highlights (strictly excluding any AI overlay elements)
+    // 3. Check native Chess.com move highlights (strictly excluding any AI overlay elements)
+    // Only examine when there are exactly 2 native highlights (1 origin + 1 destination)
     const nativeHighlights = board.querySelectorAll(
       '.highlight:not([class*="ai-"]):not([id*="ai-"])'
     );
-    if (nativeHighlights.length >= 2) {
+    if (nativeHighlights.length === 2) {
+      let destPiece: string | null = null;
+      let emptyCount = 0;
       for (const hl of Array.from(nativeHighlights)) {
         for (const cls of Array.from(hl.classList)) {
           const match = cls.match(/^square-(\d)(\d)$/);
@@ -334,28 +363,18 @@ export class BoardParser {
             const rank = parseInt(match[2], 10) - 1;
             const piece = grid[rank]?.[file];
             if (piece) {
-              return piece === piece.toUpperCase() ? 'b' : 'w';
+              destPiece = piece;
+            } else {
+              emptyCount++;
             }
           }
         }
       }
-    }
-
-    // 3. Check move list in sidebar
-    const moveNodes = document.querySelectorAll(
-      '.move-list-row .node, vertical-move-list .node, .game-history .node'
-    );
-    if (moveNodes.length > 0) {
-      const lastNode = moveNodes[moveNodes.length - 1];
-      if (lastNode) {
-        const isWhite =
-          lastNode.classList.contains('white-node') ||
-          lastNode.getAttribute('data-player') === 'white' ||
-          !lastNode.previousElementSibling;
-        return isWhite ? 'b' : 'w';
+      if (destPiece && emptyCount === 1) {
+        return destPiece === destPiece.toUpperCase() ? 'b' : 'w';
       }
     }
 
-    return 'w';
+    return this.lastTurn || 'w';
   }
 }

@@ -135,6 +135,11 @@ export class HighlightController {
     const primaryCandidate = displayCandidates[0];
     if (!primaryCandidate) return;
 
+    // Filter out premature 1-ply blunders (depth < 4) during initial alpha-beta expansion
+    if (evaluation.depth < 4 && !primaryCandidate.isBookMove && evaluation.engineInstanceId !== 'maia3') {
+      return;
+    }
+
     const primaryMoveKey = `${primaryCandidate.from}-${primaryCandidate.to}`;
     const now = Date.now();
 

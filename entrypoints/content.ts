@@ -1,4 +1,5 @@
 import { BoardParser } from '../lib/board-parser';
+import { GameStateAdapter } from '../lib/game-state-adapter';
 import { SvgOverlay } from '../lib/svg-overlay';
 import { EngineClient } from '../lib/engine-client';
 import { HighlightController } from '../lib/highlight-controller';
@@ -33,6 +34,8 @@ export default defineContentScript({
         highlightController.handleEvaluation(evaluation);
       });
 
+      let settingsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
       subscribeToSettings((newSettings) => {
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
         const depthChanged = newSettings.depth !== currentSettings.depth;
@@ -63,10 +66,22 @@ export default defineContentScript({
         }
 
         if (currentBoard && (multiPvChanged || depthChanged || engineChanged || eloChanged || openingChanged)) {
-          const state = BoardParser.extractBoardState(currentBoard);
-          if (state && currentSettings.autoAnalyze) {
-            engineClient?.analyze(state.fen, currentSettings);
+          if (settingsDebounceTimer) {
+            clearTimeout(settingsDebounceTimer);
           }
+          settingsDebounceTimer = setTimeout(() => {
+            if (!currentBoard) return;
+            const state = BoardParser.extractBoardState(currentBoard);
+            if (state && currentSettings.autoAnalyze) {
+              const authGame = GameStateAdapter.extractGameState(currentBoard, state.turn);
+              if (authGame && authGame.fen) {
+                state.fen = authGame.fen;
+                state.positionKey = authGame.positionKey;
+                state.turn = authGame.turn;
+              }
+              engineClient?.analyze(state.fen, currentSettings);
+            }
+          }, 120);
         }
       });
 
@@ -163,6 +178,14 @@ export default defineContentScript({
 
       const state: BoardState | null = BoardParser.extractBoardState(currentBoard);
       if (!state) return;
+
+      // Authoritative FEN & turn resolution via DOM move list replay with chess.js
+      const authGame = GameStateAdapter.extractGameState(currentBoard, state.turn);
+      if (authGame && authGame.fen) {
+        state.fen = authGame.fen;
+        state.positionKey = authGame.positionKey;
+        state.turn = authGame.turn;
+      }
 
       overlay.setFlipped(state.isFlipped);
       highlightController.setBoardState(state);
