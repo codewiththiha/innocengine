@@ -716,4 +716,35 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   console.log('   ✓ Patricia 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');
 }
 
+// --------------------------------------------------------------------------
+// 11. Maia Hanging Piece & Queen Safety Defense (calculateHangingThreats)
+// --------------------------------------------------------------------------
+console.log('\n11. Testing Maia hanging piece & Queen safety defense (calculateHangingThreats)...');
+{
+  const { evaluateHumanPolicy, calculateHangingThreats } = await import('../lib/maia-policy');
+
+  // Position: White Queen on d4 attacked by defended Bishop on b6 (pawn on a7)
+  // White must move the Queen away to safety, NEVER play passive moves like h3 or f3
+  const queenThreatFen = '6k1/p4ppp/1b6/8/3Q4/8/5PPP/6K1 w - - 0 1';
+  const candidates = evaluateHumanPolicy(queenThreatFen, 1500, 5);
+
+  assert(candidates.length > 0, 'Candidates must be generated');
+  // Top move must be a Queen move that avoids capture
+  assert(
+    candidates[0]?.san.startsWith('Q') && candidates[0]?.san !== 'Qxb6',
+    `Top move must safely escape the Queen, got ${candidates[0]?.san}`
+  );
+
+  // Passive moves like h3 must be eliminated or ranked at bottom
+  const blunderH3 = candidates.find((m) => m.san === 'h3');
+  assert.strictEqual(
+    blunderH3,
+    undefined,
+    'Passive move h3 that hangs the Queen on d4 must not appear in top candidates'
+  );
+
+  console.log(`   Threat Position Top Move: ${candidates[0]?.san} (safely escapes Queen under attack)`);
+  console.log('   ✓ Hanging Queen and major piece defense verified');
+}
+
 console.log('\n=== ALL TESTS PASSED SUCCESSFULLY ===');

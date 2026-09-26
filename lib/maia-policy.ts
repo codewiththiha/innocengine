@@ -69,6 +69,57 @@ export function extractBoardTensor(chessInstance: Chess): Float32Array {
 }
 
 /**
+ * Calculates total material value of pieces currently hanging/attacked for a side.
+ * Evaluates whether pieces left behind are attacked by lower-value pieces or completely undefended.
+ */
+export function calculateHangingThreats(chess: Chess, sideToDefend: 'w' | 'b'): number {
+  let hangingPenalty = 0;
+  const oppReplies = chess.moves({ verbose: true });
+  const board = chess.board();
+
+  for (let r = 0; r < 8; r++) {
+    const row = board[r];
+    if (!row) continue;
+    for (let c = 0; c < 8; c++) {
+      const piece = row[c];
+      if (piece && piece.color === sideToDefend && piece.type !== 'k') {
+        const sq = `${String.fromCharCode(97 + c)}${8 - r}`;
+        const attackers = oppReplies.filter((r) => r.to === sq);
+
+        if (attackers.length > 0) {
+          const pieceVal = PIECE_VALUES[piece.type] || 100;
+          // Sort attackers to find lowest-value attacker (e.g. Pawn before Queen)
+          attackers.sort((a, b) => (PIECE_VALUES[a.piece] || 100) - (PIECE_VALUES[b.piece] || 100));
+          const lowestAttacker = attackers[0];
+          const lowestAttackerVal = PIECE_VALUES[lowestAttacker?.piece || 'p'] || 100;
+
+          // Check if piece is defended by simulating the capture and checking recaptures
+          if (lowestAttacker) {
+            try {
+              chess.move(lowestAttacker);
+              const ourRecaptures = chess.moves({ verbose: true }).filter((m) => m.to === sq);
+              chess.undo();
+
+              if (ourRecaptures.length === 0) {
+                // Completely hanging piece (e.g. Queen left undefended)
+                hangingPenalty += pieceVal;
+              } else if (pieceVal > lowestAttackerVal) {
+                // Bad trade exposure (e.g. Rook or Pawn attacking Queen, even if defended)
+                hangingPenalty += (pieceVal - lowestAttackerVal);
+              }
+            } catch (_) {
+              // Fail-safe in case of any move simulation error
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return hangingPenalty;
+}
+
+/**
  * Evaluates human move policy conditioned on target Elo and position features.
  * Features:
  * 1. Zero-search lookahead (nodes: 1)
@@ -76,6 +127,7 @@ export function extractBoardTensor(chessInstance: Chess): Float32Array {
  * 3. Repetition & Draw Avoidance: Refuses 3-fold repetition when ahead in material
  * 4. Stalemate Prevention: Strictly penalizes stalemate when holding a decisive advantage
  * 5. Endgame Mating Drive: Directs friendly King opposition, corners enemy King, and restricts mobility
+ * 6. Global Board Threat & Hanging Piece Defense: Never ignores attacked Queens or major pieces
  */
 export function evaluateHumanPolicy(
   fen: string,
@@ -134,6 +186,11 @@ export function evaluateHumanPolicy(
 
       // Simulate move to evaluate post-move state
       chess.move(m);
+
+      // CRITICAL: Evaluate hanging threats across ALL friendly pieces after move 'm'
+      // This prevents blundering an attacked Queen/Rook by moving another piece elsewhere
+      const postMoveThreats = calculateHangingThreats(chess, turn);
+
       const isStalemate = chess.isStalemate();
       const nextPosKey = chess.fen().split(' ').slice(0, 4).join(' ');
       const isRepetition = recentPositions.length > 0 && recentPositions.includes(nextPosKey);
@@ -197,6 +254,9 @@ export function evaluateHumanPolicy(
           score += netExchange * (1.8 + eloRatio * 1.5);
         }
       }
+
+      // Heavily penalize moves that leave hanging pieces behind (e.g. leaving Queen under attack)
+      score -= postMoveThreats * 2.5;
 
       // 4. Winning Endgame Heuristics (Converting advantage, opposition, mating net)
       if (isEndgame && isDecisiveAdvantage) {
