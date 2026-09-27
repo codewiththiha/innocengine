@@ -17,7 +17,7 @@ export default defineContentScript({
     let currentSettings: EngineSettings;
     let lastPositionKey: string = '';
     let boardObserver: MutationObserver | null = null;
-    let pendingScanTimeout: ReturnType<typeof setTimeout> | null = null;
+    let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
 
     async function init() {
@@ -149,9 +149,9 @@ export default defineContentScript({
       if (boardObserver) {
         boardObserver.disconnect();
       }
-      if (pendingScanTimeout !== null) {
-        clearTimeout(pendingScanTimeout);
-        pendingScanTimeout = null;
+      if (pendingScanRaf !== null) {
+        cancelAnimationFrame(pendingScanRaf);
+        pendingScanRaf = null;
       }
 
       handleBoardChange();
@@ -164,7 +164,7 @@ export default defineContentScript({
         });
         if (isSelfMutation) return;
 
-        // Ignore transient UI mutations whose only changes are selection/highlights/hints
+        // Ignore transient UI mutations whose only changes are selection/hints
         const isTransientOnly = mutations.every((m) => {
           const target = m.target as HTMLElement;
           if (target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar')) {
@@ -173,7 +173,6 @@ export default defineContentScript({
           if (m.type === 'attributes' && m.attributeName === 'class') {
             const cls = target.className || '';
             const isSquareHighlight =
-              cls.includes('highlight') ||
               cls.includes('square-selected') ||
               cls.includes('hover-square') ||
               cls.includes('selected');
@@ -187,7 +186,6 @@ export default defineContentScript({
               (n) =>
                 n.classList?.contains('hint') ||
                 n.classList?.contains('capture-hint') ||
-                n.classList?.contains('highlight') ||
                 n.id?.startsWith('chess-ai-')
             );
             if (allHints && nodes.length > 0) {
@@ -198,14 +196,14 @@ export default defineContentScript({
         });
         if (isTransientOnly) return;
 
-        // Debounce board extraction ~200ms to allow 180ms CSS move animations to finish
-        if (pendingScanTimeout !== null) {
-          clearTimeout(pendingScanTimeout);
+        // Schedule extraction immediately on next animation frame (~16ms) without artificial lag
+        if (pendingScanRaf !== null) {
+          cancelAnimationFrame(pendingScanRaf);
         }
-        pendingScanTimeout = setTimeout(() => {
-          pendingScanTimeout = null;
+        pendingScanRaf = requestAnimationFrame(() => {
+          pendingScanRaf = null;
           handleBoardChange();
-        }, 200);
+        });
       });
 
       boardObserver.observe(board, {
@@ -223,7 +221,7 @@ export default defineContentScript({
       if (!state) return;
 
       // Authoritative FEN & turn resolution via DOM move list replay with chess.js
-      const authGame = GameStateAdapter.extractGameState(currentBoard, state.turn);
+      const authGame = GameStateAdapter.extractGameState(currentBoard, state.turn, state);
       if (authGame && authGame.fen) {
         state.fen = authGame.fen;
         state.positionKey = authGame.positionKey;

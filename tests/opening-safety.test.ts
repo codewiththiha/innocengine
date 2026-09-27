@@ -785,4 +785,91 @@ console.log('\n14. Testing HighlightController Gating under Inactive Game & Flip
   console.log('   ✓ Inactive game suppression and Black player flipped board gating strictly verified');
 }
 
+// --------------------------------------------------------------------------
+// 15. Instant Grid-Diff Turn Transition & GameStateAdapter Passthrough
+// --------------------------------------------------------------------------
+console.log('\n15. Testing Instant Grid-Diff Turn Transition & GameStateAdapter Passthrough...');
+{
+  const { BoardParser } = await import('../lib/board-parser');
+  const { GameStateAdapter } = await import('../lib/game-state-adapter');
+
+  function makePiece(cls: string) {
+    const classList = new Set(cls.split(' '));
+    return {
+      classList: {
+        contains: (c: string) => classList.has(c),
+        [Symbol.iterator]: () => classList.values(),
+      },
+      className: cls,
+      dataset: {},
+      style: {},
+      closest: () => null,
+    };
+  }
+
+  // Create standard starting pieces
+  const whitePieces = [
+    'piece wr square-11', 'piece wn square-21', 'piece wb square-31', 'piece wq square-41',
+    'piece wk square-51', 'piece wb square-61', 'piece wn square-71', 'piece wr square-81',
+    'piece wp square-12', 'piece wp square-22', 'piece wp square-32', 'piece wp square-42',
+    'piece wp square-52', 'piece wp square-62', 'piece wp square-72', 'piece wp square-82',
+  ];
+  const blackPieces = [
+    'piece br square-18', 'piece bn square-28', 'piece bb square-38', 'piece bq square-48',
+    'piece bk square-58', 'piece bb square-68', 'piece bn square-78', 'piece br square-88',
+    'piece bp square-17', 'piece bp square-27', 'piece bp square-37', 'piece bp square-47',
+    'piece bp square-57', 'piece bp square-67', 'piece bp square-77', 'piece bp square-87',
+  ];
+
+  const initialPieces = [...whitePieces, ...blackPieces].map(makePiece);
+
+  const initialBoardMock = {
+    classList: { contains: () => false },
+    hasAttribute: () => false,
+    getAttribute: () => null,
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 800, height: 800 }),
+    querySelectorAll: (sel: string) => (sel.includes('.piece') ? initialPieces : []),
+    querySelector: () => null,
+  } as any;
+
+  const initialState = BoardParser.extractBoardState(initialBoardMock);
+  assert(initialState, 'Initial board state must parse');
+  assert.strictEqual(initialState.turn, 'w', 'Initial turn must be White');
+
+  // White moves pawn from e2 (square-52) to e4 (square-54)
+  const afterE4Pieces = initialPieces.map((p) => {
+    if (p.className === 'piece wp square-52') {
+      return makePiece('piece wp square-54');
+    }
+    return p;
+  });
+
+  const afterE4BoardMock = {
+    classList: { contains: () => false },
+    hasAttribute: () => false,
+    getAttribute: () => null,
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 800, height: 800 }),
+    querySelectorAll: (sel: string) => (sel.includes('.piece') ? afterE4Pieces : []),
+    querySelector: () => null,
+  } as any;
+
+  const afterE4State = BoardParser.extractBoardState(afterE4BoardMock);
+  assert(afterE4State, 'Board state after 1.e4 must parse');
+  assert.strictEqual(
+    afterE4State.turn,
+    'b',
+    'Turn must transition immediately to Black via grid diffing before clock element updates'
+  );
+
+  // Test GameStateAdapter passthrough with existingGridState
+  const gameState = GameStateAdapter.extractGameState(afterE4BoardMock, afterE4State.turn, afterE4State);
+  assert(gameState, 'GameState must resolve via existingGridState');
+  assert.strictEqual(gameState.turn, 'b', 'GameState must preserve instantaneous Black turn');
+  assert(gameState.fen.includes('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b'), 'FEN reflects 1.e4 b');
+
+  console.log('   ✓ Instant grid-diff turn transition and GameStateAdapter passthrough verified');
+}
+
 console.log('\n=== ALL OPENING SAFETY TESTS PASSED SUCCESSFULLY ===');

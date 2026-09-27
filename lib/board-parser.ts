@@ -18,6 +18,7 @@ const PIECE_MAP: Record<string, string> = {
 export class BoardParser {
   private static lastPlacement: string = '';
   private static lastTurn: 'w' | 'b' = 'w';
+  private static lastGrid: string[][] | null = null;
 
   public static findBoardElement(): HTMLElement | null {
     const selectors = [
@@ -95,19 +96,25 @@ export class BoardParser {
   }
 
   public static isGameActive(board: HTMLElement): boolean {
-    if (board.classList.contains('board-disabled')) {
+    if (board?.classList?.contains('board-disabled')) {
       return false;
     }
-    const gameOverEl = document.querySelector(
-      '.game-over-modal-shell-container, .game-over-modal-component, .game-over-dialog-component, .game-over-modal'
-    );
-    if (gameOverEl) {
-      return false;
+    if (typeof document !== 'undefined') {
+      const gameOverEl = document.querySelector(
+        '.game-over-modal-shell-container, .game-over-modal-component, .game-over-dialog-component, .game-over-modal'
+      );
+      if (gameOverEl) {
+        return false;
+      }
     }
     return true;
   }
 
   public static detectPlayerColor(board: HTMLElement, isFlipped: boolean): 'w' | 'b' {
+    if (typeof document === 'undefined') {
+      return isFlipped ? 'b' : 'w';
+    }
+
     const colorOf = (el?: Element | null): 'w' | 'b' | null => {
       if (!el) return null;
       if (el.classList.contains('clock-white') || el.classList.contains('white')) return 'w';
@@ -271,13 +278,21 @@ export class BoardParser {
       turn = 'w';
       this.lastTurn = 'w';
       this.lastPlacement = placement;
+      this.lastGrid = grid.map((r) => [...r]);
     } else if (placement === this.lastPlacement && this.lastTurn) {
       // Piece selection or click without movement: retain existing turn!
       turn = this.lastTurn;
     } else {
-      turn = this.detectTurn(board, this.lastTurn || 'w');
+      const movedColor = this.detectMovedColor(this.lastGrid, grid);
+      if (movedColor) {
+        // In chess, turns strictly alternate: if White moved, it is now Black's turn
+        turn = movedColor === 'w' ? 'b' : 'w';
+      } else {
+        turn = this.detectTurn(board, this.lastTurn || 'w');
+      }
       this.lastTurn = turn;
       this.lastPlacement = placement;
+      this.lastGrid = grid.map((r) => [...r]);
     }
 
     const castling = this.computeCastlingRights(grid);
@@ -297,6 +312,27 @@ export class BoardParser {
       isGameActive,
       moveHistory: this.extractMoveHistoryFromDom(),
     };
+  }
+
+  private static detectMovedColor(prevGrid: string[][] | null, nextGrid: string[][]): 'w' | 'b' | null {
+    if (!prevGrid) return null;
+
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        const prevPiece = prevGrid[r]?.[f] || '';
+        const nextPiece = nextGrid[r]?.[f] || '';
+        if (!prevPiece && nextPiece) {
+          // Destination square of quiet move or pawn advance
+          return nextPiece === nextPiece.toUpperCase() ? 'w' : 'b';
+        }
+        if (prevPiece && nextPiece && prevPiece !== nextPiece) {
+          // Destination square of a capture: replaced by capturing piece
+          return nextPiece === nextPiece.toUpperCase() ? 'w' : 'b';
+        }
+      }
+    }
+
+    return null;
   }
 
   private static gridToPlacement(grid: string[][]): string {
@@ -366,6 +402,7 @@ export class BoardParser {
   }
 
   public static extractMoveHistoryFromDom(): string[] {
+    if (typeof document === 'undefined') return [];
     const nodes = document.querySelectorAll<HTMLElement>(
       'wc-simple-move-list .node.main-line-ply, .main-line-row .node.main-line-ply, .main-line-ply, vertical-move-list .node, .game-history .node, wc-move-list .node, .move-node:not(.empty)'
     );
@@ -386,6 +423,8 @@ export class BoardParser {
   }
 
   public static detectTurn(board?: HTMLElement | null, fallbackTurn: 'w' | 'b' = 'w'): 'w' | 'b' {
+    if (typeof document === 'undefined') return fallbackTurn;
+
     const colorOf = (el?: Element | null): 'w' | 'b' | null => {
       if (!el) return null;
       if (el.classList.contains('clock-white') || el.classList.contains('white')) return 'w';

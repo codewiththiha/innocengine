@@ -1,5 +1,6 @@
 import { Chess } from 'chess.js';
 import { BoardParser } from './board-parser';
+import type { BoardState } from './types';
 
 export interface GameState {
   fen: string;
@@ -15,9 +16,13 @@ export interface GameState {
 }
 
 export class GameStateAdapter {
-  public static extractGameState(board: HTMLElement, previousTurn: 'w' | 'b' = 'w'): GameState | null {
-    const isFlipped = BoardParser.isBoardFlipped(board);
-    const gridState = BoardParser.extractBoardState(board);
+  public static extractGameState(
+    board: HTMLElement,
+    previousTurn: 'w' | 'b' = 'w',
+    existingGridState?: BoardState | null
+  ): GameState | null {
+    const isFlipped = existingGridState?.isFlipped ?? BoardParser.isBoardFlipped(board);
+    const gridState = existingGridState || BoardParser.extractBoardState(board);
     if (!gridState) return null;
 
     const boardFingerprint = this.computeBoardFingerprint(gridState.pieceMap);
@@ -68,7 +73,7 @@ export class GameStateAdapter {
     }
 
     // Determine turn reliably using single source of truth
-    const detectedTurn = BoardParser.detectTurn(board, previousTurn);
+    const detectedTurn = gridState.turn || BoardParser.detectTurn(board, previousTurn);
 
     // Fallback: visual board snapshot
     const tokens = gridState.fen.split(' ');
