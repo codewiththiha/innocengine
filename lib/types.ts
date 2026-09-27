@@ -1,5 +1,5 @@
 export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.0.1';
 
 export interface UciOption {
   name: string;

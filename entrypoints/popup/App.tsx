@@ -670,7 +670,7 @@ export default function App() {
                   <Sparkles size={12} /> Dynamic Rating & Personality Calibration
                 </div>
                 <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and node budgets to match the selected rating. At low Elo (500–1000), search is restricted to authentic beginner tactical horizon instead of machine-like 20+ ply perfection.
+                  Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and move time to match the selected rating. At low Elo (500–1000), search is restricted to authentic beginner tactical horizon instead of machine-like 20+ ply perfection.
                 </div>
               </div>
 

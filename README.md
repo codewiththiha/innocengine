@@ -100,7 +100,7 @@ Compiles TypeScript, processes assets, bundles WebAssembly, and outputs the fina
 ```bash
 npm run zip
 ```
-Creates `.output/chess-ai-overlay-1.0.0-chrome.zip` ready for Chrome Web Store submission or distribution.
+Creates `.output/chess-ai-overlay-1.0.1-chrome.zip` ready for Chrome Web Store submission or distribution.
 
 ### 5. Multi-Browser Support: Mozilla Firefox & Waterfox
 The extension is fully compatible with Mozilla Firefox and Waterfox (both Manifest V2 and Manifest V3):
@@ -132,7 +132,7 @@ npm run zip:all
 ##### Method A: Temporary / Developer Mode (Recommended & Instant)
 1. Open Waterfox or Firefox and navigate to `about:debugging#/runtime/this-firefox`.
 2. Click **Load Temporary Add-on...**.
-3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select `releases/chess-ai-overlay-1.0.0-firefox.xpi`.
+3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select `releases/chess-ai-overlay-1.0.1-firefox.xpi`.
 4. Open [Chess.com](https://www.chess.com) and start playing!
 
 ##### Method B: Permanent Installation in Waterfox (Fixing "Cannot modify the needed file")
@@ -143,14 +143,14 @@ To install permanently in Waterfox without signature rejection:
 2. Search for `xpinstall.signatures.required` and toggle it to **`false`**.
 3. Search for `extensions.experiments.enabled` and toggle it to **`true`**.
 4. Open `about:addons`, click the gear icon in the top right, and choose **Install Add-on From File...**.
-5. Select `releases/chess-ai-overlay-1.0.0-firefox.xpi`. It will install permanently without the modal staging error.
+5. Select `releases/chess-ai-overlay-1.0.1-firefox.xpi`. It will install permanently without the modal staging error.
 
 ---
 
 ### 6. Patricia 5.1 Engine & Dynamic Personality Calibration
 Patricia 5.1 is integrated with full native WebAssembly execution, supporting dynamic rating adjustment (500–3000 Elo) and distinct playstyle personalities:
 - **Aggressive (EAS 430,000 Sacrificial)**: Patricia's hallmark romantic style with high draw contempt and bonuses for piece sacrifices and king attacks. Scaled dynamically to your target rating.
-- **Human-Like**: Calibrated human blunder and mistake distribution modeled from CCRL and Lichess error rates. Throttles search depth (3–14 ply) and node budgets to match genuine human tactical vision.
+- **Human-Like**: Calibrated human blunder and mistake distribution modeled from CCRL and Lichess error rates. Throttles search depth (2–14 ply) and move time to match genuine human tactical vision.
 - **Solid Positional**: Focuses on king safety, central pawn control, and avoids speculative sacrifices.
 - **Full Strength (CCRL 3500+)**: Unrestricted grandmaster computation with maximum tactical depth.
 

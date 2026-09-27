@@ -370,6 +370,7 @@ class PatriciaRunner implements IEngineRunner {
   private currentPositionKey: string = '';
   private currentMultiPv: number = 1;
   private currentSkillLevel: number = -1;
+  private initializationFailed: boolean = false;
   private senderTabId?: number;
   private pendingAnalysis: { fen: string; analysisId: number; positionKey: string; options: EngineRunOptions } | null = null;
   private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
@@ -394,57 +395,87 @@ class PatriciaRunner implements IEngineRunner {
           this.worker = null;
         }
 
+        this.initializationFailed = false;
+        this.isReady = false;
+        this.isSearching = false;
         this.onStatus('loading', 'Initializing Patricia WASM...');
         this.currentSkillLevel = -1;
         const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
         this.worker = new Worker(workerUrl);
 
-        let resolved = false;
+        let settled = false;
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        const fail = (message: string, error?: unknown) => {
+          if (settled) return;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          if (error) console.error('[PatriciaRunner] Initialization failed:', error);
+          this.initializationFailed = true;
+          this.isReady = false;
+          this.isSearching = false;
+          this.pendingAnalysis = null;
+          try {
+            this.worker?.terminate();
+          } catch (_) {}
+          this.worker = null;
+          this.onStatus('error', message);
+          resolve();
+        };
         const markReady = () => {
-          if (!resolved) {
-            resolved = true;
-            this.isReady = true;
-            this.isSearching = false;
-            this.onStatus('ready', 'Patricia 5.1 Ready');
-            resolve();
-            if (this.pendingAnalysis) {
-              const pending = this.pendingAnalysis;
-              this.pendingAnalysis = null;
-              this.analyze(pending.fen, pending.analysisId, pending.positionKey, pending.options);
-            }
+          if (settled) return;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          this.isReady = true;
+          this.isSearching = false;
+          this.onStatus('ready', 'Patricia 5.1 Ready');
+          resolve();
+          if (this.pendingAnalysis) {
+            const pending = this.pendingAnalysis;
+            this.pendingAnalysis = null;
+            this.analyze(pending.fen, pending.analysisId, pending.positionKey, pending.options);
           }
         };
 
-        const timeout = setTimeout(() => {
-          markReady();
+        timeout = setTimeout(() => {
+          fail('Patricia worker did not complete UCI initialization');
         }, 6000);
 
         this.worker.onmessage = (event: MessageEvent) => {
           const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
           if (line === 'uciok' || line === 'readyok') {
-            clearTimeout(timeout);
             markReady();
             return;
           }
           this.handleLine(line);
         };
 
-        this.worker.onerror = (err) => {
-          console.error('[PatriciaRunner] Worker error:', err);
-          this.onStatus('error', 'Patricia worker failed to initialize');
-          clearTimeout(timeout);
-          markReady();
+        this.worker.onerror = (error) => {
+          if (!settled) {
+            fail('Patricia worker failed to initialize', error);
+            return;
+          }
+
+          console.error('[PatriciaRunner] Worker failed:', error);
+          this.initializationFailed = true;
+          this.isReady = false;
+          this.isSearching = false;
+          this.pendingAnalysis = null;
+          try {
+            this.worker?.terminate();
+          } catch (_) {}
+          this.worker = null;
+          this.onStatus('error', 'Patricia worker failed');
         };
 
         this.worker.postMessage('uci');
         this.worker.postMessage('isready');
         this.worker.postMessage('setoption name Hash value 32');
         this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
-        if (this.currentSkillLevel > 0) {
-          this.worker.postMessage(`setoption name Skill_Level value ${this.currentSkillLevel}`);
-        }
-      } catch (err) {
-        console.error('[PatriciaRunner] Initialization failed:', err);
+      } catch (error) {
+        console.error('[PatriciaRunner] Initialization failed:', error);
+        this.initializationFailed = true;
+        this.isReady = false;
+        this.pendingAnalysis = null;
         this.onStatus('error', 'Failed to launch Patricia worker');
         resolve();
       }
@@ -547,6 +578,10 @@ class PatriciaRunner implements IEngineRunner {
       return;
     }
 
+    if (this.initializationFailed) {
+      return;
+    }
+
     if (!this.worker || !this.isReady) {
       this.pendingAnalysis = { fen, analysisId, positionKey, options };
       return;
@@ -591,6 +626,8 @@ class PatriciaRunner implements IEngineRunner {
   }
 
   public stop() {
+    if (this.initializationFailed) return;
+
     if (this.isSearching && this.worker) {
       try {
         this.worker.onerror = null;
@@ -619,6 +656,8 @@ class PatriciaRunner implements IEngineRunner {
     }
     this.isReady = false;
     this.isSearching = false;
+    this.initializationFailed = false;
+    this.pendingAnalysis = null;
   }
 }
 

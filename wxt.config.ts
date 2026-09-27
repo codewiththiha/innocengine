@@ -9,7 +9,7 @@ export default defineConfig({
     return {
       name: 'Chess Engine AI Overlay',
       description: 'Educational tool for real-time Stockfish analysis and board move square highlights on Chess.com.',
-      version: '1.0.0',
+      version: '1.0.1',
       permissions: isFirefox
         ? ['storage', 'activeTab', 'tabs']
         : ['storage', 'activeTab', 'tabs', 'offscreen'],
