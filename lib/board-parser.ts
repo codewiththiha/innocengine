@@ -94,10 +94,83 @@ export class BoardParser {
     return false;
   }
 
+  public static isGameActive(board: HTMLElement): boolean {
+    if (board.classList.contains('board-disabled')) {
+      return false;
+    }
+    const gameOverEl = document.querySelector(
+      '.game-over-modal-shell-container, .game-over-modal-component, .game-over-dialog-component, .game-over-modal'
+    );
+    if (gameOverEl) {
+      return false;
+    }
+    return true;
+  }
+
   public static detectPlayerColor(board: HTMLElement, isFlipped: boolean): 'w' | 'b' {
-    // 1. Check bottom player container in Chess.com / Lichess UI (User is always bottom player)
+    const colorOf = (el?: Element | null): 'w' | 'b' | null => {
+      if (!el) return null;
+      if (el.classList.contains('clock-white') || el.classList.contains('white')) return 'w';
+      if (el.classList.contains('clock-black') || el.classList.contains('black')) return 'b';
+      const dataColor = el.getAttribute('data-color');
+      if (dataColor === 'w' || dataColor === 'white') return 'w';
+      if (dataColor === 'b' || dataColor === 'black') return 'b';
+      return null;
+    };
+
+    // 1. Authoritative: Bottom player clock on Chess.com
+    const bottomClock = document.querySelector(
+      '#board-layout-player-bottom .clock-component, .player-bottom .clock-component, .clock-bottom, #board-layout-player-bottom [class*="clock"], .board-layout-bottom [class*="clock"]'
+    );
+    let myColor = colorOf(bottomClock);
+
+    // 2. Cross-check with authenticated user session
+    try {
+      const session =
+        (typeof window !== 'undefined' && (window as any).context?.user?.username) ||
+        document.querySelector('a[data-user-activity-key="profile"]')?.getAttribute('data-user') ||
+        document.querySelector('a[data-user-activity-key="profile"]')?.textContent?.trim();
+
+      const bottomName = document.querySelector(
+        '#board-layout-player-bottom [data-test-element="user-tagline-username"], .player-bottom [data-test-element="user-tagline-username"], #board-layout-player-bottom .user-username-component, .player-bottom .user-username-component'
+      )?.textContent?.trim();
+
+      if (session && bottomName && bottomName.toLowerCase() !== session.toLowerCase()) {
+        const topClock = document.querySelector(
+          '#board-layout-player-top .clock-component, .player-top .clock-component, .clock-top, #board-layout-player-top [class*="clock"], .board-layout-top [class*="clock"]'
+        );
+        const topColor = colorOf(topClock);
+        if (topColor) {
+          myColor = topColor;
+        }
+      }
+    } catch (_) {}
+
+    if (myColor) return myColor;
+
+    // 3. Captured pieces container: player-color="1" -> White, player-color="2" -> Black
+    const bottomCaptured = document.querySelector(
+      '#board-layout-player-bottom wc-captured-pieces, .player-bottom wc-captured-pieces'
+    );
+    if (bottomCaptured) {
+      const pColor = bottomCaptured.getAttribute('player-color');
+      if (pColor === '1') return 'w';
+      if (pColor === '2') return 'b';
+    }
+
+    // 4. Avatar image source check (white_400.png / black_400.png)
+    const bottomAvatar = document.querySelector(
+      '#board-layout-player-bottom img.avatar, .player-bottom img.avatar, #board-layout-player-bottom [data-test-element="user-avatar"] img, .player-bottom [data-test-element="user-avatar"] img'
+    );
+    if (bottomAvatar) {
+      const src = bottomAvatar.getAttribute('src') || '';
+      if (src.includes('white_400.png') || src.includes('white_100.png')) return 'w';
+      if (src.includes('black_400.png') || src.includes('black_100.png')) return 'b';
+    }
+
+    // 5. Container data-color / class check (including legacy selectors and Lichess)
     const bottomPlayer = document.querySelector(
-      '.board-layout-player.bottom, .player-component.bottom, [data-test-element="player-bottom"], .board-player-bottom, .round__app .ruser-bottom'
+      '#board-layout-player-bottom, .player-bottom, .board-layout-bottom, .board-layout-player.bottom, .player-component.bottom, [data-test-element="player-bottom"], .board-player-bottom, .round__app .ruser-bottom'
     );
     if (bottomPlayer) {
       const dataColor = bottomPlayer.getAttribute('data-color');
@@ -108,16 +181,14 @@ export class BoardParser {
       if (bottomPlayer.classList.contains('black')) return 'b';
     }
 
-    // 2. Board orientation is the definitive indicator:
-    // When playing on Chess.com or Lichess, the local user is always seated at the bottom.
-    // If board is flipped, Black is at the bottom -> player is Black ('b')
-    // If not flipped, White is at the bottom -> player is White ('w')
+    // 6. Orientation fallback: Seated at bottom without explicit clock/user data
     return isFlipped ? 'b' : 'w';
   }
 
   public static extractBoardState(board: HTMLElement): BoardState | null {
     const isFlipped = this.isBoardFlipped(board);
     const playerColor = this.detectPlayerColor(board, isFlipped);
+    const isGameActive = this.isGameActive(board);
     const pieces = board.querySelectorAll<HTMLElement>('.piece:not([class*="ai-"])');
     if (!pieces || pieces.length === 0) {
       return null;
@@ -202,11 +273,9 @@ export class BoardParser {
       this.lastPlacement = placement;
     } else if (placement === this.lastPlacement && this.lastTurn) {
       // Piece selection or click without movement: retain existing turn!
-      // This prevents the opponent move shift bug when focusing a piece.
       turn = this.lastTurn;
     } else {
-      // Pieces actually moved to new squares: detect whose turn it is now
-      turn = this.detectSideToMove(board, grid);
+      turn = this.detectTurn(board, this.lastTurn || 'w');
       this.lastTurn = turn;
       this.lastPlacement = placement;
     }
@@ -225,6 +294,8 @@ export class BoardParser {
       controlledColor: 'auto',
       pieceMap,
       boardElement: board,
+      isGameActive,
+      moveHistory: this.extractMoveHistoryFromDom(),
     };
   }
 
@@ -296,15 +367,15 @@ export class BoardParser {
 
   public static extractMoveHistoryFromDom(): string[] {
     const nodes = document.querySelectorAll<HTMLElement>(
-      '.move-list-row .node, vertical-move-list .node, .game-history .node, wc-move-list .node, .move-node'
+      'wc-simple-move-list .node.main-line-ply, .main-line-row .node.main-line-ply, .main-line-ply, vertical-move-list .node, .game-history .node, wc-move-list .node, .move-node:not(.empty)'
     );
     if (!nodes || nodes.length === 0) return [];
 
     const moves: string[] = [];
     nodes.forEach((node) => {
-      const text = node.innerText.trim();
-      // Skip turn numbers like "1.", "2."
-      if (/^\d+\.?$/.test(text)) return;
+      const text = node.innerText?.trim() || node.textContent?.trim() || '';
+      // Skip turn numbers ("1.", "2.") and timestamp notations ("0.9s", "1.2s", "0:15")
+      if (/^\d+\.?$/.test(text) || /^\d+(\.\d+)?s$/.test(text) || /^\d+:\d+$/.test(text)) return;
       const match = text.match(/^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[\+#]?|^O-O(?:-O)?[\+#]?/);
       if (match && match[0]) {
         moves.push(match[0]);
@@ -314,51 +385,37 @@ export class BoardParser {
     return moves;
   }
 
-  private static detectSideToMove(board: HTMLElement, grid: string[][]): 'w' | 'b' {
-    // 1. Authoritative move count from move history
+  public static detectTurn(board?: HTMLElement | null, fallbackTurn: 'w' | 'b' = 'w'): 'w' | 'b' {
+    const colorOf = (el?: Element | null): 'w' | 'b' | null => {
+      if (!el) return null;
+      if (el.classList.contains('clock-white') || el.classList.contains('white')) return 'w';
+      if (el.classList.contains('clock-black') || el.classList.contains('black')) return 'b';
+      return null;
+    };
+
+    // 1. Clock first: active clock marked with .clock-player-turn
+    const activeClock = document.querySelector(
+      '.clock-component.clock-player-turn, [class*="clock-player-turn"], .rclock.running, .rclock-bottom.running, .rclock-top.running'
+    );
+    const clockTurn = colorOf(activeClock);
+    if (clockTurn) {
+      return clockTurn;
+    }
+
+    // 2. Ply count second: count authoritative .main-line-ply nodes
+    const plies = document.querySelectorAll(
+      'wc-simple-move-list .node.main-line-ply, .main-line-row .node.main-line-ply, .move-list-row .node.main-line-ply, .main-line-ply'
+    );
+    if (plies.length > 0) {
+      return plies.length % 2 === 0 ? 'w' : 'b';
+    }
+
+    // 3. Extracted move history fallback (Lichess or alternate move list DOM)
     const moveHistory = this.extractMoveHistoryFromDom();
     if (moveHistory.length > 0) {
       return moveHistory.length % 2 === 0 ? 'w' : 'b';
     }
 
-    // 2. Check running clock
-    const whiteClock = document.querySelector(
-      '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
-    );
-    const blackClock = document.querySelector(
-      '.player-component.black .clock-player-turn, .clock-black.running, [data-cy="black-clock"].running'
-    );
-    if (whiteClock && !blackClock) return 'w';
-    if (blackClock && !whiteClock) return 'b';
-
-    // 3. Check native Chess.com move highlights (strictly excluding any AI overlay elements)
-    // Only examine when there are exactly 2 native highlights (1 origin + 1 destination)
-    const nativeHighlights = board.querySelectorAll(
-      '.highlight:not([class*="ai-"]):not([id*="ai-"])'
-    );
-    if (nativeHighlights.length === 2) {
-      let destPiece: string | null = null;
-      let emptyCount = 0;
-      for (const hl of Array.from(nativeHighlights)) {
-        for (const cls of Array.from(hl.classList)) {
-          const match = cls.match(/^square-(\d)(\d)$/);
-          if (match && match[1] && match[2]) {
-            const file = parseInt(match[1], 10) - 1;
-            const rank = parseInt(match[2], 10) - 1;
-            const piece = grid[rank]?.[file];
-            if (piece) {
-              destPiece = piece;
-            } else {
-              emptyCount++;
-            }
-          }
-        }
-      }
-      if (destPiece && emptyCount === 1) {
-        return destPiece === destPiece.toUpperCase() ? 'b' : 'w';
-      }
-    }
-
-    return this.lastTurn || 'w';
+    return fallbackTurn;
   }
 }

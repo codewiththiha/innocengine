@@ -54,7 +54,8 @@ export class HighlightController {
   }
 
   public setBoardState(boardState: BoardState | null) {
-    if (!boardState) {
+    if (!boardState || boardState.isGameActive === false) {
+      this.currentBoardState = boardState;
       this.clear();
       return;
     }
@@ -189,6 +190,8 @@ export class HighlightController {
 
   private shouldShowForTurn(): boolean {
     if (!this.currentBoardState) return true;
+    if (this.currentBoardState.isGameActive === false) return false;
+
     const turn = this.currentBoardState.turn;
     const playerColor = this.settings.controlledColor === 'auto'
       ? (this.currentBoardState.playerColor || (this.currentBoardState.isFlipped ? 'b' : 'w'))
@@ -251,16 +254,28 @@ export class HighlightController {
   }
 
   private getValidatedBookCandidate(engineCandidates: EngineCandidate[] = []): EngineCandidate | null {
-    if (!this.currentBoardState) return null;
+    if (!this.currentBoardState || this.currentBoardState.isGameActive === false) return null;
     const openingSettings = this.settings.opening;
     if (!openingSettings?.enabled) return null;
     if (!this.isWithinBookDepth(this.currentBoardState.fen)) return null;
 
     // Strict Player-Turn Gating: Book recommendations are exclusively for the active player's turn!
     // Never highlight book moves when it is the opponent's turn to move.
-    const turn = this.currentBoardState.fen.split(' ')[1] as 'w' | 'b';
-    if (this.currentBoardState.playerColor && turn !== this.currentBoardState.playerColor) {
+    const turn = this.currentBoardState.turn;
+    const playerColor = this.settings.controlledColor === 'auto'
+      ? (this.currentBoardState.playerColor || (this.currentBoardState.isFlipped ? 'b' : 'w'))
+      : this.settings.controlledColor;
+
+    if (turn !== playerColor) {
       return null;
+    }
+
+    // Repertoire check: If specific repertoire is configured, its side must match playerColor
+    if (openingSettings.repertoireId && openingSettings.repertoireId !== 'auto') {
+      const meta = OpeningBook.getMeta(openingSettings.repertoireId);
+      if (meta && meta.side !== playerColor) {
+        return null;
+      }
     }
 
     // 1. Try PGN-indexed catalog resolver first with player color awareness

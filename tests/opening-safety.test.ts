@@ -484,4 +484,305 @@ console.log('\n10. Testing BoardParser player color detection and captured piece
   console.log('   ✓ Captured piece immunity: Black player never flips to White upon capturing White pieces');
 }
 
+// --------------------------------------------------------------------------
+// 11. Authoritative Player Color Resolution (Clock, Session, Avatar, Captures)
+// --------------------------------------------------------------------------
+console.log('\n11. Testing Authoritative Player Color Resolution...');
+{
+  const { BoardParser } = await import('../lib/board-parser');
+  const originalDoc = (global as any).document;
+  const originalWindow = (global as any).window;
+
+  // Case A: Bottom clock has .clock-black -> Player is Black ('b')
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('#board-layout-player-bottom .clock-component')) {
+        return {
+          classList: { contains: (cls: string) => cls === 'clock-black' },
+          getAttribute: () => null,
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const colorFromBottomBlackClock = BoardParser.detectPlayerColor({} as any, false);
+  assert.strictEqual(colorFromBottomBlackClock, 'b', 'Bottom clock-black must identify player as Black');
+
+  // Case B: Bottom clock has .clock-white -> Player is White ('w')
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('#board-layout-player-bottom .clock-component')) {
+        return {
+          classList: { contains: (cls: string) => cls === 'clock-white' },
+          getAttribute: () => null,
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const colorFromBottomWhiteClock = BoardParser.detectPlayerColor({} as any, true);
+  assert.strictEqual(colorFromBottomWhiteClock, 'w', 'Bottom clock-white must identify player as White');
+
+  // Case C: Session username cross-check
+  // Logged-in user is 'GrandmasterThiha'. Bottom tagline is 'OpponentPlayer'.
+  // Top clock is .clock-black -> Player is Black ('b')
+  (global as any).window = {
+    context: { user: { username: 'GrandmasterThiha' } },
+  };
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('user-tagline-username')) {
+        return { textContent: 'OpponentPlayer' };
+      }
+      if (sel.includes('#board-layout-player-top .clock-component')) {
+        return {
+          classList: { contains: (cls: string) => cls === 'clock-black' },
+          getAttribute: () => null,
+        };
+      }
+      if (sel.includes('#board-layout-player-bottom .clock-component')) {
+        return {
+          classList: { contains: (cls: string) => cls === 'clock-white' },
+          getAttribute: () => null,
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const colorFromCrossCheck = BoardParser.detectPlayerColor({} as any, false);
+  assert.strictEqual(colorFromCrossCheck, 'b', 'Mismatched bottom username must cross-check to top player clock');
+
+  // Case D: Captured pieces container player-color="2" -> Black
+  (global as any).window = undefined;
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('wc-captured-pieces')) {
+        return {
+          getAttribute: (attr: string) => (attr === 'player-color' ? '2' : null),
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const colorFromCapturedPieces = BoardParser.detectPlayerColor({} as any, false);
+  assert.strictEqual(colorFromCapturedPieces, 'b', 'Captured pieces player-color="2" must identify Black');
+
+  // Case E: Avatar image source check (white_400.png)
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('img.avatar')) {
+        return {
+          getAttribute: (attr: string) => (attr === 'src' ? '/images/avatars/white_400.png' : null),
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const colorFromAvatar = BoardParser.detectPlayerColor({} as any, true);
+  assert.strictEqual(colorFromAvatar, 'w', 'Avatar white_400.png must identify White');
+
+  (global as any).document = originalDoc;
+  (global as any).window = originalWindow;
+  console.log('   ✓ Authoritative player color resolution verified across clocks, session, captures, and avatars');
+}
+
+// --------------------------------------------------------------------------
+// 12. Authoritative Turn Detection (Clock First, Ply Count Second, Highlight Immunity)
+// --------------------------------------------------------------------------
+console.log('\n12. Testing Authoritative Turn Detection & Highlight Immunity...');
+{
+  const { BoardParser } = await import('../lib/board-parser');
+  const originalDoc = (global as any).document;
+
+  // Case A: Active clock marked with .clock-player-turn carrying .clock-black -> 'b'
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('clock-player-turn')) {
+        return {
+          classList: { contains: (cls: string) => cls === 'clock-black' },
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const turnFromClockBlack = BoardParser.detectTurn(null, 'w');
+  assert.strictEqual(turnFromClockBlack, 'b', 'Active clock-black must indicate Black turn');
+
+  // Case B: Ply count with 5 plies -> White turn is next ('b' because 5 % 2 === 1, so Black's turn)
+  // Even plies -> 'w', Odd plies -> 'b'
+  (global as any).document = {
+    querySelector: () => null,
+    querySelectorAll: (sel: string) => {
+      if (sel.includes('.main-line-ply')) {
+        // 4 moves played -> 4 % 2 === 0 -> White turn ('w')
+        return [{}, {}, {}, {}];
+      }
+      return [];
+    },
+  };
+  const turnFrom4Plies = BoardParser.detectTurn(null, 'b');
+  assert.strictEqual(turnFrom4Plies, 'w', '4 completed plies must indicate White turn');
+
+  (global as any).document = {
+    querySelector: () => null,
+    querySelectorAll: (sel: string) => {
+      if (sel.includes('.main-line-ply')) {
+        // 5 moves played -> 5 % 2 === 1 -> Black turn ('b')
+        return [{}, {}, {}, {}, {}];
+      }
+      return [];
+    },
+  };
+  const turnFrom5Plies = BoardParser.detectTurn(null, 'w');
+  assert.strictEqual(turnFrom5Plies, 'b', '5 completed plies must indicate Black turn');
+
+  // Case C: Highlight Immunity
+  // Native highlights on the board must NEVER change or influence detected turn!
+  const mockBoardWithHighlights = {
+    classList: { contains: () => false },
+    querySelectorAll: (sel: string) => {
+      if (sel.includes('.highlight')) {
+        return [{ classList: ['highlight', 'square-52'] }, { classList: ['highlight', 'square-54'] }];
+      }
+      return [];
+    },
+  } as any;
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('clock-player-turn')) {
+        return {
+          classList: { contains: (cls: string) => cls === 'clock-white' },
+        };
+      }
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const turnWithHighlights = BoardParser.detectTurn(mockBoardWithHighlights, 'b');
+  assert.strictEqual(turnWithHighlights, 'w', 'Clicking pieces and highlights must never invert turn');
+
+  (global as any).document = originalDoc;
+  console.log('   ✓ Authoritative turn detection verified with complete highlight immunity');
+}
+
+// --------------------------------------------------------------------------
+// 13. Game Lifecycle & Game-over Gating
+// --------------------------------------------------------------------------
+console.log('\n13. Testing Game Lifecycle & Game-over Gating...');
+{
+  const { BoardParser } = await import('../lib/board-parser');
+  const originalDoc = (global as any).document;
+
+  // Active board
+  const activeBoard = {
+    classList: { contains: (cls: string) => false },
+  } as any;
+  (global as any).document = {
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  assert.strictEqual(BoardParser.isGameActive(activeBoard), true, 'Standard board must be active');
+
+  // Disabled board (board-disabled class)
+  const disabledBoard = {
+    classList: { contains: (cls: string) => cls === 'board-disabled' },
+  } as any;
+  assert.strictEqual(BoardParser.isGameActive(disabledBoard), false, 'board-disabled class must mark game inactive');
+
+  // Game over modal present
+  (global as any).document = {
+    querySelector: (sel: string) => {
+      if (sel.includes('game-over-modal-shell-container')) return {};
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  assert.strictEqual(BoardParser.isGameActive(activeBoard), false, 'Game over modal must mark game inactive');
+
+  (global as any).document = originalDoc;
+  console.log('   ✓ Game lifecycle and game-over gating verified');
+}
+
+// --------------------------------------------------------------------------
+// 14. HighlightController Gating under Inactive Game & Flipped Black Play
+// --------------------------------------------------------------------------
+console.log('\n14. Testing HighlightController Gating under Inactive Game & Flipped Black Play...');
+{
+  const snapshots: RenderSnapshot[] = [];
+  const controller = new HighlightController(
+    {
+      ...DEFAULT_SETTINGS,
+      highlightPlayerMoves: true,
+      highlightOpponentMoves: false,
+      opening: {
+        ...DEFAULT_SETTINGS.opening,
+        enabled: true,
+        mode: 'book-only',
+        selectedOpeningIds: ['sicilian-najdorf'],
+      },
+    },
+    (snapshot) => {
+      snapshots.push(snapshot);
+    }
+  );
+
+  // Inactive game board state (game over)
+  controller.setBoardState({
+    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    positionKey: 'game_over_pos',
+    isFlipped: false,
+    turn: 'w',
+    playerColor: 'w',
+    controlledColor: 'auto',
+    pieceMap: new Map(),
+    isGameActive: false,
+  });
+
+  const inactiveSnap = snapshots[snapshots.length - 1];
+  assert(inactiveSnap, 'Snapshot emitted for inactive game');
+  assert.strictEqual(inactiveSnap.candidates.length, 0, 'Inactive game must emit 0 candidates');
+
+  // Black player on flipped board on White turn (opponent turn)
+  controller.setBoardState({
+    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    positionKey: 'turn_1_white_turn',
+    isFlipped: true,
+    turn: 'w',
+    playerColor: 'b',
+    controlledColor: 'auto',
+    pieceMap: new Map(),
+    isGameActive: true,
+  });
+  const oppSnap = snapshots[snapshots.length - 1];
+  assert(oppSnap, 'Snapshot emitted for opponent turn');
+  assert.strictEqual(oppSnap.candidates.length, 0, 'Black player must receive 0 candidates on opponent (White) turn');
+
+  // Black player on flipped board on Black turn (player turn after 1.e4)
+  const chess = new Chess();
+  chess.move('e4');
+  controller.setBoardState({
+    fen: chess.fen(),
+    positionKey: 'turn_1_black_turn',
+    isFlipped: true,
+    turn: 'b',
+    playerColor: 'b',
+    controlledColor: 'auto',
+    pieceMap: new Map(),
+    isGameActive: true,
+  });
+  const blackPlayerSnap = snapshots[snapshots.length - 1];
+  assert(blackPlayerSnap, 'Snapshot emitted for Black player turn');
+  assert(blackPlayerSnap.candidates.length > 0, 'Black player must receive candidates on Black turn');
+  assert.strictEqual(blackPlayerSnap.candidates[0]?.from, 'c7', 'Black plays Sicilian 1...c5');
+  assert.strictEqual(blackPlayerSnap.candidates[0]?.to, 'c5');
+
+  console.log('   ✓ Inactive game suppression and Black player flipped board gating strictly verified');
+}
+
 console.log('\n=== ALL OPENING SAFETY TESTS PASSED SUCCESSFULLY ===');

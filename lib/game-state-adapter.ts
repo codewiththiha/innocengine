@@ -6,10 +6,12 @@ export interface GameState {
   positionKey: string;
   boardFingerprint: string;
   turn: 'w' | 'b';
+  playerColor: 'w' | 'b';
   isFlipped: boolean;
   pieceMap: Map<string, string>;
   moveHistory: string[];
   boardElement: HTMLElement;
+  isGameActive: boolean;
 }
 
 export class GameStateAdapter {
@@ -19,9 +21,11 @@ export class GameStateAdapter {
     if (!gridState) return null;
 
     const boardFingerprint = this.computeBoardFingerprint(gridState.pieceMap);
+    const moveHistory = gridState.moveHistory || this.extractMoveHistoryFromDom();
+    const isGameActive = gridState.isGameActive ?? BoardParser.isGameActive(board);
+    const playerColor = gridState.playerColor;
 
     // Attempt authoritative FEN reconstruction via Chess.com DOM move-list replay
-    const moveHistory = this.extractMoveHistoryFromDom();
     if (moveHistory.length > 0) {
       try {
         const chess = new Chess();
@@ -51,18 +55,20 @@ export class GameStateAdapter {
               positionKey,
               boardFingerprint,
               turn: chess.turn() as 'w' | 'b',
+              playerColor,
               isFlipped,
               pieceMap: gridState.pieceMap,
               moveHistory,
               boardElement: board,
+              isGameActive,
             };
           }
         }
       } catch (_) {}
     }
 
-    // Determine turn reliably without guessing or fabrication
-    const detectedTurn = this.detectTurnFromClocksAndHistory(moveHistory, previousTurn);
+    // Determine turn reliably using single source of truth
+    const detectedTurn = BoardParser.detectTurn(board, previousTurn);
 
     // Fallback: visual board snapshot
     const tokens = gridState.fen.split(' ');
@@ -75,10 +81,12 @@ export class GameStateAdapter {
       positionKey,
       boardFingerprint,
       turn: detectedTurn,
+      playerColor,
       isFlipped,
       pieceMap: gridState.pieceMap,
       moveHistory,
       boardElement: board,
+      isGameActive,
     };
   }
 
@@ -90,22 +98,7 @@ export class GameStateAdapter {
   }
 
   private static detectTurnFromClocksAndHistory(moveHistory: string[], fallbackTurn: 'w' | 'b'): 'w' | 'b' {
-    // 1. Running clock on page
-    const whiteClock = document.querySelector(
-      '.player-component.white .clock-player-turn, .clock-white.running, [data-cy="white-clock"].running'
-    );
-    const blackClock = document.querySelector(
-      '.player-component.black .clock-player-turn, .clock-black.running, [data-cy="black-clock"].running'
-    );
-    if (whiteClock && !blackClock) return 'w';
-    if (blackClock && !whiteClock) return 'b';
-
-    // 2. Authoritative move count
-    if (moveHistory.length > 0) {
-      return moveHistory.length % 2 === 0 ? 'w' : 'b';
-    }
-
-    return fallbackTurn;
+    return BoardParser.detectTurn(null, fallbackTurn);
   }
 
   public static extractMoveHistoryFromDom(): string[] {

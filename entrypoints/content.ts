@@ -17,7 +17,7 @@ export default defineContentScript({
     let currentSettings: EngineSettings;
     let lastPositionKey: string = '';
     let boardObserver: MutationObserver | null = null;
-    let pendingScanRaf: number | null = null;
+    let pendingScanTimeout: ReturnType<typeof setTimeout> | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
 
     async function init() {
@@ -149,6 +149,10 @@ export default defineContentScript({
       if (boardObserver) {
         boardObserver.disconnect();
       }
+      if (pendingScanTimeout !== null) {
+        clearTimeout(pendingScanTimeout);
+        pendingScanTimeout = null;
+      }
 
       handleBoardChange();
 
@@ -156,18 +160,52 @@ export default defineContentScript({
         // Guard against feedback loops caused by our own overlay DOM nodes
         const isSelfMutation = mutations.every((m) => {
           const target = m.target as HTMLElement;
-          return target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar');
+          return target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar') !== null;
         });
         if (isSelfMutation) return;
 
-        // Debounce board extraction to ensure pieces have settled
-        if (pendingScanRaf !== null) {
-          cancelAnimationFrame(pendingScanRaf);
-        }
-        pendingScanRaf = requestAnimationFrame(() => {
-          pendingScanRaf = null;
-          handleBoardChange();
+        // Ignore transient UI mutations whose only changes are selection/highlights/hints
+        const isTransientOnly = mutations.every((m) => {
+          const target = m.target as HTMLElement;
+          if (target.id?.startsWith('chess-ai-') || target.closest?.('#chess-ai-svg-overlay, #chess-ai-hud, #chess-ai-eval-bar')) {
+            return true;
+          }
+          if (m.type === 'attributes' && m.attributeName === 'class') {
+            const cls = target.className || '';
+            const isSquareHighlight =
+              cls.includes('highlight') ||
+              cls.includes('square-selected') ||
+              cls.includes('hover-square') ||
+              cls.includes('selected');
+            if (isSquareHighlight && !target.classList.contains('piece')) {
+              return true;
+            }
+          }
+          if (m.type === 'childList') {
+            const nodes = [...Array.from(m.addedNodes), ...Array.from(m.removedNodes)] as HTMLElement[];
+            const allHints = nodes.every(
+              (n) =>
+                n.classList?.contains('hint') ||
+                n.classList?.contains('capture-hint') ||
+                n.classList?.contains('highlight') ||
+                n.id?.startsWith('chess-ai-')
+            );
+            if (allHints && nodes.length > 0) {
+              return true;
+            }
+          }
+          return false;
         });
+        if (isTransientOnly) return;
+
+        // Debounce board extraction ~200ms to allow 180ms CSS move animations to finish
+        if (pendingScanTimeout !== null) {
+          clearTimeout(pendingScanTimeout);
+        }
+        pendingScanTimeout = setTimeout(() => {
+          pendingScanTimeout = null;
+          handleBoardChange();
+        }, 200);
       });
 
       boardObserver.observe(board, {
@@ -193,7 +231,14 @@ export default defineContentScript({
       }
 
       overlay.setFlipped(state.isFlipped);
+      overlay.setPlayerColor(state.playerColor);
+      overlay.setGameActive(state.isGameActive ?? true);
+
       highlightController.setBoardState(state);
+
+      if (!state.isGameActive) {
+        return;
+      }
 
       if (state.positionKey !== lastPositionKey) {
         lastPositionKey = state.positionKey;

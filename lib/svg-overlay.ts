@@ -78,6 +78,8 @@ export class SvgOverlay {
   private evalScoreText: HTMLElement | null = null;
   private hudElement: HTMLElement | null = null;
   private isFlipped: boolean = false;
+  private playerColor: 'w' | 'b' = 'w';
+  private isGameActive: boolean = true;
   private settings: EngineSettings;
   private activeCandidates: EngineCandidate[] = [];
   private currentRenderKey: string = '';
@@ -91,6 +93,13 @@ export class SvgOverlay {
 
   public updateSettings(settings: EngineSettings) {
     this.settings = settings;
+    if (!this.isGameActive) {
+      this.clearHighlights();
+      if (this.evalBarContainer) this.evalBarContainer.style.display = 'none';
+      if (this.hudElement) this.hudElement.style.display = 'none';
+      return;
+    }
+
     const hasHighlightsEnabled =
       (this.settings.highlightPlayerMoves ?? true) ||
       (this.settings.highlightOpponentMoves ?? false) ||
@@ -116,6 +125,37 @@ export class SvgOverlay {
       this.isFlipped = flipped;
       this.currentRenderKey = '';
       this.renderCandidates(this.activeCandidates);
+    }
+  }
+
+  public setPlayerColor(color: 'w' | 'b') {
+    if (this.playerColor !== color) {
+      this.playerColor = color;
+      if (this.hudElement) {
+        const sideEl = this.hudElement.querySelector('#ai-hud-side') as HTMLElement;
+        if (sideEl) {
+          const effective = this.settings.controlledColor === 'auto'
+            ? this.playerColor
+            : this.settings.controlledColor;
+          sideEl.innerText = `YOU: ${effective === 'b' ? 'BLACK' : 'WHITE'}`;
+        }
+      }
+    }
+  }
+
+  public setGameActive(active: boolean) {
+    this.isGameActive = active;
+    if (!active) {
+      this.clearHighlights();
+      if (this.evalBarContainer) this.evalBarContainer.style.display = 'none';
+      if (this.hudElement) this.hudElement.style.display = 'none';
+    } else {
+      if (this.evalBarContainer) {
+        this.evalBarContainer.style.display = this.settings.showEvalBar ? 'flex' : 'none';
+      }
+      if (this.hudElement) {
+        this.hudElement.style.display = this.settings.showHud ? 'flex' : 'none';
+      }
     }
   }
 
@@ -298,6 +338,11 @@ export class SvgOverlay {
 
   public renderCandidates(candidates: EngineCandidate[]) {
     this.activeCandidates = candidates;
+    if (!this.isGameActive) {
+      this.clearHighlights();
+      return;
+    }
+
     const hasHighlightsEnabled =
       (this.settings.highlightPlayerMoves ?? true) ||
       (this.settings.highlightOpponentMoves ?? false) ||
@@ -474,11 +519,13 @@ export class SvgOverlay {
   }
 
   public updateEvaluationMetadata(evaluation: EngineEvaluation) {
+    if (!this.isGameActive) return;
     if (this.rafScheduled) return;
     this.rafScheduled = true;
 
     requestAnimationFrame(() => {
       this.rafScheduled = false;
+      if (!this.isGameActive) return;
       this.updateEvalBar(evaluation);
       this.updateHud(evaluation);
     });
@@ -536,10 +583,10 @@ export class SvgOverlay {
     }
     if (engineEl) engineEl.innerText = (evalData.engineInstanceId || 'SF').toUpperCase();
 
-    const playerColor = this.settings.controlledColor === 'auto'
-      ? (this.isFlipped ? 'BLACK' : 'WHITE')
-      : (this.settings.controlledColor === 'b' ? 'BLACK' : 'WHITE');
-    if (sideEl) sideEl.innerText = `YOU: ${playerColor}`;
+    const effectiveColor = this.settings.controlledColor === 'auto'
+      ? this.playerColor
+      : this.settings.controlledColor;
+    if (sideEl) sideEl.innerText = `YOU: ${effectiveColor === 'b' ? 'BLACK' : 'WHITE'}`;
 
     if (bestEl) {
       const bookCand = this.activeCandidates.find((c) => c.isBookMove);

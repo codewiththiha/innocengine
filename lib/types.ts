@@ -164,6 +164,8 @@ export interface BoardState {
   controlledColor: 'auto' | 'w' | 'b';
   pieceMap: Map<string, string>;
   boardElement?: HTMLElement;
+  isGameActive?: boolean;
+  moveHistory?: string[];
 }
 
 export interface EngineTelemetry {

@@ -132,6 +132,10 @@ export function resolveSafeOpeningEntry(
   const turn = fen.split(' ')[1] as 'w' | 'b';
   const effectivePlayerColor = playerColor || turn;
 
+  if (playerColor && turn !== playerColor) {
+    return null;
+  }
+
   const entries = index.lookupFiltered(fen, (entry) => {
     // 1. Repertoire side matching: ensure opening belongs to the player's color
     if (entry.side !== 'any' && entry.side !== effectivePlayerColor) {
@@ -142,7 +146,12 @@ export function resolveSafeOpeningEntry(
     return true;
   });
 
-  if (!entries.length) return null;
+  if (!entries.length) {
+    if (config.strictLine && globalOpeningSession.isActive()) {
+      globalOpeningSession.reset();
+    }
+    return null;
+  }
 
   // Strict line tracking: if an active opening is tracked and user deviated, only continue if in-line
   if (config.strictLine && globalOpeningSession.isActive()) {
