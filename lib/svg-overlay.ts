@@ -84,6 +84,7 @@ export class SvgOverlay {
   private activeCandidates: EngineCandidate[] = [];
   private currentRenderKey: string = '';
   private rafScheduled: boolean = false;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(board: HTMLElement, settings: EngineSettings) {
     this.board = board;
@@ -286,8 +287,7 @@ export class SvgOverlay {
     hud.style.alignItems = 'center';
     hud.style.justifyContent = 'space-between';
     hud.style.padding = '5px 12px';
-    hud.style.backgroundColor = 'rgba(15, 23, 42, 0.92)';
-    hud.style.backdropFilter = 'blur(6px)';
+    hud.style.backgroundColor = '#16202b';
     hud.style.border = '1px solid rgba(255, 255, 255, 0.10)';
     hud.style.borderRadius = '6px';
     hud.style.color = '#cbd5e1';
@@ -313,12 +313,13 @@ export class SvgOverlay {
   }
 
   private attachResizeObserver() {
-    const ro = new ResizeObserver(() => {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = new ResizeObserver(() => {
       if (this.evalBarContainer && this.board) {
         this.evalBarContainer.style.height = `${this.board.clientHeight}px`;
       }
     });
-    ro.observe(this.board);
+    this.resizeObserver.observe(this.board);
   }
 
   public clearHighlights() {
@@ -638,6 +639,8 @@ export class SvgOverlay {
   }
 
   public destroy() {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     if (this.svg) this.svg.remove();
     if (this.evalBarContainer) this.evalBarContainer.remove();
     if (this.hudElement) this.hudElement.remove();

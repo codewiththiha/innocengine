@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
-import { EngineRegistry, type BUILTIN_STOCKFISH } from '../../lib/engine-registry';
+import { EngineRegistry } from '../../lib/engine-registry';
 import { capsFor } from '../../lib/engine-capabilities';
-import { REPERTOIRE_LIST } from '../../lib/opening-book';
 import { OPENING_CATALOG } from '../../lib/openings/catalog';
 import OpeningBrowser from './components/OpeningBrowser';
 import { getEngineStrengthDescription, mapEloToPatriciaSkill, getPatriciaTuning, getStockfishTuning } from '../../lib/engine-tuning';
@@ -12,13 +11,13 @@ import type {
   EngineCapabilities,
   EngineTelemetry,
   CustomEngineMeta,
+  OpeningMode,
 } from '../../lib/types';
 import {
   Sliders,
   Eye,
   ExternalLink,
   RotateCcw,
-  Sparkles,
   Activity,
   CheckCircle2,
   Cpu,
@@ -192,12 +191,10 @@ export default function App() {
     <div className="popup-container">
       <header className="popup-header">
         <div className="popup-title-group">
-          <div className="logo-icon">
-            <Sparkles size={18} color="#f59e0b" />
-          </div>
+          <div className="logo-icon" aria-hidden="true">♞</div>
           <div>
-            <h1 className="popup-title">Chess AI Overlay</h1>
-            <p className="popup-subtitle">{capabilities?.name || 'Stockfish 17'} • MV3</p>
+            <h1 className="popup-title">Chess Engine</h1>
+            <p className="popup-subtitle">Overlay controls · {capabilities?.name || 'Stockfish 17'}</p>
           </div>
         </div>
         <div className={`status-badge status-${engineStatus}`}>
@@ -234,7 +231,7 @@ export default function App() {
               <span className="best-move-algebraic">{currentEval.bestMove || 'Calculating...'}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, fontSize: 10, color: '#94a3b8', marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 4 }}>
+          <div className="eval-meta">
             <span>Raw PV: {currentEval.multiPvLines?.length || 0}</span>
             <span>Player: {settings.highlightPlayerMoves ? 'ON' : 'OFF'}</span>
             <span>Opponent: {settings.highlightOpponentMoves ? 'ON' : 'OFF'}</span>
@@ -667,7 +664,7 @@ export default function App() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
-                  <Sparkles size={12} /> Dynamic Rating & Personality Calibration
+                  <Activity size={12} /> Dynamic Rating & Personality Calibration
                 </div>
                 <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
                   Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and move time to match the selected rating. At low Elo (500–1000), search is restricted to authentic beginner tactical horizon instead of machine-like 20+ ply perfection.
@@ -1024,33 +1021,35 @@ export default function App() {
             />
           </label>
 
-          <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
+          <div className="setting-item opening-setting" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
             <div className="setting-label-row">
-              <span className="setting-label">Display & Tactical Integration Mode</span>
+              <span className="setting-label">Suggestion mode</span>
             </div>
             <select
               className="select-dropdown"
               disabled={!settings.opening.enabled}
               value={settings.opening.mode}
               onChange={(e) =>
-                updateSetting('opening', { ...settings.opening, mode: e.target.value as any })
+                updateSetting('opening', { ...settings.opening, mode: e.target.value as OpeningMode })
               }
             >
-              <option value="adaptive">Adaptive (Tactical Veto: suppresses book if queen hangs or engine refutes)</option>
-              <option value="coexist">Coexist (Overlay both engine variations & repertoire)</option>
-              <option value="prefer">Prefer Book (Promote safe repertoire move to #1)</option>
-              <option value="hint">Hint Only (Non-intrusive hint; never displaces engine lines)</option>
-              <option value="book-only">Book Only (Repertoire moves only with tactical safety fallback)</option>
-              <option value="off">Off (Disable opening recommendations)</option>
+              <option value="adaptive">Adaptive safety</option>
+              <option value="parallel">Theory + engine</option>
+              <option value="coexist">Share variation slots</option>
+              <option value="prefer">Prefer theory</option>
+              <option value="hint">Theory when a slot is free</option>
+              <option value="book-only">Theory only</option>
+              <option value="off">Disable theory</option>
             </select>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 5, lineHeight: 1.3 }}>
-              {settings.opening.mode === 'adaptive' && 'Smartest mode: guides opening theory but instantly suppresses book moves if an enemy piece attacks your queen or wins material.'}
-              {settings.opening.mode === 'coexist' && 'Renders emerald green book highlight alongside amber/blue engine variations.'}
-              {settings.opening.mode === 'prefer' && 'Promotes the safe repertoire move to primary variation (#1) during the opening phase.'}
-              {settings.opening.mode === 'hint' && 'Subtle hint mode recommended for human policy engines like Maia.'}
-              {settings.opening.mode === 'book-only' && 'Only suggests book moves; safely falls back to engine if line deviates or hangs material.'}
-              {settings.opening.mode === 'off' && 'Opening book recommendations disabled.'}
-            </div>
+            <p className="setting-help">
+              {settings.opening.mode === 'adaptive' && 'Show theory only when the engine does not find a meaningful disagreement.'}
+              {settings.opening.mode === 'parallel' && 'Show a safe theory step and every selected engine variation independently through the depth limit.'}
+              {settings.opening.mode === 'coexist' && 'Reserve one configured variation slot for a safe theory step.'}
+              {settings.opening.mode === 'prefer' && 'Place a safe theory step ahead of the engine variations.'}
+              {settings.opening.mode === 'hint' && 'Add theory only when the chosen variation count leaves room.'}
+              {settings.opening.mode === 'book-only' && 'Show safe theory steps while the selected line remains available.'}
+              {settings.opening.mode === 'off' && 'Keep the repertoire saved without drawing opening suggestions.'}
+            </p>
           </div>
 
           <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
@@ -1077,16 +1076,35 @@ export default function App() {
             </div>
           </div>
 
-          {/* Searchable Categorized Opening Catalog */}
-          <div style={{ marginTop: 12, opacity: settings.opening.enabled ? 1 : 0.45 }}>
-            <div className="section-title" style={{ fontSize: 12, marginBottom: 4 }}>
-              <Sparkles size={13} /> Opening Catalog & Repertoire Builder
+          {(settings.opening.mode === 'adaptive' || settings.opening.mode === 'coexist') && (
+            <label className="toggle-row opening-reserve-row" style={{ opacity: settings.opening.enabled ? 1 : 0.45 }}>
+              <span className="toggle-label">Reserve one variation slot for theory</span>
+              <input
+                type="checkbox"
+                disabled={!settings.opening.enabled}
+                checked={settings.opening.reserveSlot ?? true}
+                onChange={(e) =>
+                  updateSetting('opening', { ...settings.opening, reserveSlot: e.target.checked })
+                }
+                className="toggle-switch"
+              />
+            </label>
+          )}
+
+          <div className="opening-builder-section" style={{ opacity: settings.opening.enabled ? 1 : 0.45 }}>
+            <div className="section-title opening-builder-title">
+              <BookOpen size={13} /> Opening catalog
             </div>
             <OpeningBrowser
               openings={OPENING_CATALOG}
               selectedIds={settings.opening.selectedOpeningIds || []}
-              whiteRepertoireId={settings.opening.whiteRepertoireId || 'auto'}
-              blackRepertoireId={settings.opening.blackRepertoireId || 'auto'}
+              filters={{
+                categories: settings.opening.categories,
+                includeMeme: settings.opening.includeMeme,
+                includeWeird: settings.opening.includeWeird,
+                maxRisk: settings.opening.maxRisk,
+              }}
+              disabled={!settings.opening.enabled}
               onChange={(ids) => {
                 updateSetting('opening', {
                   ...settings.opening,
@@ -1094,17 +1112,8 @@ export default function App() {
                   repertoireId: ids.length === 1 ? ids[0]! : 'auto',
                 });
               }}
-              onWhiteRepertoireChange={(id) => {
-                updateSetting('opening', {
-                  ...settings.opening,
-                  whiteRepertoireId: id,
-                });
-              }}
-              onBlackRepertoireChange={(id) => {
-                updateSetting('opening', {
-                  ...settings.opening,
-                  blackRepertoireId: id,
-                });
+              onFiltersChange={(patch) => {
+                updateSetting('opening', { ...settings.opening, ...patch });
               }}
             />
           </div>

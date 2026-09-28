@@ -260,9 +260,134 @@ console.log('\n6. Testing HighlightController Tactical Veto in book-only & prefe
 }
 
 // --------------------------------------------------------------------------
-// 7. Repertoire Side Isolation (White vs Black)
+// 7. Theory + Engine mode retains independent book and engine highlights
 // --------------------------------------------------------------------------
-console.log('\n7. Testing repertoire side isolation (White vs Black openings)...');
+console.log('\n7. Testing Theory + Engine opening comparison mode...');
+{
+  const snapshots: RenderSnapshot[] = [];
+  const controller = new HighlightController(
+    {
+      ...DEFAULT_SETTINGS,
+      multiPv: 1,
+      opening: {
+        ...DEFAULT_SETTINGS.opening,
+        enabled: true,
+        mode: 'parallel',
+        selectedOpeningIds: ['london'],
+      },
+    },
+    (snapshot) => snapshots.push(snapshot)
+  );
+
+  const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  controller.setBoardState({
+    fen: startFen,
+    positionKey: 'parallel_start',
+    isFlipped: false,
+    turn: 'w',
+    playerColor: 'w',
+    controlledColor: 'auto',
+    pieceMap: new Map([
+      ['e2', 'P'],
+      ['d2', 'P'],
+    ]),
+  });
+
+  controller.handleEvaluation({
+    engineInstanceId: 'stockfish',
+    analysisId: 1,
+    positionKey: 'parallel_start',
+    fen: startFen,
+    depth: 14,
+    scoreCp: 20,
+    scoreMate: null,
+    whiteScoreCp: 20,
+    whiteScoreMate: null,
+    bestMove: 'e2e4',
+    multiPvLines: [],
+    candidates: [
+      {
+        pvId: 1,
+        from: 'e2',
+        to: 'e4',
+        depth: 14,
+        scoreCp: 20,
+        scoreMate: null,
+        pv: ['e2e4'],
+      },
+    ],
+    isCalculating: false,
+    timestamp: Date.now(),
+  });
+
+  const comparisonSnapshot = snapshots[snapshots.length - 1];
+  assert(comparisonSnapshot, 'Theory + Engine must render a comparison snapshot');
+  assert.strictEqual(comparisonSnapshot.candidates.length, 2, 'Comparison mode must retain the engine line and append theory');
+  assert.deepStrictEqual(
+    comparisonSnapshot.candidates.map((candidate) => `${candidate.from}${candidate.to}`),
+    ['e2e4', 'd2d4'],
+    'A safe book move must remain visible even when it does not match the engine move'
+  );
+  assert.strictEqual(comparisonSnapshot.candidates[0]?.isBookMove, undefined, 'Engine variation must retain its engine treatment');
+  assert.strictEqual(comparisonSnapshot.candidates[1]?.isBookMove, true, 'Theory variation must retain its book treatment');
+
+  const afterThreePlies = new Chess();
+  afterThreePlies.move('e4');
+  afterThreePlies.move('c5');
+  afterThreePlies.move('Nf3');
+  const depthLimitedSnapshots: RenderSnapshot[] = [];
+  const depthLimitedController = new HighlightController(
+    {
+      ...DEFAULT_SETTINGS,
+      multiPv: 1,
+      opening: {
+        ...DEFAULT_SETTINGS.opening,
+        enabled: true,
+        mode: 'parallel',
+        maxPlies: 2,
+        selectedOpeningIds: ['sicilian-najdorf'],
+      },
+    },
+    (snapshot) => depthLimitedSnapshots.push(snapshot)
+  );
+  depthLimitedController.setBoardState({
+    fen: afterThreePlies.fen(),
+    positionKey: 'parallel_after_limit',
+    isFlipped: true,
+    turn: 'b',
+    playerColor: 'b',
+    controlledColor: 'auto',
+    pieceMap: new Map([['g8', 'n']]),
+  });
+  depthLimitedController.handleEvaluation({
+    engineInstanceId: 'stockfish',
+    analysisId: 1,
+    positionKey: 'parallel_after_limit',
+    fen: afterThreePlies.fen(),
+    depth: 14,
+    scoreCp: 0,
+    scoreMate: null,
+    whiteScoreCp: 0,
+    whiteScoreMate: null,
+    bestMove: 'g8f6',
+    multiPvLines: [],
+    candidates: [{ pvId: 1, from: 'g8', to: 'f6', depth: 14, scoreCp: 0, scoreMate: null, pv: ['g8f6'] }],
+    isCalculating: false,
+    timestamp: Date.now(),
+  });
+
+  const depthLimitedSnapshot = depthLimitedSnapshots[depthLimitedSnapshots.length - 1];
+  assert(depthLimitedSnapshot, 'Depth-limited comparison mode must render engine analysis');
+  assert.strictEqual(depthLimitedSnapshot.candidates.length, 1, 'Theory must stop once the configured ply limit is exceeded');
+  assert.strictEqual(depthLimitedSnapshot.candidates[0]?.isBookMove, undefined);
+
+  console.log('   ✓ Theory and engine remain independent until the configured book depth');
+}
+
+// --------------------------------------------------------------------------
+// 8. Repertoire Side Isolation (White vs Black)
+// --------------------------------------------------------------------------
+console.log('\n8. Testing repertoire side isolation (White vs Black openings)...');
 {
   const index = new OpeningIndex(OPENING_CATALOG);
 
@@ -315,9 +440,9 @@ console.log('\n7. Testing repertoire side isolation (White vs Black openings)...
 }
 
 // --------------------------------------------------------------------------
-// 8. Opponent Turn Gating & HighlightController Role Consistency
+// 9. Opponent Turn Gating & HighlightController Role Consistency
 // --------------------------------------------------------------------------
-console.log('\n8. Testing HighlightController role consistency and opponent turn gating...');
+console.log('\n9. Testing HighlightController role consistency and opponent turn gating...');
 {
   const snapshots: RenderSnapshot[] = [];
   const controller = new HighlightController(
@@ -380,9 +505,9 @@ console.log('\n8. Testing HighlightController role consistency and opponent turn
 }
 
 // --------------------------------------------------------------------------
-// 9. Specific Repertoire Filtering (White: London, Black: Sicilian)
+// 10. Specific Repertoire Filtering (White: London, Black: Sicilian)
 // --------------------------------------------------------------------------
-console.log('\n9. Testing specific repertoire selection filtering...');
+console.log('\n10. Testing specific repertoire selection filtering...');
 {
   const index = new OpeningIndex(OPENING_CATALOG);
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -425,9 +550,9 @@ console.log('\n9. Testing specific repertoire selection filtering...');
 }
 
 // --------------------------------------------------------------------------
-// 10. Role Inversion Prevention & BoardParser Player Color Detection
+// 11. Role Inversion Prevention & BoardParser Player Color Detection
 // --------------------------------------------------------------------------
-console.log('\n10. Testing BoardParser player color detection and captured piece immunity...');
+console.log('\n11. Testing BoardParser player color detection and captured piece immunity...');
 {
   // Simulated DOM environment for Node testing
   const mockBottomPlayer = {
@@ -485,9 +610,9 @@ console.log('\n10. Testing BoardParser player color detection and captured piece
 }
 
 // --------------------------------------------------------------------------
-// 11. Authoritative Player Color Resolution (Clock, Session, Avatar, Captures)
+// 12. Authoritative Player Color Resolution (Clock, Session, Avatar, Captures)
 // --------------------------------------------------------------------------
-console.log('\n11. Testing Authoritative Player Color Resolution...');
+console.log('\n12. Testing Authoritative Player Color Resolution...');
 {
   const { BoardParser } = await import('../lib/board-parser');
   const originalDoc = (global as any).document;
@@ -592,9 +717,9 @@ console.log('\n11. Testing Authoritative Player Color Resolution...');
 }
 
 // --------------------------------------------------------------------------
-// 12. Authoritative Turn Detection (Clock First, Ply Count Second, Highlight Immunity)
+// 13. Authoritative Turn Detection (Clock First, Ply Count Second, Highlight Immunity)
 // --------------------------------------------------------------------------
-console.log('\n12. Testing Authoritative Turn Detection & Highlight Immunity...');
+console.log('\n13. Testing Authoritative Turn Detection & Highlight Immunity...');
 {
   const { BoardParser } = await import('../lib/board-parser');
   const originalDoc = (global as any).document;
@@ -672,9 +797,9 @@ console.log('\n12. Testing Authoritative Turn Detection & Highlight Immunity...'
 }
 
 // --------------------------------------------------------------------------
-// 13. Game Lifecycle & Game-over Gating
+// 14. Game Lifecycle & Game-over Gating
 // --------------------------------------------------------------------------
-console.log('\n13. Testing Game Lifecycle & Game-over Gating...');
+console.log('\n14. Testing Game Lifecycle & Game-over Gating...');
 {
   const { BoardParser } = await import('../lib/board-parser');
   const originalDoc = (global as any).document;
@@ -710,9 +835,9 @@ console.log('\n13. Testing Game Lifecycle & Game-over Gating...');
 }
 
 // --------------------------------------------------------------------------
-// 14. HighlightController Gating under Inactive Game & Flipped Black Play
+// 15. HighlightController Gating under Inactive Game & Flipped Black Play
 // --------------------------------------------------------------------------
-console.log('\n14. Testing HighlightController Gating under Inactive Game & Flipped Black Play...');
+console.log('\n15. Testing HighlightController Gating under Inactive Game & Flipped Black Play...');
 {
   const snapshots: RenderSnapshot[] = [];
   const controller = new HighlightController(
@@ -786,9 +911,9 @@ console.log('\n14. Testing HighlightController Gating under Inactive Game & Flip
 }
 
 // --------------------------------------------------------------------------
-// 15. Instant Grid-Diff Turn Transition & GameStateAdapter Passthrough
+// 16. Instant Grid-Diff Turn Transition & GameStateAdapter Passthrough
 // --------------------------------------------------------------------------
-console.log('\n15. Testing Instant Grid-Diff Turn Transition & GameStateAdapter Passthrough...');
+console.log('\n16. Testing Instant Grid-Diff Turn Transition & GameStateAdapter Passthrough...');
 {
   const { BoardParser } = await import('../lib/board-parser');
   const { GameStateAdapter } = await import('../lib/game-state-adapter');

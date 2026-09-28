@@ -72,6 +72,7 @@ export type OpeningMode =
   | 'off'
   | 'hint'
   | 'coexist'
+  | 'parallel'
   | 'prefer'
   | 'book-only'
   | 'adaptive';

@@ -211,7 +211,7 @@ export class HighlightController {
       const fullmove = parseInt(tokens[5] || '1', 10);
       const isBlack = tokens[1] === 'b';
       const plies = (fullmove - 1) * 2 + (isBlack ? 1 : 0);
-      const maxPlies = this.settings.opening.maxPlies || 12;
+      const maxPlies = this.settings.opening.maxPlies ?? 12;
       return plies <= maxPlies;
     } catch (_) {
       return true;
@@ -253,7 +253,10 @@ export class HighlightController {
       }));
   }
 
-  private getValidatedBookCandidate(engineCandidates: EngineCandidate[] = []): EngineCandidate | null {
+  private getValidatedBookCandidate(
+    engineCandidates: EngineCandidate[] = [],
+    allowEngineDisagreement: boolean = false
+  ): EngineCandidate | null {
     if (!this.currentBoardState || this.currentBoardState.isGameActive === false) return null;
     const openingSettings = this.settings.opening;
     if (!openingSettings?.enabled) return null;
@@ -284,7 +287,8 @@ export class HighlightController {
       this.currentBoardState.fen,
       this.settings,
       engineCandidates,
-      this.currentBoardState.playerColor
+      this.currentBoardState.playerColor,
+      { allowEngineDisagreement }
     );
 
     if (resolved) {
@@ -389,12 +393,11 @@ export class HighlightController {
       return baseCandidates;
     }
 
-    const bookCandidate = this.getValidatedBookCandidate(baseCandidates);
+    const mode = opening.mode || 'adaptive';
+    const bookCandidate = this.getValidatedBookCandidate(baseCandidates, mode === 'parallel');
     if (!bookCandidate) {
       return baseCandidates;
     }
-
-    const mode = opening.mode || 'adaptive';
 
     if (mode === 'off') {
       return baseCandidates;
@@ -410,6 +413,20 @@ export class HighlightController {
         c.to === bookCandidate.to &&
         (c.promotion ?? '') === (bookCandidate.promotion ?? '')
     );
+
+    if (mode === 'parallel') {
+      if (matchIdx !== -1) {
+        return baseCandidates.map((candidate, index) =>
+          index === matchIdx
+            ? { ...candidate, isBookMove: true, bookName: bookCandidate.bookName }
+            : candidate
+        );
+      }
+
+      // Theory + engine is an explicit comparison mode: retain every requested
+      // engine variation and append the independently safe repertoire move.
+      return [...baseCandidates, bookCandidate];
+    }
 
     if (matchIdx !== -1) {
       const updated = [...baseCandidates];

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add a Theory + engine opening mode that keeps every configured engine variation
+  visible alongside a legal, locally safe repertoire step through the configured
+  opening depth.
+
+### Changed
+
+- Rebuild the extension popup around a compact, keyboard-visible chess annotation
+  interface and persist opening-catalog filters with the repertoire.
+
 ## 1.0.1 - 2026-09-27
 
 ### Fixed

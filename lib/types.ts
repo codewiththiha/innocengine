@@ -1,3 +1,5 @@
+import type { OpeningCategory } from './openings/types';
+
 export const APP_NAME = 'Chess Engine AI Overlay';
 export const APP_VERSION = '1.0.1';
 
@@ -38,7 +40,7 @@ export interface CustomEngineMeta {
   isBuiltIn?: boolean;
 }
 
-export type OpeningMode = 'off' | 'hint' | 'coexist' | 'prefer' | 'book-only' | 'adaptive';
+export type OpeningMode = 'off' | 'hint' | 'coexist' | 'parallel' | 'prefer' | 'book-only' | 'adaptive';
 
 export interface OpeningConfig {
   enabled: boolean;
@@ -49,7 +51,7 @@ export interface OpeningConfig {
   mode: OpeningMode;
   maxPlies: number;
   reserveSlot?: boolean;
-  categories?: any[];
+  categories?: OpeningCategory[];
   searchQuery?: string;
   includeMeme?: boolean;
   includeWeird?: boolean;

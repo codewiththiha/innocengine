@@ -49,10 +49,7 @@ export default defineContentScript({
           newSettings.targetElo !== currentSettings.targetElo ||
           patriciaChanged;
         const openingChanged =
-          newSettings.opening.enabled !== currentSettings.opening.enabled ||
-          newSettings.opening.repertoireId !== currentSettings.opening.repertoireId ||
-          newSettings.opening.mode !== currentSettings.opening.mode ||
-          newSettings.opening.maxPlies !== currentSettings.opening.maxPlies;
+          JSON.stringify(newSettings.opening) !== JSON.stringify(currentSettings.opening);
         const visualChanged =
           newSettings.showHighlights !== currentSettings.showHighlights ||
           newSettings.highlightPlayerMoves !== currentSettings.highlightPlayerMoves ||

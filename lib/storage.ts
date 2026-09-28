@@ -85,38 +85,40 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   customOptions: {},
 };
 
+function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings {
+  const loadedOpening: Partial<EngineSettings['opening']> = loaded.opening ?? {};
+
+  return {
+    ...DEFAULT_SETTINGS,
+    ...loaded,
+    highlightPlayerMoves: loaded.highlightPlayerMoves ?? loaded.showHighlights ?? true,
+    highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
+    highlighterOpacity: loaded.highlighterOpacity ?? DEFAULT_SETTINGS.highlighterOpacity,
+    showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
+    opening: {
+      ...DEFAULT_SETTINGS.opening,
+      ...loadedOpening,
+      safety: {
+        ...DEFAULT_SETTINGS.opening.safety,
+        ...(loadedOpening.safety ?? {}),
+      },
+      enginePolicy: {
+        ...DEFAULT_SETTINGS.opening.enginePolicy,
+        ...(loadedOpening.enginePolicy ?? {}),
+      },
+    },
+  };
+}
+
 export async function getSettings(): Promise<EngineSettings> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) {
     return DEFAULT_SETTINGS;
   }
+
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
-    if (!result || !result[STORAGE_KEY]) {
-      return DEFAULT_SETTINGS;
-    }
-    const loaded = (result[STORAGE_KEY] || {}) as Partial<EngineSettings>;
-    const loadedOpening = (loaded.opening || {}) as any;
-    return {
-      ...DEFAULT_SETTINGS,
-      ...loaded,
-      highlightPlayerMoves: loaded.highlightPlayerMoves ?? loaded.showHighlights ?? true,
-      highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
-      highlighterOpacity: loaded.highlighterOpacity ?? 0.35,
-      showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
-      opening: {
-        ...DEFAULT_SETTINGS.opening,
-        ...loadedOpening,
-        safety: {
-          ...DEFAULT_SETTINGS.opening.safety,
-          ...(loadedOpening.safety || {}),
-        },
-        enginePolicy: {
-          ...DEFAULT_SETTINGS.opening.enginePolicy,
-          ...(loadedOpening.enginePolicy || {}),
-        },
-      },
-    };
-  } catch (_) {
+    return normalizeSettings(result?.[STORAGE_KEY] as Partial<EngineSettings> | undefined);
+  } catch {
     return DEFAULT_SETTINGS;
   }
 }
@@ -125,26 +127,38 @@ export async function saveSettings(settings: Partial<EngineSettings>): Promise<v
   if (typeof chrome === 'undefined' || !chrome.storage?.local) {
     return;
   }
+
   try {
     const current = await getSettings();
-    const updated = { ...current, ...settings };
-    await chrome.storage.local.set({ [STORAGE_KEY]: updated });
-  } catch (_) {}
+    const nextOpening = settings.opening
+      ? {
+          ...current.opening,
+          ...settings.opening,
+          safety: { ...current.opening.safety, ...settings.opening.safety },
+          enginePolicy: { ...current.opening.enginePolicy, ...settings.opening.enginePolicy },
+        }
+      : current.opening;
+
+    await chrome.storage.local.set({
+      [STORAGE_KEY]: normalizeSettings({ ...current, ...settings, opening: nextOpening }),
+    });
+  } catch {
+    // Storage is unavailable in non-extension test contexts.
+  }
 }
 
 export function subscribeToSettings(callback: (settings: EngineSettings) => void): () => void {
   if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) {
     return () => {};
   }
+
   const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-    if (changes[STORAGE_KEY] && changes[STORAGE_KEY].newValue) {
-      callback({ ...DEFAULT_SETTINGS, ...changes[STORAGE_KEY].newValue });
+    const stored = changes[STORAGE_KEY]?.newValue;
+    if (stored) {
+      callback(normalizeSettings(stored as Partial<EngineSettings>));
     }
   };
+
   chrome.storage.onChanged.addListener(listener);
-  return () => {
-    try {
-      chrome.storage.onChanged.removeListener(listener);
-    } catch (_) {}
-  };
+  return () => chrome.storage.onChanged.removeListener(listener);
 }

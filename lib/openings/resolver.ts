@@ -65,13 +65,18 @@ export function selectedOpeningMatches(
   return true;
 }
 
+export interface OpeningResolutionOptions {
+  allowEngineDisagreement?: boolean;
+}
+
 export function engineAllowsEntry(
   entry: BookPositionEntry,
   engineCandidates: EngineCandidate[],
   settings: EngineSettings,
-  config: OpeningConfig
+  config: OpeningConfig,
+  options: OpeningResolutionOptions = {}
 ): boolean {
-  if (!engineCandidates.length) return true;
+  if (options.allowEngineDisagreement || !engineCandidates.length) return true;
 
   const enginePolicy = config.enginePolicy?.[settings.activeEngineId] ?? {};
   const minEngineDepth =
@@ -124,7 +129,8 @@ export function resolveSafeOpeningEntry(
   fen: string,
   settings: EngineSettings,
   engineCandidates: EngineCandidate[] = [],
-  playerColor?: 'w' | 'b'
+  playerColor?: 'w' | 'b',
+  options: OpeningResolutionOptions = {}
 ): ResolvedBookEntry | null {
   const config = settings.opening;
   if (!config?.enabled) return null;
@@ -181,7 +187,7 @@ export function resolveSafeOpeningEntry(
       continue;
     }
 
-    if (!engineAllowsEntry(entry, engineCandidates, settings, config)) {
+    if (!engineAllowsEntry(entry, engineCandidates, settings, config, options)) {
       continue;
     }
 

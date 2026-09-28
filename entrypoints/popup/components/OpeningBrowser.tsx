@@ -1,60 +1,85 @@
 import React, { useMemo, useState } from 'react';
-import type { OpeningDefinition, OpeningCategory } from '../../../lib/openings/types';
-import { Search, Flame, Shield, Sparkles, Filter, X, Check, BookOpen, Swords, Zap } from 'lucide-react';
+import type { OpeningCategory, OpeningDefinition } from '../../../lib/openings/types';
+
+interface OpeningFilters {
+  categories?: OpeningCategory[];
+  includeMeme?: boolean;
+  includeWeird?: boolean;
+  maxRisk?: number;
+}
 
 interface OpeningBrowserProps {
   openings: OpeningDefinition[];
   selectedIds: string[];
-  whiteRepertoireId?: string;
-  blackRepertoireId?: string;
+  filters: OpeningFilters;
+  disabled?: boolean;
   onChange: (ids: string[]) => void;
-  onWhiteRepertoireChange?: (id: string) => void;
-  onBlackRepertoireChange?: (id: string) => void;
+  onFiltersChange: (patch: Partial<OpeningFilters>) => void;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
+const CATEGORY_LABELS: Record<OpeningCategory, string> = {
+  white: 'White',
+  black: 'Black',
+  universal: 'Universal',
   aggressive: 'Aggressive',
   solid: 'Solid',
   positional: 'Positional',
   tactical: 'Tactical',
   sharp: 'Sharp',
+  risky: 'Risky',
   gambit: 'Gambit',
   trap: 'Trap',
   meme: 'Meme',
   weird: 'Weird',
+  fun: 'Fun',
+  chaos: 'Chaos',
   beginner: 'Beginner',
   classical: 'Classical',
   hypermodern: 'Hypermodern',
+  flank: 'Flank',
+  indian: 'Indian',
   sicilian: 'Sicilian',
   french: 'French',
   'caro-kann': 'Caro-Kann',
   'kings-pawn': "King's Pawn",
   'queens-pawn': "Queen's Pawn",
-  indian: 'Indian',
   english: 'English',
   dutch: 'Dutch',
+  offbeat: 'Offbeat',
+  romantic: 'Romantic',
   system: 'System',
 };
 
+const BROWSE_CATEGORIES: OpeningCategory[] = [
+  'solid',
+  'positional',
+  'aggressive',
+  'tactical',
+  'gambit',
+  'classical',
+  'hypermodern',
+  'system',
+];
+
 const PRESETS = [
   {
-    name: '🏆 Grandmaster',
-    desc: 'Classical & Tier-1',
+    name: 'Classical',
+    description: 'A compact classical repertoire',
     ids: ['italian', 'queens-gambit', 'sicilian-najdorf', 'kings-indian'],
   },
   {
-    name: '🛡️ Solid Rock',
-    desc: 'Fortress & Structure',
+    name: 'Solid',
+    description: 'Low-risk positional choices',
     ids: ['london', 'catalan', 'caro-classical', 'slav-black'],
   },
   {
-    name: '⚔️ Sharp Attacks',
-    desc: 'Tactics & Sacrifices',
+    name: 'Sharp',
+    description: 'Tactical opening choices',
     ids: ['kings-gambit-accepted', 'evans-gambit', 'sicilian-dragon', 'french-winawer'],
   },
   {
-    name: '🎭 Gambits',
-    desc: 'Traps & Wild lines',
+    name: 'Gambits',
+    description: 'Sacrificial and trapping lines',
     ids: ['fried-liver', 'danish-gambit', 'stafford-gambit', 'latvian-gambit'],
   },
 ];
@@ -62,50 +87,45 @@ const PRESETS = [
 export default function OpeningBrowser({
   openings,
   selectedIds,
-  whiteRepertoireId,
-  blackRepertoireId,
+  filters,
+  disabled = false,
   onChange,
-  onWhiteRepertoireChange,
-  onBlackRepertoireChange,
+  onFiltersChange,
 }: OpeningBrowserProps) {
   const [query, setQuery] = useState('');
   const [sideFilter, setSideFilter] = useState<'all' | 'w' | 'b'>('all');
-  const [activeCategories, setActiveCategories] = useState<Set<OpeningCategory>>(new Set());
-  const [maxRisk, setMaxRisk] = useState<number>(5);
-  const [includeMeme, setIncludeMeme] = useState(false);
-  const [includeWeird, setIncludeWeird] = useState(false);
+  const activeCategories = useMemo(
+    () => new Set(filters.categories ?? []),
+    [filters.categories],
+  );
+  const maxRisk = filters.maxRisk ?? 5;
+  const includeMeme = filters.includeMeme ?? false;
+  const includeWeird = filters.includeWeird ?? false;
 
-  const whiteOpenings = useMemo(() => openings.filter((o) => o.side === 'w' || o.side === 'any'), [openings]);
-  const blackOpenings = useMemo(() => openings.filter((o) => o.side === 'b' || o.side === 'any'), [openings]);
+  const whiteOpenings = useMemo(
+    () => openings.filter((opening) => opening.side === 'w' || opening.side === 'any'),
+    [openings],
+  );
+  const blackOpenings = useMemo(
+    () => openings.filter((opening) => opening.side === 'b' || opening.side === 'any'),
+    [openings],
+  );
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const normalizedQuery = query.trim().toLowerCase();
 
     return openings.filter((opening) => {
       if (opening.enabled === false) return false;
-
-      // Side filter
-      if (sideFilter !== 'all' && opening.side !== 'any' && opening.side !== sideFilter) {
-        return false;
-      }
-
-      // Meme / Weird filter
+      if (sideFilter !== 'all' && opening.side !== 'any' && opening.side !== sideFilter) return false;
       if (!includeMeme && opening.meme) return false;
       if (!includeWeird && opening.categories.includes('weird')) return false;
-
-      // Risk threshold
       if (opening.risk > maxRisk) return false;
-
-      // Category chip filter
-      if (activeCategories.size > 0) {
-        const matchesCat = opening.categories.some((cat) => activeCategories.has(cat));
-        if (!matchesCat) return false;
+      if (activeCategories.size > 0 && !opening.categories.some((category) => activeCategories.has(category))) {
+        return false;
       }
+      if (!normalizedQuery) return true;
 
-      // Search query filter
-      if (!q) return true;
-
-      const haystack = [
+      return [
         opening.id,
         opening.name,
         opening.eco ?? '',
@@ -114,272 +134,205 @@ export default function OpeningBrowser({
         ...opening.categories,
       ]
         .join(' ')
-        .toLowerCase();
-
-      return haystack.includes(q);
+        .toLowerCase()
+        .includes(normalizedQuery);
     });
-  }, [openings, query, sideFilter, activeCategories, maxRisk, includeMeme, includeWeird]);
+  }, [activeCategories, includeMeme, includeWeird, maxRisk, openings, query, sideFilter]);
 
-  const toggleOpening = (id: string) => {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter((x) => x !== id));
-    } else {
-      onChange([...selectedIds, id]);
-    }
+  const updateSelection = (id: string) => {
+    if (disabled) return;
+    onChange(selectedIds.includes(id) ? selectedIds.filter((selected) => selected !== id) : [...selectedIds, id]);
   };
 
-  const toggleCategory = (cat: OpeningCategory) => {
+  const toggleCategory = (category: OpeningCategory) => {
+    if (disabled) return;
     const next = new Set(activeCategories);
-    if (next.has(cat)) {
-      next.delete(cat);
+    if (next.has(category)) {
+      next.delete(category);
     } else {
-      next.add(cat);
+      next.add(category);
     }
-    setActiveCategories(next);
+    onFiltersChange({ categories: Array.from(next) });
   };
 
-  const handleApplyPreset = (presetIds: string[]) => {
-    // Only keep IDs that exist in the catalog
-    const valid = presetIds.filter((id) => openings.some((o) => o.id === id));
-    onChange(valid);
+  const applyPreset = (ids: string[]) => {
+    if (disabled) return;
+    onChange(ids.filter((id) => openings.some((opening) => opening.id === id)));
   };
 
-  const handleSelectAllFiltered = () => {
-    const combined = Array.from(new Set([...selectedIds, ...filtered.map((o) => o.id)]));
-    onChange(combined);
+  const selectShown = () => {
+    if (disabled) return;
+    onChange(Array.from(new Set([...selectedIds, ...filtered.map((opening) => opening.id)])));
   };
 
-  const handleClearSelection = () => {
-    onChange([]);
-  };
-
-  // Selected counts by side
   const selectedWhiteCount = useMemo(
-    () => selectedIds.filter((id) => openings.some((o) => o.id === id && (o.side === 'w' || o.side === 'any'))).length,
-    [selectedIds, openings]
+    () => selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'w' || opening.side === 'any'))).length,
+    [openings, selectedIds],
   );
   const selectedBlackCount = useMemo(
-    () => selectedIds.filter((id) => openings.some((o) => o.id === id && (o.side === 'b' || o.side === 'any'))).length,
-    [selectedIds, openings]
+    () => selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'b' || opening.side === 'any'))).length,
+    [openings, selectedIds],
   );
 
   return (
-    <div className="opening-browser">
-      {/* Quick Repertoire Presets */}
-      <div className="opening-presets-bar">
-        <span className="presets-title">Quick Presets:</span>
-        <div className="presets-scroll">
+    <section className={`opening-browser ${disabled ? 'is-disabled' : ''}`} aria-label="Opening repertoire builder">
+      <div className="repertoire-presets" aria-label="Repertoire presets">
+        <span className="field-label">Start with</span>
+        <div className="preset-list">
           {PRESETS.map((preset) => (
             <button
               key={preset.name}
               type="button"
-              className="preset-btn"
-              onClick={() => handleApplyPreset(preset.ids)}
-              title={preset.desc}
+              className="preset-button"
+              disabled={disabled}
+              onClick={() => applyPreset(preset.ids)}
+              title={preset.description}
             >
               {preset.name}
             </button>
           ))}
-          {selectedIds.length > 0 && (
-            <button
-              type="button"
-              className="preset-btn clear"
-              onClick={handleClearSelection}
-            >
-              Clear All ({selectedIds.length})
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Side Tabs & Active Repertoire Counts */}
-      <div className="opening-side-tabs">
+      <div className="opening-side-tabs" role="group" aria-label="Opening side">
         <button
           type="button"
           className={`side-tab ${sideFilter === 'all' ? 'active' : ''}`}
+          aria-pressed={sideFilter === 'all'}
+          disabled={disabled}
           onClick={() => setSideFilter('all')}
         >
-          All Openings ({openings.length})
+          All <span>{openings.length}</span>
         </button>
         <button
           type="button"
           className={`side-tab ${sideFilter === 'w' ? 'active' : ''}`}
+          aria-pressed={sideFilter === 'w'}
+          disabled={disabled}
           onClick={() => setSideFilter('w')}
         >
-          ⚪ White Repertoire ({whiteOpenings.length})
-          {selectedWhiteCount > 0 && <span className="tab-pill">{selectedWhiteCount}</span>}
+          White <span>{selectedWhiteCount}/{whiteOpenings.length}</span>
         </button>
         <button
           type="button"
           className={`side-tab ${sideFilter === 'b' ? 'active' : ''}`}
+          aria-pressed={sideFilter === 'b'}
+          disabled={disabled}
           onClick={() => setSideFilter('b')}
         >
-          ⚫ Black Repertoire ({blackOpenings.length})
-          {selectedBlackCount > 0 && <span className="tab-pill">{selectedBlackCount}</span>}
+          Black <span>{selectedBlackCount}/{blackOpenings.length}</span>
         </button>
       </div>
 
-      {/* Search Input */}
-      <div style={{ position: 'relative' }}>
+      <div className="opening-search-wrap">
+        <label className="sr-only" htmlFor="opening-search">Search openings</label>
         <input
-          type="text"
-          placeholder={
-            sideFilter === 'w'
-              ? 'Search White openings (e.g. Italian, London, Queen’s Gambit)...'
-              : sideFilter === 'b'
-              ? 'Search Black defenses (e.g. Sicilian, Caro-Kann, King’s Indian)...'
-              : 'Search 99+ openings by name, ECO (e.g. C50), or theme...'
-          }
+          id="opening-search"
+          type="search"
+          placeholder="Search name, ECO, or style"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          disabled={disabled}
+          onChange={(event) => setQuery(event.target.value)}
           className="opening-search-input"
         />
         {query && (
           <button
             type="button"
+            className="clear-search"
+            aria-label="Clear opening search"
+            disabled={disabled}
             onClick={() => setQuery('')}
-            style={{
-              position: 'absolute',
-              right: 8,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              background: 'none',
-              border: 'none',
-              color: '#64748b',
-              cursor: 'pointer',
-            }}
           >
-            <X size={12} />
+            ×
           </button>
         )}
       </div>
 
-      {/* Control Strip: Meme, Weird & Risk */}
-      <div className="opening-controls-bar">
-        <label className="opening-toggle-label">
+      <div className="opening-filter-row">
+        <label className="check-label">
           <input
             type="checkbox"
             checked={includeMeme}
-            onChange={(e) => setIncludeMeme(e.target.checked)}
+            disabled={disabled}
+            onChange={(event) => onFiltersChange({ includeMeme: event.target.checked })}
           />
-          🎭 Memes (Bongcloud, Borg)
+          Include meme lines
         </label>
-
-        <label className="opening-toggle-label">
+        <label className="check-label">
           <input
             type="checkbox"
             checked={includeWeird}
-            onChange={(e) => setIncludeWeird(e.target.checked)}
+            disabled={disabled}
+            onChange={(event) => onFiltersChange({ includeWeird: event.target.checked })}
           />
-          🌀 Weird / Offbeat
+          Include offbeat lines
         </label>
-
-        {/* Risk Limit */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#94a3b8' }}>
-          <span>Max Risk: <b>{maxRisk}/5</b></span>
+        <label className="risk-control">
+          <span>Risk ≤ {maxRisk}</span>
           <input
             type="range"
             min="1"
             max="5"
             value={maxRisk}
-            onChange={(e) => setMaxRisk(Number(e.target.value))}
-            style={{ width: 50, height: 3, accentColor: '#38bdf8' }}
+            disabled={disabled}
+            onChange={(event) => onFiltersChange({ maxRisk: Number(event.target.value) })}
           />
-        </div>
+        </label>
       </div>
 
-      {/* Category Filter Chips */}
-      <div className="opening-categories-wrap">
-        {Object.entries(CATEGORY_LABELS).map(([key, label]) => {
-          const active = activeCategories.has(key as OpeningCategory);
-          return (
-            <button
-              key={key}
-              type="button"
-              className={`opening-chip ${active ? 'active' : ''}`}
-              onClick={() => toggleCategory(key as OpeningCategory)}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Action Strip: Count & Quick Select */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#64748b' }}>
-        <span>
-          Showing <b>{filtered.length}</b> openings ({selectedIds.length} active in repertoire)
-        </span>
-        <div style={{ display: 'flex', gap: 6 }}>
+      <div className="opening-category-row" aria-label="Opening style filters">
+        {BROWSE_CATEGORIES.map((category) => (
           <button
+            key={category}
             type="button"
-            className="opening-chip"
-            style={{ fontSize: 9, padding: '1px 6px' }}
-            onClick={handleSelectAllFiltered}
+            className={`opening-chip ${activeCategories.has(category) ? 'active' : ''}`}
+            aria-pressed={activeCategories.has(category)}
+            disabled={disabled}
+            onClick={() => toggleCategory(category)}
           >
-            Select Shown ({filtered.length})
+            {CATEGORY_LABELS[category]}
           </button>
-          {selectedIds.length > 0 && (
-            <button
-              type="button"
-              className="opening-chip"
-              style={{ fontSize: 9, padding: '1px 6px', color: '#f43f5e' }}
-              onClick={handleClearSelection}
-            >
-              Clear
-            </button>
-          )}
+        ))}
+      </div>
+
+      <div className="opening-list-header">
+        <span>{filtered.length} shown · {selectedIds.length} selected</span>
+        <div>
+          <button type="button" className="text-button" disabled={disabled || filtered.length === 0} onClick={selectShown}>
+            Select shown
+          </button>
+          <button type="button" className="text-button danger" disabled={disabled || selectedIds.length === 0} onClick={() => onChange([])}>
+            Clear
+          </button>
         </div>
       </div>
 
-      {/* Cards List */}
-      <div className="opening-cards-list">
+      <div className="opening-list" aria-live="polite">
         {filtered.map((opening) => {
-          const isSelected = selectedIds.includes(opening.id);
+          const selected = selectedIds.includes(opening.id);
           return (
-            <div
-              key={opening.id}
-              className={`opening-card ${isSelected ? 'selected' : ''}`}
-              onClick={() => toggleOpening(opening.id)}
-            >
-              <div className="opening-card-header">
-                <div className="opening-card-title">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => {}}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ accentColor: '#38bdf8', cursor: 'pointer' }}
-                  />
-                  <span>{opening.name}</span>
-                </div>
-                <div className="opening-badges-row">
-                  {opening.eco && <span className="opening-badge badge-eco">{opening.eco}</span>}
-                  <span className={`opening-badge badge-side-${opening.side}`}>
-                    {opening.side === 'w' ? '⚪ White' : opening.side === 'b' ? '⚫ Black' : 'Universal'}
-                  </span>
-                  <span className={`opening-badge badge-risk risk-${opening.risk}`}>
-                    Risk {opening.risk}/5
-                  </span>
-                </div>
-              </div>
-
-              {opening.description && (
-                <div className="opening-card-desc">{opening.description}</div>
-              )}
-
-              <div className="opening-card-tags">
-                <span className="opening-tag pgn-tag">{opening.pgn}</span>
-                {opening.categories.slice(0, 3).map((cat) => (
-                  <span key={cat} className="opening-tag">
-                    {cat}
-                  </span>
-                ))}
-              </div>
-            </div>
+            <label key={opening.id} className={`opening-row ${selected ? 'selected' : ''}`}>
+              <input
+                type="checkbox"
+                checked={selected}
+                disabled={disabled}
+                onChange={() => updateSelection(opening.id)}
+              />
+              <span className="opening-row-main">
+                <span className="opening-row-title">{opening.name}</span>
+                <span className="opening-row-line">{opening.pgn}</span>
+              </span>
+              <span className="opening-row-meta">
+                {opening.eco && <span>{opening.eco}</span>}
+                <span>R{opening.risk}</span>
+              </span>
+            </label>
           );
         })}
+        {filtered.length === 0 && (
+          <p className="opening-empty">No openings match these filters.</p>
+        )}
       </div>
-    </div>
+    </section>
   );
 }
