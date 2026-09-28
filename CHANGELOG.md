@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.2 - 2026-09-28
+
+### Added
+
+- Add system-adaptive light and dark themes across the popup and playground.
+- Add IndexedDB-backed adaptive repertoire matching that follows actual moves
+  and falls back across selected opening lines.
+
+### Fixed
+
+- Release content-script observers, timers, subscriptions, and engine listeners
+  when a Chess.com page is replaced.
+
 ## 1.1.0 - 2026-09-28
 
 ### Added

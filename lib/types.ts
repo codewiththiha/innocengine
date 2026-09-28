@@ -3,7 +3,7 @@ import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
 export type { OpeningConfig, OpeningMode } from './openings/types';
 
 export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.2';
 
 export interface UciOption {
   name: string;
