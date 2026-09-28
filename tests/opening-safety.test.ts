@@ -14,6 +14,7 @@ import {
   selectedOpeningMatches,
 } from '../lib/openings/resolver';
 import { OpeningBook } from '../lib/opening-book';
+import { AdaptiveOpeningSelector } from '../lib/openings/adaptive-selector';
 import { HighlightController, type RenderSnapshot } from '../lib/highlight-controller';
 import { DEFAULT_SETTINGS } from '../lib/storage';
 import type { BoardState, EngineCandidate } from '../lib/types';
@@ -550,9 +551,53 @@ console.log('\n10. Testing specific repertoire selection filtering...');
 }
 
 // --------------------------------------------------------------------------
-// 11. Role Inversion Prevention & BoardParser Player Color Detection
+// 11. Adaptive selected-opening fallback
 // --------------------------------------------------------------------------
-console.log('\n11. Testing BoardParser player color detection and captured piece immunity...');
+console.log('\n11. Testing adaptive fallback across selected openings...');
+{
+  assert.strictEqual(DEFAULT_SETTINGS.opening.adaptiveSelection, true, 'Adaptive selected-opening matching must be enabled by default');
+
+  const index = new OpeningIndex(OPENING_CATALOG);
+  const selector = new AdaptiveOpeningSelector();
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    opening: {
+      ...DEFAULT_SETTINGS.opening,
+      enabled: true,
+      mode: 'parallel' as const,
+      adaptiveSelection: true,
+      selectedOpeningIds: ['london', 'qgd-classical'],
+    },
+  };
+
+  const game = new Chess();
+  const startResolution = resolveSafeOpeningEntry(index, game.fen(), settings, [], 'w', { selector });
+  assert(startResolution, 'A selected opening must resolve at the starting position');
+  assert.strictEqual(startResolution.openingId, 'london', 'The safer active selected line should be preferred first');
+
+  game.move('d4');
+  game.move('d5');
+  const activeLineResolution = resolveSafeOpeningEntry(index, game.fen(), settings, [], 'w', { selector });
+  assert(activeLineResolution, 'The active selected line must remain available after the opponent reply');
+  assert.strictEqual(activeLineResolution.openingId, 'london', 'The selector must continue the active matching line');
+  assert.strictEqual(activeLineResolution.uci, 'c1f4');
+
+  // White chooses the Queen's Gambit move instead of the active London suggestion.
+  // After Black's ...e6, only the other selected line still has a matching next step.
+  game.move('c4');
+  game.move('e6');
+  const fallbackResolution = resolveSafeOpeningEntry(index, game.fen(), settings, [], 'w', { selector });
+  assert(fallbackResolution, 'A different matching selected line must be considered after a deviation');
+  assert.strictEqual(fallbackResolution.openingId, 'qgd-classical');
+  assert.strictEqual(fallbackResolution.uci, 'b1c3');
+
+  console.log('   ✓ Active lines continue when valid and fall back to another selected match after a deviation');
+}
+
+// --------------------------------------------------------------------------
+// 12. Role Inversion Prevention & BoardParser Player Color Detection
+// --------------------------------------------------------------------------
+console.log('\n12. Testing BoardParser player color detection and captured piece immunity...');
 {
   // Simulated DOM environment for Node testing
   const mockBottomPlayer = {

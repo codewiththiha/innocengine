@@ -165,13 +165,18 @@ export default function OpeningBrowser({
     onChange(Array.from(new Set([...selectedIds, ...filtered.map((opening) => opening.id)])));
   };
 
+  const usesCatalogDefault = selectedIds.length === 0;
   const selectedWhiteCount = useMemo(
-    () => selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'w' || opening.side === 'any'))).length,
-    [openings, selectedIds],
+    () => usesCatalogDefault
+      ? whiteOpenings.length
+      : selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'w' || opening.side === 'any'))).length,
+    [openings, selectedIds, usesCatalogDefault, whiteOpenings.length],
   );
   const selectedBlackCount = useMemo(
-    () => selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'b' || opening.side === 'any'))).length,
-    [openings, selectedIds],
+    () => usesCatalogDefault
+      ? blackOpenings.length
+      : selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'b' || opening.side === 'any'))).length,
+    [blackOpenings.length, openings, selectedIds, usesCatalogDefault],
   );
 
   return (
@@ -296,16 +301,19 @@ export default function OpeningBrowser({
       </div>
 
       <div className="opening-list-header">
-        <span>{filtered.length} shown · {selectedIds.length} selected</span>
+        <span>{filtered.length} shown · {usesCatalogDefault ? `all ${openings.length} catalog openings active` : `${selectedIds.length} selected`}</span>
         <div>
           <button type="button" className="text-button" disabled={disabled || filtered.length === 0} onClick={selectShown}>
             Select shown
           </button>
-          <button type="button" className="text-button danger" disabled={disabled || selectedIds.length === 0} onClick={() => onChange([])}>
-            Clear
+          <button type="button" className="text-button" disabled={disabled || usesCatalogDefault} onClick={() => onChange([])}>
+            Use all
           </button>
         </div>
       </div>
+      {usesCatalogDefault && (
+        <p className="opening-selection-note">Choose individual openings or a preset to create a narrower repertoire.</p>
+      )}
 
       <div className="opening-list" aria-live="polite">
         {filtered.map((opening) => {

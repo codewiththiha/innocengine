@@ -1021,6 +1021,22 @@ export default function App() {
             />
           </label>
 
+          <label className="toggle-row opening-adaptive-row" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
+            <span>
+              <span className="toggle-label">Adaptive repertoire matching</span>
+              <span className="setting-help">Continue a matching selected line, then switch to another selected match after either player deviates.</span>
+            </span>
+            <input
+              type="checkbox"
+              disabled={!settings.opening.enabled}
+              checked={settings.opening.adaptiveSelection ?? true}
+              onChange={(e) =>
+                updateSetting('opening', { ...settings.opening, adaptiveSelection: e.target.checked })
+              }
+              className="toggle-switch"
+            />
+          </label>
+
           <div className="setting-item opening-setting" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
             <div className="setting-label-row">
               <span className="setting-label">Suggestion mode</span>

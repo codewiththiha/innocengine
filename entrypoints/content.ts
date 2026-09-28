@@ -17,11 +17,19 @@ export default defineContentScript({
     let currentSettings: EngineSettings;
     let lastPositionKey: string = '';
     let boardObserver: MutationObserver | null = null;
+    let bodyObserver: MutationObserver | null = null;
+    let boardScanInterval: ReturnType<typeof setInterval> | null = null;
+    let settingsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribeFromSettings: (() => void) | null = null;
+    let privacyHotkeyHandler: ((event: KeyboardEvent) => void) | null = null;
     let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
+    let disposed = false;
 
     async function init() {
-      currentSettings = await getSettings();
+      const settings = await getSettings();
+      if (disposed) return;
+      currentSettings = settings;
       engineClient = new EngineClient();
 
       engineClient.onEvaluation((evaluation) => {
@@ -34,9 +42,7 @@ export default defineContentScript({
         highlightController.handleEvaluation(evaluation);
       });
 
-      let settingsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-      subscribeToSettings((newSettings) => {
+      unsubscribeFromSettings = subscribeToSettings((newSettings) => {
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
         const depthChanged = newSettings.depth !== currentSettings.depth;
         const engineChanged = newSettings.activeEngineId !== currentSettings.activeEngineId;
@@ -72,7 +78,7 @@ export default defineContentScript({
             clearTimeout(settingsDebounceTimer);
           }
           settingsDebounceTimer = setTimeout(() => {
-            if (!currentBoard) return;
+            if (disposed || !currentBoard) return;
             const state = BoardParser.extractBoardState(currentBoard);
             if (state && currentSettings.autoAnalyze) {
               const authGame = GameStateAdapter.extractGameState(currentBoard, state.turn);
@@ -92,8 +98,8 @@ export default defineContentScript({
     }
 
     function setupPrivacyHotkey() {
-      window.addEventListener('keydown', (e) => {
-        if (e.altKey && e.code === 'KeyH') {
+      privacyHotkeyHandler = (event) => {
+        if (event.altKey && event.code === 'KeyH') {
           isHiddenByPrivacyHotkey = !isHiddenByPrivacyHotkey;
           if (overlay) {
             overlay.updateSettings({
@@ -104,7 +110,8 @@ export default defineContentScript({
             });
           }
         }
-      });
+      };
+      window.addEventListener('keydown', privacyHotkeyHandler);
     }
 
     function startBoardScanner() {
@@ -113,14 +120,16 @@ export default defineContentScript({
         attachToBoard(initialBoard);
       }
 
-      setInterval(() => {
+      boardScanInterval = setInterval(() => {
+        if (disposed) return;
         const board = BoardParser.findBoardElement();
         if (board && board !== currentBoard) {
           attachToBoard(board);
         }
       }, 1000);
 
-      const bodyObserver = new MutationObserver(() => {
+      bodyObserver = new MutationObserver(() => {
+        if (disposed) return;
         const board = BoardParser.findBoardElement();
         if (board && board !== currentBoard) {
           attachToBoard(board);
@@ -130,8 +139,11 @@ export default defineContentScript({
     }
 
     function attachToBoard(board: HTMLElement) {
+      if (disposed) return;
       currentBoard = board;
+      lastPositionKey = '';
 
+      highlightController?.destroy();
       if (overlay) {
         overlay.destroy();
       }
@@ -154,6 +166,7 @@ export default defineContentScript({
       handleBoardChange();
 
       boardObserver = new MutationObserver((mutations) => {
+        if (disposed) return;
         // Guard against feedback loops caused by our own overlay DOM nodes
         const isSelfMutation = mutations.every((m) => {
           const target = m.target as HTMLElement;
@@ -243,6 +256,37 @@ export default defineContentScript({
       }
     }
 
+    function cleanup() {
+      if (disposed) return;
+      disposed = true;
+
+      if (boardScanInterval) clearInterval(boardScanInterval);
+      if (settingsDebounceTimer) clearTimeout(settingsDebounceTimer);
+      if (pendingScanRaf !== null) cancelAnimationFrame(pendingScanRaf);
+      boardObserver?.disconnect();
+      bodyObserver?.disconnect();
+      unsubscribeFromSettings?.();
+      if (privacyHotkeyHandler) {
+        window.removeEventListener('keydown', privacyHotkeyHandler);
+      }
+      highlightController?.destroy();
+      overlay?.destroy();
+      engineClient?.destroy();
+
+      boardScanInterval = null;
+      settingsDebounceTimer = null;
+      pendingScanRaf = null;
+      boardObserver = null;
+      bodyObserver = null;
+      unsubscribeFromSettings = null;
+      privacyHotkeyHandler = null;
+      highlightController = null;
+      overlay = null;
+      engineClient = null;
+      currentBoard = null;
+    }
+
+    window.addEventListener('beforeunload', cleanup, { once: true });
     init();
   },
 });

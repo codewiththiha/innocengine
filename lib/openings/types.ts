@@ -109,7 +109,7 @@ export interface OpeningConfig {
   includeMeme?: boolean;
   includeWeird?: boolean;
   maxRisk?: number;
-  strictLine?: boolean;
+  adaptiveSelection?: boolean;
   safety?: OpeningSafetyConfig;
   enginePolicy?: Record<string, OpeningEnginePolicy>;
 }

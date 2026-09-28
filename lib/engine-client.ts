@@ -16,6 +16,25 @@ export class EngineClient {
   private onEvalCallbacks: Set<EvalCallback> = new Set();
   private onStatusCallbacks: Set<StatusCallback> = new Set();
   private isListening: boolean = false;
+  private readonly messageListener = (message: any) => {
+    if (message.target !== 'content') return;
+
+    if (message.type === 'EVAL_UPDATE' && message.evaluation) {
+      const evalData: EngineEvaluation = message.evaluation;
+
+      // Reject stale evaluation generations or position mismatches
+      const matchesGeneration = evalData.analysisId >= this.activeAnalysisId;
+      const matchesPosition =
+        evalData.positionKey === this.activePositionKey ||
+        getPositionKey(evalData.fen) === this.activePositionKey;
+
+      if (matchesGeneration && matchesPosition) {
+        this.onEvalCallbacks.forEach((cb) => cb(evalData));
+      }
+    } else if (message.type === 'ENGINE_STATUS') {
+      this.onStatusCallbacks.forEach((cb) => cb(message.status, message.message));
+    }
+  };
 
   constructor() {
     this.setupMessageListener();
@@ -24,26 +43,7 @@ export class EngineClient {
   private setupMessageListener() {
     if (this.isListening) return;
     this.isListening = true;
-
-    chrome.runtime.onMessage.addListener((message: any) => {
-      if (message.target === 'content') {
-        if (message.type === 'EVAL_UPDATE' && message.evaluation) {
-          const evalData: EngineEvaluation = message.evaluation;
-
-          // Reject stale evaluation generations or position mismatches
-          const matchesGeneration = evalData.analysisId >= this.activeAnalysisId;
-          const matchesPosition =
-            evalData.positionKey === this.activePositionKey ||
-            getPositionKey(evalData.fen) === this.activePositionKey;
-
-          if (matchesGeneration && matchesPosition) {
-            this.onEvalCallbacks.forEach((cb) => cb(evalData));
-          }
-        } else if (message.type === 'ENGINE_STATUS') {
-          this.onStatusCallbacks.forEach((cb) => cb(message.status, message.message));
-        }
-      }
-    });
+    chrome.runtime.onMessage.addListener(this.messageListener);
   }
 
   public analyze(fen: string, settings: EngineSettings): number {
@@ -86,6 +86,16 @@ export class EngineClient {
     } catch (err) {
       console.warn('[EngineClient] Error dispatching stop message:', err);
     }
+  }
+
+  public destroy() {
+    this.stop();
+    if (this.isListening) {
+      chrome.runtime.onMessage.removeListener(this.messageListener);
+      this.isListening = false;
+    }
+    this.onEvalCallbacks.clear();
+    this.onStatusCallbacks.clear();
   }
 
   public getActiveAnalysisId(): number {

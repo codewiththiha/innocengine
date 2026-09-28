@@ -4,6 +4,7 @@ import { validateBookMoveCached } from './opening-safety';
 import { OPENING_CATALOG } from './openings/catalog';
 import { OpeningIndex } from './openings/index';
 import { resolveSafeOpeningEntry } from './openings/resolver';
+import { AdaptiveOpeningSelector } from './openings/adaptive-selector';
 
 export const globalOpeningIndex = new OpeningIndex(OPENING_CATALOG);
 
@@ -27,6 +28,7 @@ export class HighlightController {
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
   private renderCallback: HighlightRenderCallback;
   private activePositionKey: string = '';
+  private readonly openingSelector = new AdaptiveOpeningSelector();
 
   private readonly STABILITY_WINDOW_MS = 180;
 
@@ -288,7 +290,7 @@ export class HighlightController {
       this.settings,
       engineCandidates,
       this.currentBoardState.playerColor,
-      { allowEngineDisagreement }
+      { allowEngineDisagreement, selector: this.openingSelector }
     );
 
     if (resolved) {
@@ -306,7 +308,11 @@ export class HighlightController {
       };
     }
 
-    // 2. Legacy fallback to OpeningBook.lookupMove with tactical safety validation
+    // Exact catalog matching is the default adaptive behavior. Keep the legacy
+    // system repertoire only for users who explicitly turn adaptive matching off.
+    if (openingSettings.adaptiveSelection !== false) return null;
+
+    // Legacy fallback to OpeningBook.lookupMove with tactical safety validation.
     const bookEntry = OpeningBook.lookupMove(
       this.currentBoardState.positionKey,
       openingSettings.repertoireId,
@@ -495,6 +501,16 @@ export class HighlightController {
       clearTimeout(this.stabilityTimer);
       this.stabilityTimer = null;
     }
+  }
+
+  public destroy() {
+    this.clearPendingTimer();
+    this.currentBoardState = null;
+    this.latestEngineSnapshot = null;
+    this.committedCandidates = [];
+    this.pendingCandidates = [];
+    this.pendingCandidateKey = '';
+    this.pendingDepth = 0;
   }
 
   public clear() {

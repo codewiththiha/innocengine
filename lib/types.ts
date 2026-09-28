@@ -1,4 +1,6 @@
-import type { OpeningCategory } from './openings/types';
+import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
+
+export type { OpeningConfig, OpeningMode } from './openings/types';
 
 export const APP_NAME = 'Chess Engine AI Overlay';
 export const APP_VERSION = '1.1.0';
@@ -40,40 +42,6 @@ export interface CustomEngineMeta {
   isBuiltIn?: boolean;
 }
 
-export type OpeningMode = 'off' | 'hint' | 'coexist' | 'parallel' | 'prefer' | 'book-only' | 'adaptive';
-
-export interface OpeningConfig {
-  enabled: boolean;
-  repertoireId: string;
-  whiteRepertoireId?: string;
-  blackRepertoireId?: string;
-  selectedOpeningIds?: string[];
-  mode: OpeningMode;
-  maxPlies: number;
-  reserveSlot?: boolean;
-  categories?: OpeningCategory[];
-  searchQuery?: string;
-  includeMeme?: boolean;
-  includeWeird?: boolean;
-  maxRisk?: number;
-  strictLine?: boolean;
-  safety?: {
-    maxLossCp?: number;
-    forbidQueenHang?: boolean;
-    minEngineDepth?: number;
-    maxEngineDisagreementCp?: number;
-    allowRiskyOpenings?: boolean;
-    allowMemeOpenings?: boolean;
-  };
-  enginePolicy?: Record<string, {
-    mode?: OpeningMode;
-    maxLossCp?: number;
-    minEngineDepth?: number;
-    allowOffBook?: boolean;
-    allowRisky?: boolean;
-    allowMeme?: boolean;
-  }>;
-}
 
 export interface EngineSettings {
   depth: number;
@@ -98,7 +66,7 @@ export interface EngineSettings {
   controlledColor: 'auto' | 'w' | 'b';
   activeEngineId: string;
   captureResistantOverlay: boolean;
-  opening: OpeningConfig;
+  opening: OpeningSettingsConfig;
   customOptions: Record<string, string | number | boolean>;
 }
 

@@ -5,7 +5,7 @@ import type {
 import type { EngineCandidate, EngineSettings } from '../types';
 import { validateBookMoveCached } from '../opening-safety';
 import type { OpeningIndex } from './index';
-import { globalOpeningSession } from './session';
+import type { AdaptiveOpeningSelector } from './adaptive-selector';
 
 export interface ResolvedBookEntry extends BookPositionEntry {
   validationLoss: number;
@@ -51,11 +51,11 @@ export function selectedOpeningMatches(
   }
 
   // Side-specific repertoire binding:
-  if (playerColor === 'w' && (config as any).whiteRepertoireId && (config as any).whiteRepertoireId !== 'auto') {
-    return entry.openingId === (config as any).whiteRepertoireId;
+  if (playerColor === 'w' && config.whiteRepertoireId && config.whiteRepertoireId !== 'auto') {
+    return entry.openingId === config.whiteRepertoireId;
   }
-  if (playerColor === 'b' && (config as any).blackRepertoireId && (config as any).blackRepertoireId !== 'auto') {
-    return entry.openingId === (config as any).blackRepertoireId;
+  if (playerColor === 'b' && config.blackRepertoireId && config.blackRepertoireId !== 'auto') {
+    return entry.openingId === config.blackRepertoireId;
   }
 
   if (config.repertoireId && config.repertoireId !== 'auto') {
@@ -67,6 +67,7 @@ export function selectedOpeningMatches(
 
 export interface OpeningResolutionOptions {
   allowEngineDisagreement?: boolean;
+  selector?: AdaptiveOpeningSelector;
 }
 
 export function engineAllowsEntry(
@@ -152,33 +153,13 @@ export function resolveSafeOpeningEntry(
     return true;
   });
 
-  if (!entries.length) {
-    if (config.strictLine && globalOpeningSession.isActive()) {
-      globalOpeningSession.reset();
-    }
-    return null;
-  }
+  if (!entries.length) return null;
 
-  // Strict line tracking: if an active opening is tracked and user deviated, only continue if in-line
-  if (config.strictLine && globalOpeningSession.isActive()) {
-    const activeId = globalOpeningSession.getActiveOpeningId();
-    if (activeId) {
-      const activeEntry = entries.find((e) => e.openingId === activeId);
-      if (!activeEntry) {
-        // Position is not part of the active opening line
-        return null;
-      }
-    }
-  }
-
-  const sorted = entries.sort((a, b) => {
-    if (a.priority !== b.priority) {
-      return b.priority - a.priority;
-    }
-    if (a.risk !== b.risk) {
-      return a.risk - b.risk;
-    }
-    return a.ply - b.ply;
+  const sorted = options.selector?.rank(entries, config, effectivePlayerColor) ?? entries.slice().sort((a, b) => {
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    if (a.risk !== b.risk) return a.risk - b.risk;
+    if (a.ply !== b.ply) return a.ply - b.ply;
+    return a.openingId.localeCompare(b.openingId);
   });
 
   for (const entry of sorted) {
@@ -191,6 +172,7 @@ export function resolveSafeOpeningEntry(
       continue;
     }
 
+    options.selector?.remember(entry, config, effectivePlayerColor);
     return {
       ...entry,
       validationLoss: validation.loss,

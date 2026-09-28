@@ -38,7 +38,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
     includeMeme: false,
     includeWeird: false,
     maxRisk: 5,
-    strictLine: true,
+    adaptiveSelection: true,
     safety: {
       maxLossCp: 250,
       forbidQueenHang: true,
@@ -86,7 +86,10 @@ export const DEFAULT_SETTINGS: EngineSettings = {
 };
 
 function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings {
-  const loadedOpening: Partial<EngineSettings['opening']> = loaded.opening ?? {};
+  const loadedOpening = { ...(loaded.opening ?? {}) } as Partial<EngineSettings['opening']> & {
+    strictLine?: boolean;
+  };
+  delete loadedOpening.strictLine;
 
   return {
     ...DEFAULT_SETTINGS,
