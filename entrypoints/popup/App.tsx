@@ -257,7 +257,7 @@ export default function App() {
       (rung) => rung.threads === Math.min(settings.threads, 4) && rung.budgetMs === settings.searchBudgetMs
     );
     if (exact) return exact;
-    let closest = PROCESSING_POWER[0]!;
+    let closest: (typeof PROCESSING_POWER)[number] = PROCESSING_POWER[0]!;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const rung of PROCESSING_POWER) {
       const distance = Math.abs(rung.budgetMs - settings.searchBudgetMs) + Math.abs(rung.threads - settings.threads) * 120;
@@ -278,7 +278,7 @@ export default function App() {
   };
 
   const aggressionProfile = (() => {
-    let closest = AGGRESSION_PRESETS[0]!;
+    let closest: (typeof AGGRESSION_PRESETS)[number] = AGGRESSION_PRESETS[0]!;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const preset of AGGRESSION_PRESETS) {
       const distance = Math.abs(preset.value - settings.aggressiveness);

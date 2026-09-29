@@ -164,7 +164,7 @@ export class OverlayBubble {
       this.callbacks.onToggleAutoMove(next);
     });
 
-    const head = root.querySelector('#chess-ai-bubble-head');
+    const head = root.querySelector<HTMLElement>('#chess-ai-bubble-head');
     head?.addEventListener('pointerdown', (event) => this.startDrag(event));
     root.addEventListener('pointermove', (event) => this.moveDrag(event));
     root.addEventListener('pointerup', (event) => this.endDrag(event));
@@ -181,7 +181,7 @@ export class OverlayBubble {
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
     };
-    const head = this.root.querySelector('#chess-ai-bubble-head');
+    const head = this.root.querySelector<HTMLElement>('#chess-ai-bubble-head');
     if (head) head.style.cursor = 'grabbing';
     event.preventDefault();
     event.stopPropagation();
@@ -203,7 +203,7 @@ export class OverlayBubble {
   private endDrag(event: PointerEvent): void {
     if (!this.drag || event.pointerId !== this.drag.pointerId) return;
     this.drag = null;
-    const head = this.root?.querySelector('#chess-ai-bubble-head');
+    const head = this.root?.querySelector<HTMLElement>('#chess-ai-bubble-head');
     if (head) head.style.cursor = 'grab';
     if (this.settings.x !== null && this.settings.y !== null) {
       this.callbacks.onPositionChanged(this.settings.x, this.settings.y);
@@ -234,7 +234,7 @@ export class OverlayBubble {
     if (this.root) this.root.style.display = settings.visible ? 'block' : 'none';
     if (this.handle) this.handle.style.display = settings.visible ? 'none' : 'block';
     if (this.root) {
-      const autoRow = this.root.querySelector('#chess-ai-bubble-auto-row');
+      const autoRow = this.root.querySelector<HTMLElement>('#chess-ai-bubble-auto-row');
       if (autoRow) autoRow.style.display = settings.showAutoMoveToggle ? 'flex' : 'none';
     }
     if (positionChanged) this.applyPosition();
@@ -251,12 +251,12 @@ export class OverlayBubble {
     const root = this.root;
     root.style.borderColor = content.autoMoveEnabled ? 'rgba(244, 63, 94, 0.45)' : LINE;
 
-    const nameEl = root.querySelector('#chess-ai-bubble-name');
-    const lineEl = root.querySelector('#chess-ai-bubble-line');
-    const engineEl = root.querySelector('#chess-ai-bubble-engine');
-    const evalEl = root.querySelector('#chess-ai-bubble-eval');
-    const autoRow = root.querySelector('#chess-ai-bubble-auto-row');
-    const autoState = root.querySelector('#chess-ai-bubble-auto-state');
+    const nameEl = root.querySelector<HTMLElement>('#chess-ai-bubble-name');
+    const lineEl = root.querySelector<HTMLElement>('#chess-ai-bubble-line');
+    const engineEl = root.querySelector<HTMLElement>('#chess-ai-bubble-engine');
+    const evalEl = root.querySelector<HTMLElement>('#chess-ai-bubble-eval');
+    const autoRow = root.querySelector<HTMLElement>('#chess-ai-bubble-auto-row');
+    const autoState = root.querySelector<HTMLElement>('#chess-ai-bubble-auto-state');
     const autoButton = root.querySelector<HTMLButtonElement>('#chess-ai-bubble-auto');
 
     if (nameEl) {
