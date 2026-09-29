@@ -28,10 +28,65 @@ import {
   UploadCloud,
   Lock,
   Flame,
+  Play,
+  GripHorizontal,
 } from 'lucide-react';
 import './App.css';
 
-type SettingsTab = 'engine' | 'board' | 'analysis' | 'strength' | 'resources' | 'opening' | 'advanced';
+type SettingsTab = 'engine' | 'board' | 'analysis' | 'strength' | 'automove' | 'resources' | 'opening' | 'advanced';
+
+/**
+ * Patricia's aggressiveness scale and the think-time budget that suits it.
+ * Higher aggression makes the engine prefer activity and sacrifices over
+ * material, which only reads as a deliberate style if it also gets the time to
+ * calculate the resulting positions.
+ */
+const AGGRESSION_PRESETS = [
+  {
+    id: 'solid',
+    name: 'Solid',
+    value: 60,
+    budgetMs: 240,
+    description: 'Below the stock eval weights: Patricia trades ambition for accuracy and avoids speculative sacs.',
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    value: 100,
+    budgetMs: 300,
+    description: 'The engine default. Aggression weights are exactly as shipped and the search is throttled for a responsive overlay.',
+  },
+  {
+    id: 'aggressive',
+    name: 'Aggressive',
+    value: 150,
+    budgetMs: 420,
+    description: 'Material takes a back seat to initiative; Patricia looks for the sacrifice line earlier in the iteration.',
+  },
+  {
+    id: 'bullet',
+    name: 'Bullet',
+    value: 220,
+    budgetMs: 260,
+    description: 'Fast-checkmate mode: maximum contempt, deepest sacrifice bonus, shortest think. Meant for blitz and bullet ideas, not careful play.',
+  },
+  {
+    id: 'chaos',
+    name: 'Chaos',
+    value: 300,
+    budgetMs: 500,
+    description: 'Everything the scale can give. The engine will happily be materially down if the attack is real; expect blunders along with the brilliancies.',
+  },
+] as const;
+
+/** Five rungs that move threads and think time together. */
+const PROCESSING_POWER = [
+  { level: 1, threads: 1, budgetMs: 150 },
+  { level: 2, threads: 1, budgetMs: 300 },
+  { level: 3, threads: 2, budgetMs: 500 },
+  { level: 4, threads: 3, budgetMs: 900 },
+  { level: 5, threads: 4, budgetMs: 1500 },
+] as const;
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('engine');
@@ -170,6 +225,14 @@ export default function App() {
     }
   };
 
+  const updateAutoMove = (patch: Partial<EngineSettings['autoMove']>) => {
+    updateSettingsBatch({ autoMove: { ...settings.autoMove, ...patch } });
+  };
+
+  const updateBubble = (patch: Partial<EngineSettings['bubble']>) => {
+    updateSettingsBatch({ bubble: { ...settings.bubble, ...patch } });
+  };
+
   const showSavedNotification = () => {
     setSavedBadge(true);
     setTimeout(() => setSavedBadge(false), 1200);
@@ -186,6 +249,46 @@ export default function App() {
   };
 
   const maxHardwareThreads = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 8;
+  const isPatricia = settings.activeEngineId === 'patricia';
+
+  /** Mirrors settings.threads/searchBudgetMs back onto the five-rung slider. */
+  const processingPower = (() => {
+    const exact = PROCESSING_POWER.find(
+      (rung) => rung.threads === Math.min(settings.threads, 4) && rung.budgetMs === settings.searchBudgetMs
+    );
+    if (exact) return exact;
+    let closest = PROCESSING_POWER[0]!;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const rung of PROCESSING_POWER) {
+      const distance = Math.abs(rung.budgetMs - settings.searchBudgetMs) + Math.abs(rung.threads - settings.threads) * 120;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        closest = rung;
+      }
+    }
+    return closest;
+  })();
+
+  const applyProcessingPower = (level: number) => {
+    const rung = PROCESSING_POWER.find((entry) => entry.level === level) ?? PROCESSING_POWER[0]!;
+    updateSettingsBatch({
+      threads: Math.min(rung.threads, maxHardwareThreads),
+      searchBudgetMs: rung.budgetMs,
+    });
+  };
+
+  const aggressionProfile = (() => {
+    let closest = AGGRESSION_PRESETS[0]!;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const preset of AGGRESSION_PRESETS) {
+      const distance = Math.abs(preset.value - settings.aggressiveness);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        closest = preset;
+      }
+    }
+    return closest;
+  })();
 
   return (
     <div className="popup-container">
@@ -269,6 +372,13 @@ export default function App() {
           onClick={() => setActiveTab('strength')}
         >
           <ShieldAlert size={12} /> Strength
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'automove' ? 'active' : ''}`}
+          onClick={() => setActiveTab('automove')}
+        >
+          <Play size={12} /> Auto
         </button>
         <button
           type="button"
@@ -541,6 +651,50 @@ export default function App() {
               </div>
             );
           })()}
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Think-time budget</span>
+              <span className="setting-value">
+                {settings.searchBudgetMs === 0 ? 'Engine default' : `${settings.searchBudgetMs} ms`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1500"
+              step="20"
+              value={settings.searchBudgetMs}
+              onChange={(e) => updateSetting('searchBudgetMs', parseInt(e.target.value, 10))}
+              className="slider"
+            />
+            <div className="setting-hint">
+              Ceiling on how long the engine may search one position. 0 hands it back its own calibrated budget, which
+              is slower but deeper.
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Highlight settle time</span>
+              <span className="setting-value">
+                {settings.highlightStabilityMs === 0 ? 'Instant' : `${settings.highlightStabilityMs} ms`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="400"
+              step="20"
+              value={settings.highlightStabilityMs}
+              onChange={(e) => updateSetting('highlightStabilityMs', parseInt(e.target.value, 10))}
+              className="slider"
+            />
+            <div className="setting-hint">
+              How long a newly best move must hold before it is drawn. 0 draws every improvement the moment it arrives,
+              which is the fastest the overlay can be; a small value damps flicker between near-equal moves.
+            </div>
+          </div>
 
           <div className="setting-item">
             <div className="setting-label-row">
@@ -875,6 +1029,213 @@ export default function App() {
         </div>
       )}
 
+      {/* Tab: Auto-move */}
+      {activeTab === 'automove' && (
+        <div className="settings-section">
+          <div className="section-title">
+            <Play size={14} /> Auto-Move & Live Bubble
+          </div>
+
+          <div className="automove-warning">
+            <div className="automove-warning-title">Plays real moves on the live board</div>
+            <div className="automove-warning-body">
+              Auto-move plays the highlighted move for you, at a human pace, and stops at the move count you set.
+              Use it only where automated play is allowed: rated games and prize events forbid it, and the extension
+              does nothing to hide that it is playing.
+            </div>
+          </div>
+
+          <label className="toggle-row">
+            <span className="setting-label">Enable auto-move</span>
+            <input
+              type="checkbox"
+              checked={settings.autoMove.enabled}
+              onChange={(e) => updateAutoMove({ enabled: e.target.checked })}
+            />
+          </label>
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Timing mode</span>
+              <span className="setting-value">{settings.autoMove.mode}</span>
+            </div>
+            <div className="mode-row">
+              {([
+                ['instant', 'Instant', 'Play the committed move as soon as the engine has one.'],
+                ['delay', 'Fixed delay', 'Wait the same number of milliseconds before every move.'],
+                ['paced', 'Human-like', 'Think time is modelled from the position: forced moves are instant, busy middlegames and checks take longer.'],
+              ] as const).map(([mode, label, hint]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  title={hint}
+                  className={`preset-chip ${settings.autoMove.mode === mode ? 'active' : ''}`}
+                  onClick={() => updateAutoMove({ mode })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {settings.autoMove.mode === 'delay' && (
+            <div className="setting-item">
+              <div className="setting-label-row">
+                <span className="setting-label">Delay per move</span>
+                <span className="setting-value">{settings.autoMove.delayMs} ms</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="5000"
+                step="50"
+                value={settings.autoMove.delayMs}
+                onChange={(e) => updateAutoMove({ delayMs: parseInt(e.target.value, 10) })}
+                className="slider"
+              />
+            </div>
+          )}
+
+          {settings.autoMove.mode === 'paced' && (
+            <>
+              <div className="setting-item">
+                <div className="setting-label-row">
+                  <span className="setting-label">Minimum think time</span>
+                  <span className="setting-value">{settings.autoMove.minThinkMs} ms</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="6000"
+                  step="50"
+                  value={settings.autoMove.minThinkMs}
+                  onChange={(e) => {
+                    const minThinkMs = parseInt(e.target.value, 10);
+                    updateAutoMove({ minThinkMs, maxThinkMs: Math.max(minThinkMs, settings.autoMove.maxThinkMs) });
+                  }}
+                  className="slider"
+                />
+              </div>
+              <div className="setting-item">
+                <div className="setting-label-row">
+                  <span className="setting-label">Maximum think time</span>
+                  <span className="setting-value">{settings.autoMove.maxThinkMs} ms</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="15000"
+                  step="100"
+                  value={settings.autoMove.maxThinkMs}
+                  onChange={(e) => {
+                    const maxThinkMs = parseInt(e.target.value, 10);
+                    updateAutoMove({ maxThinkMs, minThinkMs: Math.min(maxThinkMs, settings.autoMove.minThinkMs) });
+                  }}
+                  className="slider"
+                />
+              </div>
+              <div className="setting-hint">
+                The value is derived from the position itself, so the same board always gets the same think time and
+                games are repeatable. The remaining clock caps it when the site exposes one.
+              </div>
+            </>
+          )}
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Maximum auto-moves</span>
+              <span className="setting-value">
+                {settings.autoMove.maxMoves === 0 ? 'No limit' : settings.autoMove.maxMoves}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="60"
+              step="1"
+              value={settings.autoMove.maxMoves}
+              onChange={(e) => updateAutoMove({ maxMoves: parseInt(e.target.value, 10) })}
+              className="slider"
+            />
+          </div>
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Play for</span>
+              <span className="setting-value">{settings.autoMove.playFor === 'auto' ? 'Detected side' : settings.autoMove.playFor === 'w' ? 'White' : 'Black'}</span>
+            </div>
+            <div className="mode-row">
+              {([
+                ['auto', 'Detected'],
+                ['w', 'White'],
+                ['b', 'Black'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`preset-chip ${settings.autoMove.playFor === value ? 'active' : ''}`}
+                  onClick={() => updateAutoMove({ playFor: value })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="toggle-row">
+            <span className="setting-label">Pause while the tab is hidden</span>
+            <input
+              type="checkbox"
+              checked={settings.autoMove.pauseWhenHidden}
+              onChange={(e) => updateAutoMove({ pauseWhenHidden: e.target.checked })}
+            />
+          </label>
+
+          <div className="section-title" style={{ marginTop: 16 }}>
+            <GripHorizontal size={14} /> Live Opening Bubble
+          </div>
+
+          <label className="toggle-row">
+            <span className="setting-label">Show the floating bubble</span>
+            <input
+              type="checkbox"
+              checked={settings.bubble.visible}
+              onChange={(e) => updateBubble({ visible: e.target.checked })}
+            />
+          </label>
+
+          <label className="toggle-row">
+            <span className="setting-label">Show the auto-move button in the bubble</span>
+            <input
+              type="checkbox"
+              checked={settings.bubble.showAutoMoveToggle}
+              onChange={(e) => updateBubble({ showAutoMoveToggle: e.target.checked })}
+            />
+          </label>
+
+          <div className="setting-item">
+            <div className="setting-label-row">
+              <span className="setting-label">Bubble position</span>
+              <span className="setting-value">
+                {settings.bubble.x === null ? 'Default corner' : `${Math.round(settings.bubble.x)}, ${Math.round(settings.bubble.y ?? 0)}`}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="action-button secondary-btn"
+              onClick={() => updateBubble({ x: null, y: null })}
+            >
+              Reset to corner
+            </button>
+          </div>
+
+          <div className="setting-hint">
+            Drag the bubble by its title bar to move it; drag it anywhere and it stays there for this board size. The
+            label follows the game move by move and names the catalogue line the position belongs to.
+          </div>
+        </div>
+      )}
+
       {/* Tab: Resources */}
       {activeTab === 'resources' && (
         <div className="settings-section">
@@ -929,21 +1290,94 @@ export default function App() {
             </div>
           )}
 
-          {activeCaps.hasThreads && (
+          {isPatricia ? (
             <div className="setting-item">
               <div className="setting-label-row">
-                <span className="setting-label">Search Threads</span>
-                <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
+                <span className="setting-label">Processing Power</span>
+                <span className="setting-value">
+                  {processingPower.level} · {processingPower.threads}t · {processingPower.budgetMs}ms
+                </span>
               </div>
               <input
                 type="range"
                 min="1"
-                max={maxHardwareThreads}
+                max="5"
                 step="1"
-                value={settings.threads}
-                onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
+                value={processingPower.level}
+                onChange={(e) => applyProcessingPower(parseInt(e.target.value, 10))}
                 className="slider"
               />
+              <div className="setting-hint">
+                {settings.preferThreadedEngine
+                  ? 'Threads and think-time budget scale together. The pthread build needs SharedArrayBuffer; without it Patricia stays on one thread.'
+                  : 'Single-threaded build selected: only the think-time budget scales. Enable parallel threads to use every core.'}
+              </div>
+            </div>
+          ) : (
+            activeCaps.hasThreads && (
+              <div className="setting-item">
+                <div className="setting-label-row">
+                  <span className="setting-label">Search Threads</span>
+                  <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max={maxHardwareThreads}
+                  step="1"
+                  value={settings.threads}
+                  onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
+                  className="slider"
+                />
+              </div>
+            )
+          )}
+
+          {isPatricia && (
+            <label className="toggle-row">
+              <span className="setting-label">Parallel threads (pthread build)</span>
+              <input
+                type="checkbox"
+                checked={settings.preferThreadedEngine}
+                onChange={(e) => updateSetting('preferThreadedEngine', e.target.checked)}
+              />
+            </label>
+          )}
+
+          {isPatricia && activeCaps.hasAggressiveness && (
+            <div className="setting-item">
+              <div className="setting-label-row">
+                <span className="setting-label">Aggressiveness</span>
+                <span className="setting-value">
+                  {settings.aggressiveness}% · {aggressionProfile.name}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="25"
+                max="300"
+                step="5"
+                value={settings.aggressiveness}
+                onChange={(e) => updateSetting('aggressiveness', parseInt(e.target.value, 10))}
+                className="slider"
+              />
+              <div className="aggression-presets">
+                {AGGRESSION_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={`preset-chip ${settings.aggressiveness === preset.value ? 'active' : ''}`}
+                    onClick={() => updateSettingsBatch({
+                      aggressiveness: preset.value,
+                      searchBudgetMs: preset.budgetMs,
+                    })}
+                    title={preset.description}
+                  >
+                    <Flame size={10} /> {preset.name}
+                  </button>
+                ))}
+              </div>
+              <div className="setting-hint">{aggressionProfile.description}</div>
             </div>
           )}
 

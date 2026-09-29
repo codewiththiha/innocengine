@@ -964,3 +964,67 @@ select:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --- Processing power, aggression presets and auto-move controls --- */
+
+.setting-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+.mode-row,
+.aggression-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.preset-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.preset-chip.active {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent-strong);
+}
+
+.automove-warning {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--line-strong);
+}
+
+.automove-warning-title {
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.automove-warning-body {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}

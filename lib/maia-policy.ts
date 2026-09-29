@@ -1,4 +1,5 @@
 import { Chess } from 'chess.js';
+import type { AutoMoveSettings } from './types';
 
 export interface HumanPolicyCandidate {
   uci: string;
@@ -420,4 +421,140 @@ export function predictRanked(
   }
 
   return out;
+}
+
+/**
+ * Deterministic think-time model for the auto-move feature.
+ *
+ * Timings are derived by hashing the position, never sampled at play time, so
+ * the same position always yields the same think time and two runs of the same
+ * game look identical. The shape of the distribution is what makes it read as
+ * human: forced moves go instantly, busy middlegames take longer than sparse
+ * endgames, checks and big positions take longer still, and a small share of
+ * positions get a deliberate long think.
+ */
+export interface ThinkTimePlan {
+  /** How long this position is meant to take, in milliseconds. */
+  thinkMs: number;
+  /** Wall-clock timestamp (ms) after which the move may be played. */
+  readyAt: number;
+  /** Why the number came out as it did, for the settings UI and tests. */
+  reason: 'instant' | 'forced' | 'clock' | 'modelled' | 'fixed';
+}
+
+const MAX_THINK_CEILING_MS = 300_000;
+/** Never spend more than this share of the remaining clock on one move. */
+const CLOCK_SHARE = 0.04;
+
+function mix32(input: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index++) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function clampMs(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Models one position. `clockMs` is this side's remaining clock when the UI
+ * exposes it; when it is unknown the model simply does not apply the guard.
+ */
+export function humanThinkTimeMs(
+  fen: string,
+  settings: AutoMoveSettings,
+  positionKey: string,
+  clockMs: number | null = null
+): ThinkTimePlan {
+  const min = clampMs(settings.minThinkMs, 0, MAX_THINK_CEILING_MS);
+  const max = Math.max(min, clampMs(settings.maxThinkMs, 0, MAX_THINK_CEILING_MS));
+
+  if (settings.mode === 'instant') return { thinkMs: 0, readyAt: 0, reason: 'instant' };
+  if (settings.mode === 'delay') {
+    const fixed = clampMs(settings.delayMs, 0, MAX_THINK_CEILING_MS);
+    return { thinkMs: fixed, readyAt: 0, reason: 'fixed' };
+  }
+
+  const seed = mix32(`${fen}|${positionKey}`);
+  const quick = (seed & 0xff) / 255;
+  const deep = ((seed >>> 8) & 0xff) / 255;
+
+  let busy = 0.4;
+  let forced = false;
+  try {
+    const chess = new Chess(fen);
+    const pieces = (fen.split(' ')[0] ?? '').replace(/[^a-zA-Z]/g, '').length;
+    const replies = chess.moves().length;
+    forced = replies <= 1;
+    // 32 pieces is a full board; the model treats anything under 12 as an
+    // endgame where there is much less to calculate.
+    busy = 0.35 + 0.5 * Math.min(1, Math.max(0, (pieces - 12) / 20));
+    if (chess.inCheck()) busy += 0.15;
+    if (replies > 34) busy += 0.08;
+  } catch {
+    // An unparseable FEN falls back to the neutral busy-ness above.
+  }
+
+  const modelled = busy * 0.75 + ((quick + deep) / 2) * 0.25;
+  let thinkMs = min + (max - min) * modelled;
+  if (forced) thinkMs = 0;
+  else if (deep > 0.93) thinkMs = max;
+  else if (quick < 0.18) thinkMs = min + (max - min) * 0.1;
+
+  let reason: ThinkTimePlan['reason'] = forced ? 'forced' : 'modelled';
+  if (clockMs !== null && clockMs > 0) {
+    const budget = Math.max(60, clockMs * CLOCK_SHARE);
+    if (thinkMs > budget) {
+      thinkMs = budget;
+      reason = 'clock';
+    }
+  }
+
+  return { thinkMs: Math.round(thinkMs), readyAt: 0, reason };
+}
+
+/**
+ * Caches the plan for the position currently on the board. `content.ts` clears
+ * it whenever the board changes, so each move gets exactly one plan.
+ */
+export class HumanMovePlanner {
+  private positionKey = '';
+  private plan: ThinkTimePlan | null = null;
+
+  public planFor(
+    positionKey: string,
+    fen: string,
+    settings: AutoMoveSettings,
+    now: number,
+    clockMs: number | null = null
+  ): ThinkTimePlan {
+    if (!this.plan || this.positionKey !== positionKey) {
+      const thought = humanThinkTimeMs(fen, settings, positionKey, clockMs);
+      this.plan = { ...thought, readyAt: now + thought.thinkMs };
+      this.positionKey = positionKey;
+    }
+    return this.plan;
+  }
+
+  public get lastReason(): ThinkTimePlan['reason'] | null {
+    return this.plan?.reason ?? null;
+  }
+
+  public get thinkMs(): number {
+    return this.plan?.thinkMs ?? 0;
+  }
+
+  /** Timestamp the current plan may be played from; 0 when there is no plan. */
+  public get readyAtMs(): number {
+    return this.plan?.readyAt ?? 0;
+  }
+
+  public clear(): void {
+    this.plan = null;
+    this.positionKey = '';
+  }
 }

@@ -231,6 +231,7 @@ export type ExtensionMessage =
   | { target: 'content'; type: 'EVAL_UPDATE'; evaluation: EngineEvaluation; senderTabId?: number }
   | { target: 'content'; type: 'ENGINE_STATUS'; status: 'loading' | 'ready' | 'analyzing' | 'error'; message?: string; senderTabId?: number }
   | { target: 'content'; type: 'TELEMETRY_UPDATE'; telemetry: EngineTelemetry }
+  | { target: 'content'; type: 'ENGINE_INFO'; capabilities: EngineCapabilities; senderTabId?: number }
   | { target: 'content'; type: 'SETTINGS_CHANGED'; settings: EngineSettings }
   | { target: 'popup'; type: 'ENGINE_CAPABILITIES'; capabilities: EngineCapabilities }
   | { target: 'popup'; type: 'INSTALLED_ENGINES'; engines: CustomEngineMeta[] }

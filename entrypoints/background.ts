@@ -97,6 +97,12 @@ export default defineBackground(() => {
         if (message.type === 'EVAL_UPDATE' && message.evaluation) {
           latestEvaluation = message.evaluation;
         }
+        if (message.type === 'ENGINE_INFO' && message.capabilities) {
+          latestCapabilities = message.capabilities;
+        }
+        if (message.type === 'TELEMETRY_UPDATE' && message.telemetry) {
+          latestTelemetry = message.telemetry;
+        }
 
         const targetTabId = message.senderTabId || activeChessTabId;
         if (targetTabId) {

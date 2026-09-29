@@ -170,6 +170,7 @@ export class UnifiedEngineHost implements RunnerHost {
 
   public onCapabilities(capabilities: EngineCapabilities): void {
     this.send({ target: 'popup', type: 'ENGINE_CAPABILITIES', capabilities });
+    this.send({ target: 'content', type: 'ENGINE_INFO', capabilities });
   }
 
   public onTelemetry(telemetry: EngineTelemetry): void {

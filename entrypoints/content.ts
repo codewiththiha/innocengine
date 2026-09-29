@@ -3,8 +3,21 @@ import { GameStateAdapter } from '../lib/game-state-adapter';
 import { SvgOverlay } from '../lib/svg-overlay';
 import { EngineClient } from '../lib/engine-client';
 import { HighlightController } from '../lib/highlight-controller';
-import { getSettings, subscribeToSettings } from '../lib/storage';
-import type { EngineSettings, BoardState } from '../lib/types';
+import { getSettings, saveSettings, subscribeToSettings } from '../lib/storage';
+import { OpeningTracker } from '../lib/openings/tracker';
+import { OPENING_CATALOG } from '../lib/openings/catalog';
+import { OverlayBubble } from '../lib/overlay-bubble';
+import { AutoMoveController } from '../lib/auto-move';
+import { BoardInput } from '../lib/board-input';
+import type { AutoMoveStatus } from '../lib/auto-move';
+import type { OpeningProgress } from '../lib/openings/tracker';
+import type {
+  EngineSettings,
+  BoardState,
+  EngineCapabilities,
+  EngineEvaluation,
+  EngineTelemetry,
+} from '../lib/types';
 
 export default defineContentScript({
   matches: ['*://*.chess.com/*'],
@@ -25,6 +38,21 @@ export default defineContentScript({
     let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
     let disposed = false;
+    let bubble: OverlayBubble | null = null;
+    let autoMove: AutoMoveController | null = null;
+    let lastAutoMoveStatus: AutoMoveStatus | null = null;
+    let lastBoardState: BoardState | null = null;
+    let engineMessageHandler: ((message: unknown) => void) | null = null;
+    let lastEvaluation: EngineEvaluation | null = null;
+    let capabilities: EngineCapabilities | null = null;
+    let telemetry: EngineTelemetry | null = null;
+    let engineLabel = 'Engine';
+    let bubbleSignature = '';
+    let cachedTrackFen = '';
+    let cachedTrack: OpeningProgress | null = null;
+
+    // Built once per page: the tracker indexes ~150 lines and never changes.
+    const openingTracker = new OpeningTracker(OPENING_CATALOG);
 
     async function init() {
       const settings = await getSettings();
@@ -33,6 +61,9 @@ export default defineContentScript({
       engineClient = new EngineClient();
 
       engineClient.onEvaluation((evaluation) => {
+        lastEvaluation = evaluation;
+        refreshBubble();
+
         if (!overlay || !highlightController) return;
 
         // Throttled high-frequency updates for evaluation score and HUD
@@ -41,6 +72,21 @@ export default defineContentScript({
         // Low-frequency stabilized candidate commit for chessboard highlights
         highlightController.handleEvaluation(evaluation);
       });
+
+      engineMessageHandler = (message: unknown) => {
+        const payload = message as { target?: string; type?: string; capabilities?: EngineCapabilities; telemetry?: EngineTelemetry };
+        if (payload.target !== 'content') return;
+        if (payload.type === 'ENGINE_INFO' && payload.capabilities) {
+          capabilities = payload.capabilities;
+          engineLabel = payload.capabilities.name || currentSettings.activeEngineId;
+          refreshBubble();
+        }
+        if (payload.type === 'TELEMETRY_UPDATE' && payload.telemetry) {
+          telemetry = payload.telemetry;
+          refreshBubble();
+        }
+      };
+      chrome.runtime.onMessage.addListener(engineMessageHandler);
 
       unsubscribeFromSettings = subscribeToSettings((newSettings) => {
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
@@ -72,6 +118,18 @@ export default defineContentScript({
         if (highlightController) {
           highlightController.updateSettings(newSettings);
         }
+        if (bubble) {
+          bubble.updateSettings(newSettings.bubble);
+        }
+        if (autoMove) {
+          autoMove.updateSettings(newSettings.autoMove);
+        }
+        if (engineChanged) {
+          capabilities = null;
+          telemetry = null;
+          engineLabel = newSettings.activeEngineId;
+        }
+        refreshBubble();
 
         if (currentBoard && (multiPvChanged || depthChanged || engineChanged || eloChanged || openingChanged)) {
           if (settingsDebounceTimer) {
@@ -142,6 +200,11 @@ export default defineContentScript({
       if (disposed) return;
       currentBoard = board;
       lastPositionKey = '';
+      lastBoardState = null;
+      lastEvaluation = null;
+      bubbleSignature = '';
+      cachedTrackFen = '';
+      cachedTrack = null;
 
       highlightController?.destroy();
       if (overlay) {
@@ -149,9 +212,40 @@ export default defineContentScript({
       }
       overlay = new SvgOverlay(board, currentSettings);
 
+      bubble?.destroy();
+      bubble = new OverlayBubble(board, currentSettings.bubble, {
+        onToggleAutoMove: (enabled) => {
+          // Persisting is the popup's job; here the bubble just asks for the
+          // same change the popup would make, through storage.
+          void setAutoMoveEnabled(enabled);
+        },
+        onToggleVisible: (visible) => {
+          void updateBubbleSettings({ visible });
+        },
+        onPositionChanged: (x, y) => {
+          void updateBubbleSettings({ x, y });
+        },
+      });
+
+      autoMove?.destroy();
+      autoMove = new AutoMoveController(currentSettings.autoMove, {
+        playMove: (candidate, state) =>
+          BoardInput.play(board, { from: candidate.from, to: candidate.to, promotion: candidate.promotion }, state.isFlipped),
+        onStatus: (status) => {
+          lastAutoMoveStatus = status;
+          if (status.halted && status.enabled) {
+            console.warn('[AutoMove] stopped:', status.halted);
+          }
+          refreshBubble();
+        },
+      });
+
       highlightController = new HighlightController(currentSettings, (snapshot) => {
         if (overlay) {
           overlay.renderCandidates(snapshot.candidates);
+        }
+        if (autoMove && lastBoardState) {
+          autoMove.onCandidates(lastBoardState, snapshot.candidates, Date.now());
         }
       });
 
@@ -224,6 +318,88 @@ export default defineContentScript({
       });
     }
 
+    async function setAutoMoveEnabled(enabled: boolean) {
+      const stored = await getSettings();
+      if (disposed) return;
+      await saveSettings({ autoMove: { ...stored.autoMove, enabled } });
+    }
+
+    async function updateBubbleSettings(patch: Partial<EngineSettings['bubble']>) {
+      const stored = await getSettings();
+      if (disposed) return;
+      await saveSettings({ bubble: { ...stored.bubble, ...patch } });
+    }
+
+    /**
+     * Pushes the latest engine view into the bubble. Called on every engine
+     * line, so the catalogue lookup is memoised per FEN and identical content
+     * skips the DOM writes entirely.
+     */
+    function refreshBubble() {
+      if (!bubble) return;
+      const state = lastBoardState;
+      if (state?.fen && state.fen !== cachedTrackFen) {
+        cachedTrackFen = state.fen;
+        cachedTrack = openingTracker.track(state.fen);
+      }
+      const progress = state?.fen ? cachedTrack : null;
+      const status = lastAutoMoveStatus;
+      const evaluation = lastEvaluation;
+
+      let evalText = '-';
+      if (evaluation?.scoreMate != null) {
+        const mate = evaluation.whiteScoreMate ?? evaluation.scoreMate;
+        evalText = `${mate > 0 ? '+' : '-'}M${Math.abs(mate)}`;
+      } else {
+        const cp = evaluation?.whiteScoreCp ?? evaluation?.scoreCp ?? null;
+        evalText = cp === null ? '-' : `${cp >= 0 ? '+' : ''}${(cp / 100).toFixed(2)}`;
+      }
+
+      const signature = [
+        progress?.openingId ?? '',
+        progress?.reachedPlies ?? -1,
+        progress?.candidateLines ?? -1,
+        engineLabel,
+        evaluation?.depth ?? -1,
+        evalText,
+        evaluation?.timeMs ?? -1,
+        capabilities?.hasThreads ? 1 : 0,
+        telemetry?.threads ?? currentSettings.threads,
+        telemetry?.hashMb ?? currentSettings.hashMb,
+        status?.enabled ?? currentSettings.autoMove.enabled,
+        status?.mode ?? currentSettings.autoMove.mode,
+        status?.playedMoves ?? 0,
+        status?.maxMoves ?? currentSettings.autoMove.maxMoves,
+        status?.halted ?? '',
+        state?.isGameActive === false ? 0 : 1,
+      ].join('|');
+      if (signature === bubbleSignature) return;
+      bubbleSignature = signature;
+
+      bubble.render({
+        gameActive: state?.isGameActive !== false,
+        openingName: progress?.name ?? null,
+        eco: progress?.eco,
+        reachedPlies: progress?.reachedPlies ?? 0,
+        linePlies: progress?.linePlies ?? 0,
+        nextSan: progress?.nextSan ?? null,
+        candidateLines: progress?.candidateLines ?? 0,
+        offBook: progress?.offBook ?? false,
+        engineLabel,
+        depth: evaluation?.depth ?? 0,
+        evalText,
+        responseMs: evaluation?.timeMs ?? 0,
+        threaded: capabilities?.hasThreads === true,
+        threads: telemetry?.threads ?? currentSettings.threads,
+        hashMb: telemetry?.hashMb ?? currentSettings.hashMb,
+        autoMoveEnabled: status?.enabled ?? currentSettings.autoMove.enabled,
+        autoMoveMode: status?.mode ?? currentSettings.autoMove.mode,
+        autoMovesPlayed: status?.playedMoves ?? 0,
+        autoMoveHalted: status?.halted ?? null,
+        autoMoveLimit: status?.maxMoves ?? currentSettings.autoMove.maxMoves,
+      });
+    }
+
     function handleBoardChange() {
       if (!currentBoard || !overlay || !engineClient || !highlightController) return;
 
@@ -242,9 +418,12 @@ export default defineContentScript({
       overlay.setPlayerColor(state.playerColor);
       overlay.setGameActive(state.isGameActive ?? true);
 
+      lastBoardState = state;
       highlightController.setBoardState(state);
+      autoMove?.onPosition(state, Date.now());
 
       if (!state.isGameActive) {
+        refreshBubble();
         return;
       }
 
@@ -266,10 +445,15 @@ export default defineContentScript({
       boardObserver?.disconnect();
       bodyObserver?.disconnect();
       unsubscribeFromSettings?.();
+      if (engineMessageHandler) {
+        chrome.runtime.onMessage.removeListener(engineMessageHandler);
+      }
       if (privacyHotkeyHandler) {
         window.removeEventListener('keydown', privacyHotkeyHandler);
       }
       highlightController?.destroy();
+      autoMove?.destroy();
+      bubble?.destroy();
       overlay?.destroy();
       engineClient?.destroy();
 
@@ -279,10 +463,17 @@ export default defineContentScript({
       boardObserver = null;
       bodyObserver = null;
       unsubscribeFromSettings = null;
+      engineMessageHandler = null;
       privacyHotkeyHandler = null;
       highlightController = null;
+      autoMove = null;
+      bubble = null;
       overlay = null;
       engineClient = null;
+      lastBoardState = null;
+      lastEvaluation = null;
+      capabilities = null;
+      telemetry = null;
       currentBoard = null;
     }
 
