@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.1 - 2026-09-30
+
+### Fixed
+
+- Hide the opening bubble with the privacy hotkey (Alt+H), which already blanks
+  the highlights, evaluation bar and HUD.
+- Gather the Chrome, Firefox and AMO sources zips next to the XPI before the CI
+  artifact is uploaded: `.output` is a dot-directory and upload-artifact skips
+  hidden files, so the artifact shipped with the XPIs only. Both workflows now
+  verify that every artefact kind exists and is non-empty before publishing.
+
 ## 1.2.0 - 2026-09-30
 
 ### Added
