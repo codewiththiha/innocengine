@@ -1059,7 +1059,14 @@ console.log('\n15. Testing Engine Capability Matrix gating and capsFor fallback.
   const patCaps = capsFor('patricia');
   assert.strictEqual(patCaps.hasDepth, true, 'Patricia supports search depth');
   assert.strictEqual(patCaps.hasHash, true, 'Patricia supports Hash');
-  assert.strictEqual(patCaps.hasThreads, false, 'Patricia runs single-threaded in MV3');
+  // The pthread build ships, so the profile offers Threads; the runner still
+  // falls back to one thread when the host cannot back SharedArrayBuffer.
+  assert.strictEqual(patCaps.hasThreads, true, 'Patricia advertises Threads from the pthread build');
+  assert.strictEqual(
+    capsFor('patricia', { ...patCaps, hasThreads: false }).hasThreads,
+    false,
+    'A live report without Threads removes the control'
+  );
   assert.strictEqual(patCaps.hasPersonality, true, 'Patricia supports playstyle personality');
 
   // Maia-3 & Maia-2 capabilities
