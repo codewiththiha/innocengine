@@ -30,11 +30,48 @@ export class HighlightController {
   private activePositionKey: string = '';
   private readonly openingSelector = new AdaptiveOpeningSelector();
 
-  private readonly STABILITY_WINDOW_MS = 180;
+  /**
+   * Fallback settle window for callers that build settings by hand (tests).
+   * Production always carries `highlightStabilityMs` from DEFAULT_SETTINGS.
+   */
+  private readonly DEFAULT_STABILITY_WINDOW_MS = 180;
 
   constructor(settings: EngineSettings, renderCallback: HighlightRenderCallback) {
     this.settings = settings;
     this.renderCallback = renderCallback;
+  }
+
+  /** A settle window of 0 commits every improvement the moment it arrives. */
+  private get stabilityWindowMs(): number {
+    const configured = this.settings.highlightStabilityMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured)) {
+      return this.DEFAULT_STABILITY_WINDOW_MS;
+    }
+    return Math.max(0, Math.min(2000, configured));
+  }
+
+  /**
+   * Waits out the settle window before showing a move whose identity just
+   * changed. `expectedKey` keeps a late timer from publishing a stale batch.
+   */
+  private scheduleStabilityCommit(expectedKey: string) {
+    const window = this.stabilityWindowMs;
+    if (window <= 0) {
+      this.commitPending(expectedKey);
+      return;
+    }
+    this.stabilityTimer = setTimeout(() => this.commitPending(expectedKey), window);
+  }
+
+  private commitPending(expectedKey: string) {
+    this.stabilityTimer = null;
+    if (this.pendingCandidateKey !== expectedKey || this.pendingCandidates.length === 0) return;
+    this.committedCandidates = this.pendingCandidates;
+    this.renderCallback({
+      candidates: this.pendingCandidates,
+      isCommitted: false,
+      depth: this.pendingDepth,
+    });
   }
 
   public updateSettings(settings: EngineSettings) {
@@ -160,22 +197,13 @@ export class HighlightController {
       this.pendingDepth = evaluation.depth;
 
       this.clearPendingTimer();
-      this.stabilityTimer = setTimeout(() => {
-        if (this.pendingCandidateKey === primaryMoveKey && this.pendingCandidates.length > 0) {
-          this.committedCandidates = this.pendingCandidates;
-          this.renderCallback({
-            candidates: this.pendingCandidates,
-            isCommitted: false,
-            depth: this.pendingDepth,
-          });
-        }
-      }, this.STABILITY_WINDOW_MS);
+      this.scheduleStabilityCommit(primaryMoveKey);
     } else {
       // Primary move is stable: keep pending batch updated with incoming multipv lines
       this.pendingCandidates = displayCandidates;
       this.pendingDepth = evaluation.depth;
 
-      const windowElapsed = now - this.candidatePendingSince >= this.STABILITY_WINDOW_MS;
+      const windowElapsed = now - this.candidatePendingSince >= this.stabilityWindowMs;
       const newLinesAvailable = displayCandidates.length > this.committedCandidates.length;
 
       // Commit immediately if stability window elapsed or additional MultiPV lines arrived
