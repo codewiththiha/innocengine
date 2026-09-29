@@ -85,7 +85,7 @@ export class UnifiedEngineHost implements RunnerHost {
       } else if (message.type === 'SETTINGS_UPDATE' && message.settings) {
         void this.applySettings(message.settings);
       } else if (message.type === 'PING') {
-        this.broadcastStatus('ready');
+        this.onStatus('ready');
       }
     });
   }
@@ -138,7 +138,14 @@ export class UnifiedEngineHost implements RunnerHost {
     this.activeRunner?.analyze(request);
   }
 
-  private async applySettings(settings: Partial<EngineRunOptions> & { activeEngineId?: string }): Promise<void> {
+  private async applySettings(
+    settings: Partial<EngineRunOptions> & { activeEngineId?: string; preferThreadedEngine?: boolean }
+  ): Promise<void> {
+    // Settings carry the flag as `preferThreadedEngine`; the run options call
+    // it `preferThreaded`. Accept either so the toggle works on its own.
+    const threadedPreference = settings.preferThreaded ?? settings.preferThreadedEngine;
+    const previousThreaded = this.lastOptions.preferThreaded;
+
     this.lastOptions = {
       ...this.lastOptions,
       depth: settings.depth ?? this.lastOptions.depth,
@@ -147,7 +154,7 @@ export class UnifiedEngineHost implements RunnerHost {
       hashMb: settings.hashMb ?? this.lastOptions.hashMb,
       searchBudgetMs: settings.searchBudgetMs ?? this.lastOptions.searchBudgetMs,
       aggressiveness: settings.aggressiveness ?? this.lastOptions.aggressiveness,
-      preferThreaded: settings.preferThreaded ?? this.lastOptions.preferThreaded,
+      preferThreaded: threadedPreference ?? this.lastOptions.preferThreaded,
       limitStrength: settings.limitStrength ?? this.lastOptions.limitStrength,
       targetElo: settings.targetElo ?? this.lastOptions.targetElo,
       patriciaPersonality: settings.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
@@ -157,6 +164,17 @@ export class UnifiedEngineHost implements RunnerHost {
 
     if (settings.activeEngineId && settings.activeEngineId !== this.currentEngineId) {
       await this.switchEngine(settings.activeEngineId);
+      return;
+    }
+
+    // The build is picked when the worker is created, so changing the choice
+    // only takes effect by rebuilding the runner.
+    if (
+      threadedPreference !== undefined &&
+      threadedPreference !== previousThreaded &&
+      this.currentEngineId === 'patricia'
+    ) {
+      await this.switchEngine(this.currentEngineId);
     }
   }
 

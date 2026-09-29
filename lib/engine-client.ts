@@ -70,7 +70,7 @@ export class EngineClient {
         hashMb: settings.hashMb,
         searchBudgetMs: settings.searchBudgetMs,
         aggressiveness: settings.aggressiveness,
-        preferThreaded: settings.preferThreaded,
+        preferThreaded: settings.preferThreadedEngine,
       });
     } catch (err) {
       console.warn('[EngineClient] Error dispatching analyze message:', err);

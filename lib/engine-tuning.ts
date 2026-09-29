@@ -5,6 +5,8 @@ import type { EngineSettings } from './types';
  * callers from having to fabricate a whole settings object to ask a question.
  */
 export interface PatriciaTuningInput {
+  /** Callers pass a whole settings object; Maia tuning reads the same field. */
+  activeEngineId?: string;
   patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
   patriciaLimitStrength?: boolean;
   patriciaElo?: number;
@@ -14,6 +16,7 @@ export interface PatriciaTuningInput {
 }
 
 export interface MaiaTuningInput {
+  activeEngineId?: string;
   targetElo?: number;
   multiPv?: number;
 }
