@@ -49,7 +49,7 @@ jobs:
           npm run xpi:firefox
 
       # `.output` is a dot-directory and upload-artifact skips hidden files, so
-      # everything is gathered next to the XPI before it is uploaded.
+      # the zips are gathered next to the XPI before it is uploaded.
       - name: Collect release artefacts
         run: npm run artifacts:collect
 

@@ -1,9 +1,10 @@
 // Verifies that every artefact a release is supposed to ship is on disk.
 //
 // `.output` is a dot-directory and upload-artifact skips hidden files by
-// default, which is how a release can end up publishing only the XPIs. Both
-// workflows collect into `releases/` and then run this, so a missing browser
-// target fails the job instead of shipping a partial release.
+// default, so the CI artifact once shipped only the XPIs while the release
+// (whose globber does descend into it) shipped everything. Both workflows now
+// collect into `releases/` first and run this, so the two paths agree and a
+// browser target going missing fails the job instead of shipping quietly.
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
