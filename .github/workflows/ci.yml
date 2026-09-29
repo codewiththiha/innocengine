@@ -36,8 +36,22 @@ jobs:
       - name: Package Extension ZIP
         run: npm run zip
 
+      # The release workflow builds Firefox for the first time, so the same
+      # steps run here: a Gecko break should fail a push, not a tag.
+      - name: Build Firefox Extension (MV2 + MV3)
+        run: |
+          npm run build:firefox
+          npm run build:firefox:mv3
+
+      - name: Package Firefox zip, AMO sources and XPI
+        run: |
+          npm run zip:firefox
+          npm run xpi:firefox
+
       - name: Upload Extension Artifact
         uses: actions/upload-artifact@v4
         with:
           name: innocengine-extension
-          path: .output/*.zip
+          path: |
+            .output/*.zip
+            releases/*.xpi

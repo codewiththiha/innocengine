@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # Tags are the normal path; this exists so a failed release can be retried
+  # without deleting and re-pushing the tag.
+  workflow_dispatch:
 
 permissions:
   contents: write

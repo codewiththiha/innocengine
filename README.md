@@ -29,7 +29,25 @@ Built with modern browser extension tooling: **[WXT](https://wxt.dev/)**, **Reac
      - **Target Square (`to` square)**: Emerald Green highlight indicating the optimal destination square.
    - Clean, unobtrusive visual cue that blends natively with Chess.com's board without distracting arrows.
 
-4. **React Settings Popup & Interactive Playground**:
+4. **Live Opening Bubble (draggable)**:
+   - A small on-board panel names the catalogue line the current position belongs to: opening, ECO,
+     how far into the line the game is, the line's next move, and how many lines pass through the
+     position. It follows **both** players' moves, not just your own turns.
+   - Drag it by the title bar; it is clamped inside the board, keeps its position, and collapses to a
+     handle. Hideable from the bubble itself or from the popup.
+
+5. **Paced Auto-Move**:
+   - Plays the highlighted move on the live board with **instant**, **fixed-delay** or **human-like**
+     timing. The human-like model is deterministic: think time is derived from the position itself, so
+     the same board always takes the same time and a game is repeatable. Forced moves go instantly,
+     checks and crowded middlegames take longer, and a small share of positions get a long think.
+   - Selectable minimum and maximum think time, a maximum auto-move count, side selection, and pause
+     while the tab is hidden. The bubble carries a Play/Stop toggle for it.
+   - If the board does not register a move, auto-move stops and reports it instead of looping. There
+     is no detection evasion of any kind: it performs the same input a person would and nothing to
+     hide it. Use it only where automated play is permitted.
+
+6. **React Settings Popup & Interactive Playground**:
    - Polished glassmorphism dark UI with live depth sliders (8–22 ply), highlight toggles, eval bar switch, and feature controls.
    - Settings are stored in `chrome.storage.local` with real-time reactive sync to all tabs.
    - Includes a standalone **Interactive Test Playground** (`playground.html`) with an interactive board to test engine analysis and square highlighting anywhere without opening Chess.com.
@@ -77,6 +95,24 @@ chess-ai-overlay/
 
 ---
 
+## 📦 Downloads & Releases
+
+Every push to `main` builds and tests both targets in CI — Chrome MV3, Firefox MV2 and MV3, the
+AMO sources archive and the XPI — so a Gecko-only break fails a push instead of a release. Pushing a
+`v*` tag publishes a **GitHub Release** with the same artefacts:
+
+| Artefact | Use |
+| --- | --- |
+| `*.zip` (`chrome`) | Load unpacked, or upload to the Chrome Web Store |
+| `*-firefox.zip` | Upload to addons.mozilla.org |
+| `*-sources.zip` | AMO source archive (required for review) |
+| `releases/*.xpi` | Direct, permanent install in Firefox / Waterfox |
+
+The release workflow also supports `workflow_dispatch`, so a failed release can be retried from the
+Actions tab without deleting and re-pushing the tag.
+
+---
+
 ## 🚀 Quickstart & Commands
 
 ### 1. Install Dependencies
@@ -100,7 +136,7 @@ Compiles TypeScript, processes assets, bundles WebAssembly, and outputs the fina
 ```bash
 npm run zip
 ```
-Creates `.output/chess-ai-overlay-1.1.2-chrome.zip` ready for Chrome Web Store submission or distribution.
+Creates `.output/chess-ai-overlay-1.2.0-chrome.zip` ready for Chrome Web Store submission or distribution.
 
 ### 5. Multi-Browser Support: Mozilla Firefox & Waterfox
 The extension is fully compatible with Mozilla Firefox and Waterfox (both Manifest V2 and Manifest V3):
@@ -132,7 +168,7 @@ npm run zip:all
 ##### Method A: Temporary / Developer Mode (Recommended & Instant)
 1. Open Waterfox or Firefox and navigate to `about:debugging#/runtime/this-firefox`.
 2. Click **Load Temporary Add-on...**.
-3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select `releases/chess-ai-overlay-1.1.2-firefox.xpi`.
+3. Select `manifest.json` inside `.output/firefox-mv2/` (or `.output/firefox-mv3/`), or select `releases/chess-ai-overlay-1.2.0-firefox.xpi`.
 4. Open [Chess.com](https://www.chess.com) and start playing!
 
 ##### Method B: Permanent Installation in Waterfox (Fixing "Cannot modify the needed file")
@@ -143,7 +179,7 @@ To install permanently in Waterfox without signature rejection:
 2. Search for `xpinstall.signatures.required` and toggle it to **`false`**.
 3. Search for `extensions.experiments.enabled` and toggle it to **`true`**.
 4. Open `about:addons`, click the gear icon in the top right, and choose **Install Add-on From File...**.
-5. Select `releases/chess-ai-overlay-1.1.2-firefox.xpi`. It will install permanently without the modal staging error.
+5. Select `releases/chess-ai-overlay-1.2.0-firefox.xpi`. It will install permanently without the modal staging error.
 
 ---
 
@@ -153,6 +189,33 @@ Patricia 5.1 is integrated with full native WebAssembly execution, supporting dy
 - **Human-Like**: Calibrated human blunder and mistake distribution modeled from CCRL and Lichess error rates. Throttles search depth (2–14 ply) and move time to match genuine human tactical vision.
 - **Solid Positional**: Focuses on king safety, central pawn control, and avoids speculative sacrifices.
 - **Full Strength (CCRL 3500+)**: Unrestricted grandmaster computation with maximum tactical depth.
+
+#### Processing power (Resources tab)
+
+A five-rung slider next to the Hash control moves search threads and think time together (1 to 4
+threads, 150 to 1500 ms). Parallelism needs the pthread build, which needs `SharedArrayBuffer`, which
+needs cross-origin isolation — the Chromium manifest declares it, and the **Parallel threads**
+switch lets you opt out. When the host cannot back it, the runner clamps to one thread and says so
+instead of offering a control that does nothing. Patricia's WASM is CPU/SIMD only; there is no GPU
+backend to enable.
+
+#### Aggressiveness
+
+Patricia has a real sacrifice personality in the C++: a phase gate that switches to a dedicated
+network once the best score passes a threshold, a position-style bonus, and draw contempt. This
+release exposes it as `Aggressiveness` (25–300, default 100 = stock behaviour) across three sites in
+`search.h`, with five presets that pair aggression with a suitable think time:
+
+| Preset | Value | Think time | Intent |
+| --- | --- | --- | --- |
+| Solid | 60 | 240 ms | Accurate, avoids speculative sacrifices |
+| Balanced | 100 | 300 ms | The engine default |
+| Aggressive | 150 | 420 ms | Initiative ahead of material |
+| **Bullet** | 220 | 260 ms | Fastest checkmate hunting, shortest think |
+| Chaos | 300 | 500 ms | Everything the scale allows |
+
+The control only appears when the engine's `uci` handshake actually advertises the option, so an
+older engine binary falls back cleanly.
 
 ---
 
