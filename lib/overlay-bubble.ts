@@ -60,6 +60,7 @@ export class OverlayBubble {
   private content: BubbleContent | null = null;
   private drag: { pointerId: number; offsetX: number; offsetY: number } | null = null;
   private visible: boolean;
+  private suppressed = false;
 
   constructor(board: HTMLElement, settings: BubbleSettings, callbacks: BubbleCallbacks) {
     this.board = board;
@@ -91,7 +92,6 @@ export class OverlayBubble {
     root.style.zIndex = Z_INDEX;
     root.style.pointerEvents = 'auto';
     root.style.userSelect = 'none';
-    root.style.display = this.visible ? 'block' : 'none';
     root.style.willChange = 'left, top';
 
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -123,6 +123,7 @@ export class OverlayBubble {
     this.board.appendChild(root);
     this.root = root;
 
+
     const handle = document.createElement('button');
     handle.id = 'chess-ai-bubble-handle';
     handle.type = 'button';
@@ -141,10 +142,12 @@ export class OverlayBubble {
     handle.style.cursor = 'pointer';
     handle.style.zIndex = Z_INDEX;
     handle.style.pointerEvents = 'auto';
-    handle.style.display = this.visible ? 'none' : 'block';
     this.board.appendChild(handle);
     this.handle = handle;
 
+    // One place decides what is on screen, so a rebuild cannot desync the
+    // panel and its handle.
+    this.applyVisibility();
     this.applyPosition();
 
     root.querySelector('#chess-ai-bubble-hide')?.addEventListener('click', (event) => {
@@ -231,8 +234,7 @@ export class OverlayBubble {
       settings.x !== this.settings.x || settings.y !== this.settings.y || settings.visible !== this.settings.visible;
     this.settings = settings;
     this.visible = settings.visible;
-    if (this.root) this.root.style.display = settings.visible ? 'block' : 'none';
-    if (this.handle) this.handle.style.display = settings.visible ? 'none' : 'block';
+    this.applyVisibility();
     if (this.root) {
       const autoRow = this.root.querySelector<HTMLElement>('#chess-ai-bubble-auto-row');
       if (autoRow) autoRow.style.display = settings.showAutoMoveToggle ? 'flex' : 'none';
@@ -242,6 +244,23 @@ export class OverlayBubble {
 
   public setVisible(visible: boolean): void {
     this.updateSettings({ ...this.settings, visible });
+  }
+
+  /**
+   * Hides the bubble and its handle without touching saved settings, so the
+   * privacy hotkey can blank the overlay and the bubble comes back untouched.
+   */
+  public setSuppressed(suppressed: boolean): void {
+    this.suppressed = suppressed;
+    this.applyVisibility();
+  }
+
+  private applyVisibility(): void {
+    const showing = this.visible && !this.suppressed;
+    if (this.root) this.root.style.display = showing ? 'block' : 'none';
+    // The handle is the way back from a hidden bubble, so it only appears when
+    // the user hid it on purpose.
+    if (this.handle) this.handle.style.display = this.suppressed || this.visible ? 'none' : 'block';
   }
 
   public render(content: BubbleContent): void {

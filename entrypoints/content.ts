@@ -167,6 +167,9 @@ export default defineContentScript({
               showHud: !isHiddenByPrivacyHotkey && currentSettings.showHud,
             });
           }
+          // The bubble reports the opening and the engine, so it is part of
+          // what this hotkey is meant to blank.
+          bubble?.setSuppressed(isHiddenByPrivacyHotkey);
         }
       };
       window.addEventListener('keydown', privacyHotkeyHandler);
