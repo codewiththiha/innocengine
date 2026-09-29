@@ -68,6 +68,9 @@ export class EngineClient {
         patriciaElo: settings.patriciaElo,
         threads: settings.threads,
         hashMb: settings.hashMb,
+        searchBudgetMs: settings.searchBudgetMs,
+        aggressiveness: settings.aggressiveness,
+        preferThreaded: settings.preferThreaded,
       });
     } catch (err) {
       console.warn('[EngineClient] Error dispatching analyze message:', err);

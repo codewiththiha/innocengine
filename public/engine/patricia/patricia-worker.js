@@ -1,4 +1,10 @@
-// Patricia's single-threaded WASM adapter with UCI strength and style controls.
+// Patricia's WASM adapter: throttled human play, style control, compute profile.
+//
+// The engine ships two builds. A pthread build is only usable where the host
+// can back SharedArrayBuffer and can interrupt a running search with `stop`;
+// the single-threaded build searches synchronously inside the command call and
+// therefore cannot be interrupted. The host selects one with a `build` query
+// parameter on the worker URL, so this file needs no async probing to decide.
 
 const SKILL_LEVELS = [
   500, 800, 1000, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
@@ -8,6 +14,9 @@ const SKILL_LEVELS = [
 const FULL_STRENGTH_SKILL = 21;
 const MAX_MULTI_PV = 5;
 const MATE_SCORE = 100000;
+const MIN_AGGRESSIVENESS = 25;
+const MAX_AGGRESSIVENESS = 300;
+const MAX_THREADS = 32;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -31,7 +40,7 @@ function eloToSkillLevel(elo) {
   return closestIdx + 1;
 }
 
-function getEloSearchBounds(elo, isFullStrength) {
+function eloToSearchBounds(elo, isFullStrength) {
   if (isFullStrength) return { depth: 16, movetime: 500 };
   if (elo <= 600) return { depth: 2, movetime: 150 };
   if (elo <= 800) return { depth: 3, movetime: 180 };
@@ -60,6 +69,15 @@ function isForcedLoss(candidate) {
   return candidate.scoreMate !== null && candidate.scoreMate < 0;
 }
 
+function readRequestedBuild() {
+  try {
+    const build = new URL(self.location.href).searchParams.get('build');
+    return build === 'threaded' ? 'threaded' : 'single';
+  } catch (_) {
+    return 'single';
+  }
+}
+
 let engineInstance = null;
 let isReady = false;
 const pendingQueue = [];
@@ -70,6 +88,15 @@ let limitStrength = true;
 let currentMultiPv = 1;
 let currentFen = '';
 let currentSearchCandidates = [];
+
+let engineBuild = readRequestedBuild();
+let threadCount = 1;
+let hashMb = 32;
+let aggressiveness = 100;
+// 0 keeps each Elo band's own calibrated time; anything else is an explicit
+// ceiling (or floor) chosen by the operator.
+let searchBudgetMs = 0;
+let profileReported = false;
 
 function postOutput(line) {
   self.postMessage(line);
@@ -85,6 +112,19 @@ function engineMultiPv() {
 
 function syncEngineMultiPv() {
   engineInstance?.postMessage(`setoption name MultiPV value ${engineMultiPv()}`);
+}
+
+function aggressionScale() {
+  return aggressiveness / 100;
+}
+
+function reportProfile() {
+  if (profileReported) return;
+  profileReported = true;
+  postOutput(
+    `info string Patricia build=${engineBuild} threads=${threadCount} ` +
+      `hash=${hashMb} aggressiveness=${aggressiveness} budget=${searchBudgetMs}`
+  );
 }
 
 function extractFen(positionCommand) {
@@ -174,6 +214,11 @@ function chooseCandidate(sourceCandidate, candidates) {
   const bestMoveProbability = clamp(0.12 + ((elo - 500) * 0.86) / 2500, 0.12, 0.98);
   const temperature = Math.max(25, (3100 - elo) / 8);
   const primaryScore = scoreValue(sourceCandidate);
+  // Style only re-weights the handicap model. Strength is bounded by depth, so
+  // a riskier style cannot make the engine objectively stronger, only more
+  // willing to trade material for initiative.
+  const style = aggressionScale();
+  const solidity = Math.max(0.2, 2 - style);
   const alternateWeights = selectable.slice(1).map((candidate) => {
     const rawDifference = Math.max(0, primaryScore - scoreValue(candidate));
     let effectiveDifference = rawDifference;
@@ -182,12 +227,12 @@ function chooseCandidate(sourceCandidate, candidates) {
 
     if (personality === 'aggressive') {
       if (isPawnAdvance(move) || (candidate.scoreMate !== null && candidate.scoreMate > 0) || rawDifference < 60) {
-        effectiveDifference = Math.max(0, rawDifference - 35);
+        effectiveDifference = Math.max(0, rawDifference - 35 * style);
       }
-      if (isCastling && rawDifference > 0) effectiveDifference += 25;
+      if (isCastling && rawDifference > 0) effectiveDifference += 25 * style;
     } else if (personality === 'solid') {
-      if (isCastling) effectiveDifference = Math.max(0, rawDifference - 30);
-      if (rawDifference > 60) effectiveDifference += 35;
+      if (isCastling) effectiveDifference = Math.max(0, rawDifference - 30 * solidity);
+      if (rawDifference > 60) effectiveDifference += 35 * solidity;
     }
 
     if (elo <= 800) effectiveDifference *= 0.25;
@@ -252,46 +297,63 @@ function handleBestMove(rawBestMoveLine) {
   postOutput(`bestmove ${chosenCandidate.bestMove}`);
 }
 
+function handleEngineLine(line) {
+  if (line.startsWith('option name MultiPV ')) {
+    postOutput('option name MultiPV type spin default 1 min 1 max 5');
+    return;
+  }
+
+  if (line === 'uciok') {
+    postOutput('option name UCI_LimitStrength type check default true');
+    postOutput('option name UCI_Elo type spin default 2500 min 500 max 3000');
+    postOutput('option name Personality type combo default Aggressive var Aggressive var Human var Solid var FullStrength');
+    // Threads is left to the engine's own advertisement; this worker only
+    // clamps what it forwards.
+    postOutput(line);
+    return;
+  }
+
+  const isSearchInfo = line.includes(' score ') && line.includes(' pv ');
+  if (isSearchInfo) {
+    collectSearchCandidate(line);
+    if (!isFullStrength()) return;
+  }
+
+  if (line.startsWith('bestmove')) {
+    handleBestMove(line);
+    return;
+  }
+
+  postOutput(line);
+}
+
+// The threaded build is the only one that can honour `stop`, so a failure to
+// load it is the one case where booting a second copy is worth the cost.
+function loadBuild(build) {
+  const script = build === 'threaded' ? 'patricia.js' : 'patricia-single.js';
+  importScripts(script);
+  return Patricia({
+    mainScriptUrlOrBlob: self.location.href,
+    locateFile: (file) => new URL(file, self.location.href).href,
+  });
+}
+
 async function initEngine() {
   try {
-    importScripts('patricia-single.js');
+    try {
+      engineInstance = await loadBuild(engineBuild);
+    } catch (threadedError) {
+      if (engineBuild !== 'threaded') throw threadedError;
+      console.warn('[PatriciaWorker] Threaded build unavailable, using single thread:', threadedError);
+      engineBuild = 'single';
+      threadCount = 1;
+      engineInstance = await loadBuild('single');
+    }
 
-    const scriptUrl = self.location.href;
-    engineInstance = await Patricia({
-      mainScriptUrlOrBlob: scriptUrl,
-      locateFile: (file) => new URL(file, scriptUrl).href,
-    });
-
-    engineInstance.addMessageListener((line) => {
-      if (line.startsWith('option name MultiPV ')) {
-        postOutput('option name MultiPV type spin default 1 min 1 max 5');
-        return;
-      }
-
-      if (line === 'uciok') {
-        postOutput('option name UCI_LimitStrength type check default true');
-        postOutput('option name UCI_Elo type spin default 2500 min 500 max 3000');
-        postOutput('option name Personality type combo default Aggressive var Aggressive var Human var Solid var FullStrength');
-        postOutput(line);
-        return;
-      }
-
-      const isSearchInfo = line.includes(' score ') && line.includes(' pv ');
-      if (isSearchInfo) {
-        collectSearchCandidate(line);
-        if (!isFullStrength()) return;
-      }
-
-      if (line.startsWith('bestmove')) {
-        handleBestMove(line);
-        return;
-      }
-
-      postOutput(line);
-    });
-
+    engineInstance.addMessageListener(handleEngineLine);
     isReady = true;
     applyTuning();
+    reportProfile();
 
     for (const command of pendingQueue.splice(0)) {
       handleCommand(command);
@@ -368,6 +430,42 @@ function handleCommand(rawCommand) {
       return;
     }
 
+    if (command.startsWith('setoption name Aggressiveness value')) {
+      const requested = parseInteger(optionValue(command));
+      if (requested !== null) {
+        aggressiveness = clamp(requested, MIN_AGGRESSIVENESS, MAX_AGGRESSIVENESS);
+        // The engine owns the sacrifice-phase threshold and the draw contempt.
+        engineInstance.postMessage(`setoption name Aggressiveness value ${aggressiveness}`);
+      }
+      return;
+    }
+
+    if (command.startsWith('setoption name Search_Budget value')) {
+      const requested = parseInteger(optionValue(command));
+      if (requested !== null) searchBudgetMs = Math.max(0, requested);
+      return;
+    }
+
+    if (command.startsWith('setoption name Threads value')) {
+      const requested = parseInteger(optionValue(command));
+      // The single-threaded build tears its thread pool down and rebuilds it on
+      // this option; skip the round trip there and report the clamped truth.
+      if (requested !== null && engineBuild === 'threaded') {
+        threadCount = clamp(requested, 1, MAX_THREADS);
+        engineInstance.postMessage(`setoption name Threads value ${threadCount}`);
+      }
+      return;
+    }
+
+    if (command.startsWith('setoption name Hash value')) {
+      const requested = parseInteger(optionValue(command));
+      if (requested !== null) {
+        hashMb = clamp(requested, 1, 131072);
+        engineInstance.postMessage(`setoption name Hash value ${hashMb}`);
+      }
+      return;
+    }
+
     if (command.startsWith('position')) {
       currentFen = extractFen(command);
       currentSearchCandidates = [];
@@ -378,16 +476,20 @@ function handleCommand(rawCommand) {
     if (command.startsWith('go')) {
       currentSearchCandidates = [];
       const fullStrength = isFullStrength();
-      const bounds = getEloSearchBounds(targetElo, fullStrength);
+      const bounds = eloToSearchBounds(targetElo, fullStrength);
       const depthMatch = command.match(/\bdepth\s+(\d+)/);
       const requestedDepth = depthMatch ? Number(depthMatch[1]) : 0;
+      // Depth calibration owns strength; the budget owns latency. In handicapped
+      // play the band's depth always wins, so raising the budget for a snappier
+      // overlay can never inflate the rating it is pretending to be.
       const depth = fullStrength
         ? requestedDepth || bounds.depth
         : Math.min(bounds.depth, requestedDepth || bounds.depth);
+      const movetime = searchBudgetMs > 0 ? searchBudgetMs : bounds.movetime;
 
       // Patricia resets MultiPV during its human search path, so restore it per search.
       syncEngineMultiPv();
-      engineInstance.postMessage(`go depth ${depth} movetime ${bounds.movetime}`);
+      engineInstance.postMessage(`go depth ${depth} movetime ${movetime}`);
       return;
     }
 

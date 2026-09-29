@@ -13,6 +13,7 @@ export const ENGINE_CAPABILITIES: Record<string, EngineCapabilities> = {
     hasDepth: true,
     hasMultiPv: true,
     hasPersonality: false,
+    hasAggressiveness: false,
     eloMin: 800,
     eloMax: 3000,
     eloStep: 25,
@@ -25,11 +26,13 @@ export const ENGINE_CAPABILITIES: Record<string, EngineCapabilities> = {
     hasElo: true,
     hasLimitStrength: true,
     hasSkillLevel: true,
-    hasThreads: false, // Single-threaded WebAssembly in extension
+    // Present in the pthread build; the single-threaded fallback clamps to 1.
+    hasThreads: true,
     hasHash: true,
     hasDepth: true,
     hasMultiPv: true,
     hasPersonality: true,
+    hasAggressiveness: true,
     eloMin: 500,
     eloMax: 3000,
     eloStep: 50,
@@ -89,17 +92,16 @@ export const DEFAULT_CUSTOM_CAPABILITIES: EngineCapabilities = {
   options: {},
 };
 
+/**
+ * Reconciles the static profile with the options the engine actually reported
+ * during its `uci` handshake, so a control is only offered when the loaded
+ * binary can honour it.
+ */
 export function capsFor(id: string, live?: EngineCapabilities | null): EngineCapabilities {
   const base = ENGINE_CAPABILITIES[id] || DEFAULT_CUSTOM_CAPABILITIES;
-  if (!live?.options || Object.keys(live.options).length === 0) {
-    return base;
-  }
-  return {
-    ...base,
-    hasThreads: !!live.options['Threads'],
-    hasHash: !!live.options['Hash'],
-    hasLimitStrength: !!live.options['UCI_LimitStrength'],
-    hasSkillLevel: !!live.options['Skill Level'] || !!live.options['Skill_Level'],
-    options: live.options,
-  };
+  if (!live) return base;
+  // A report from the live runner wins outright. It knows which options it will
+  // actually write, and an option appearing in the handshake does not imply
+  // that: Stockfish's wasm build advertises Threads and stalls if it is set.
+  return live;
 }

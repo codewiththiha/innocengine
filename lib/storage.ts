@@ -7,6 +7,12 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   multiPv: 2,
   threads: 1,
   hashMb: 32,
+  // The overlay is a reading aid, so default to a budget that returns before a
+  // human can notice the wait. 0 would hand the engine its own calibrated time.
+  searchBudgetMs: 240,
+  highlightStabilityMs: 60,
+  aggressiveness: 100,
+  preferThreadedEngine: true,
   limitStrength: false,
   targetElo: 2000,
   patriciaPersonality: 'aggressive',
@@ -25,6 +31,22 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   controlledColor: 'auto',
   activeEngineId: 'stockfish',
   captureResistantOverlay: false,
+  autoMove: {
+    enabled: false,
+    mode: 'paced',
+    delayMs: 700,
+    minThinkMs: 400,
+    maxThinkMs: 2600,
+    maxMoves: 0,
+    playFor: 'auto',
+    pauseWhenHidden: true,
+  },
+  bubble: {
+    visible: true,
+    x: null,
+    y: null,
+    showAutoMoveToggle: true,
+  },
   opening: {
     enabled: false,
     repertoireId: 'auto',
@@ -98,6 +120,14 @@ function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings
     highlightOpponentMoves: loaded.highlightOpponentMoves ?? false,
     highlighterOpacity: loaded.highlighterOpacity ?? DEFAULT_SETTINGS.highlighterOpacity,
     showArrows: loaded.showArrows ?? loaded.showConnectors ?? true,
+    autoMove: {
+      ...DEFAULT_SETTINGS.autoMove,
+      ...(loaded.autoMove ?? {}),
+    },
+    bubble: {
+      ...DEFAULT_SETTINGS.bubble,
+      ...(loaded.bubble ?? {}),
+    },
     opening: {
       ...DEFAULT_SETTINGS.opening,
       ...loadedOpening,

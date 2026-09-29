@@ -1,5 +1,23 @@
 import type { EngineSettings } from './types';
 
+/**
+ * The tuning helpers only read the fields below. Narrowing the inputs keeps
+ * callers from having to fabricate a whole settings object to ask a question.
+ */
+export interface PatriciaTuningInput {
+  patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  patriciaLimitStrength?: boolean;
+  patriciaElo?: number;
+  targetElo?: number;
+  depth?: number;
+  multiPv?: number;
+}
+
+export interface MaiaTuningInput {
+  targetElo?: number;
+  multiPv?: number;
+}
+
 export interface StockfishTuning {
   skillLevel: number;
   maxDepth: number;
@@ -48,7 +66,7 @@ export function mapEloToPatriciaSkill(targetElo: number): {
   return { skillLevel, clampedElo, cpLoss };
 }
 
-export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
+export function getPatriciaTuning(settings: PatriciaTuningInput): PatriciaTuning {
   const personality = settings.patriciaPersonality || 'aggressive';
   const limitStrength = settings.patriciaLimitStrength ?? (personality !== 'full_strength');
   const rawElo = settings.patriciaElo ?? settings.targetElo ?? 2500;
@@ -130,7 +148,9 @@ export function mapEloToStockfishParams(
 /**
  * Resolves active Stockfish execution parameters according to user settings.
  */
-export function getStockfishTuning(settings: EngineSettings): StockfishTuning {
+export function getStockfishTuning(
+  settings: Pick<EngineSettings, 'multiPv' | 'depth' | 'limitStrength' | 'targetElo'>
+): StockfishTuning {
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
   const userDepth = Math.max(6, Math.min(24, settings.depth || 16));
 
@@ -158,7 +178,7 @@ export function getStockfishTuning(settings: EngineSettings): StockfishTuning {
  * - Maia-2 models support discrete rating checkpoints spanning 1100 to 1900.
  * In accordance with Maia architecture, tree search lookahead must be disabled (maxNodes: 1).
  */
-export function getMaiaTuning(settings: EngineSettings, engineId?: string): MaiaTuning {
+export function getMaiaTuning(settings: MaiaTuningInput, engineId?: string): MaiaTuning {
   const activeId = engineId || settings.activeEngineId || 'maia3';
   const minElo = activeId === 'maia2' ? 1100 : 600;
   const maxElo = activeId === 'maia2' ? 1900 : 2600;
