@@ -32,12 +32,14 @@ jobs:
       - name: Verify and package release
         run: npm run release:build
 
+      - name: Collect release artefacts
+        run: npm run artifacts:collect
+
+      - name: Verify release artefacts
+        run: npm run artifacts:verify
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            .output/*-chrome.zip
-            .output/*-firefox.zip
-            .output/*-sources.zip
-            releases/*.xpi
+          files: releases/*

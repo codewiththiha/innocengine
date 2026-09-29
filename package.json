@@ -20,7 +20,9 @@
     "compile": "tsc --noEmit",
     "test": "tsx tests/engine-and-multipv.test.ts && tsx tests/opening-safety.test.ts && tsx tests/patricia-worker.test.ts",
     "postinstall": "wxt prepare",
-    "release:build": "npm run compile && npm test && npm run build && npm run zip && npm run build:firefox && rm -rf releases && npm run zip:firefox && npm run xpi:firefox"
+    "release:build": "npm run compile && npm test && npm run build && npm run zip && npm run build:firefox && rm -rf releases && npm run zip:firefox && npm run xpi:firefox",
+    "artifacts:collect": "mkdir -p releases && cp .output/*.zip releases/",
+    "artifacts:verify": "node scripts/verify-artifacts.mjs releases"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

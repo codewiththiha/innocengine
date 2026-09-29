@@ -48,10 +48,16 @@ jobs:
           npm run zip:firefox
           npm run xpi:firefox
 
+      # `.output` is a dot-directory and upload-artifact skips hidden files, so
+      # everything is gathered next to the XPI before it is uploaded.
+      - name: Collect release artefacts
+        run: npm run artifacts:collect
+
+      - name: Verify release artefacts
+        run: npm run artifacts:verify
+
       - name: Upload Extension Artifact
         uses: actions/upload-artifact@v4
         with:
           name: innocengine-extension
-          path: |
-            .output/*.zip
-            releases/*.xpi
+          path: releases/*
