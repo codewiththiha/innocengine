@@ -6,8 +6,8 @@ import OpeningBrowser from './components/OpeningBrowser';
 import { getBallMaeGyiTuning, getStockfishTuning, mapEloToBallMaeGyiSkill } from '../../lib/engine-tuning';
 import type { EngineSettings, EngineEvaluation, EngineCapabilities, OpeningMode } from '../../lib/types';
 import {
-  Activity, BookOpen, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
-  Server, Terminal, Circle, Square,
+  Activity, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
+  Server, Terminal,
 } from 'lucide-react';
 
 type Tab = 'engine' | 'board' | 'analysis' | 'strength' | 'opening' | 'advanced';
@@ -37,8 +37,6 @@ export default function App() {
   const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
   const [savedBadge, setSavedBadge] = useState(false);
   const [optionSearch, setOptionSearch] = useState('');
-  const [recorderActive, setRecorderActive] = useState(false);
-  const [recorderManual, setRecorderManual] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tabRef = useRef<Tab>('engine');
 
@@ -55,20 +53,9 @@ export default function App() {
         if (res.capabilities) setCapabilities(res.capabilities);
       }
     });
-    // Query initial recorder state
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tabId = tabs[0]?.id;
-      if (tabId) {
-        chrome.tabs.sendMessage(tabId, { target: 'content', type: 'RECORDER_STATE' }, (res: any) => {
-          if (chrome.runtime.lastError) return;
-          if (res) { setRecorderActive(!!res.active); setRecorderManual(!!res.manual); }
-        });
-      }
-    });
     const onMsg = (msg: any) => {
       if (msg.target === 'content' && msg.type === 'EVAL_UPDATE') setCurrentEval(msg.evaluation);
       else if (msg.target === 'popup' && msg.type === 'ENGINE_CAPABILITIES') setCapabilities(msg.capabilities);
-      else if (msg.target === 'popup' && msg.type === 'GAME_SAVED') setRecorderActive(false);
     };
     chrome.runtime.onMessage.addListener(onMsg);
     return () => chrome.runtime.onMessage.removeListener(onMsg);
@@ -114,9 +101,7 @@ export default function App() {
   const resetTab = async () => {
     const keys = TAB_RESET_KEYS[tabRef.current] || [];
     const patch: Partial<EngineSettings> = {};
-    for (const k of keys) {
-      (patch as any)[k] = (DEFAULT_SETTINGS as any)[k];
-    }
+    for (const k of keys) (patch as any)[k] = (DEFAULT_SETTINGS as any)[k];
     const next = { ...settings, ...patch };
     setSettings(next);
     await saveSettings(next);
@@ -125,28 +110,6 @@ export default function App() {
   };
 
   const openPlayground = () => chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
-  const openReview = () => chrome.tabs.create({ url: chrome.runtime.getURL('review.html') });
-
-  const sendToActiveTab = (msg: any) => new Promise<any>((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const id = tabs[0]?.id;
-      if (!id) return resolve(null);
-      chrome.tabs.sendMessage(id, msg, (res) => {
-        if (chrome.runtime.lastError) return resolve(null);
-        resolve(res);
-      });
-    });
-  });
-
-  const toggleRecording = async () => {
-    if (recorderActive && recorderManual) {
-      await sendToActiveTab({ target: 'content', type: 'RECORDER_STOP' });
-      setRecorderActive(false); setRecorderManual(false);
-    } else {
-      const res = await sendToActiveTab({ target: 'content', type: 'RECORDER_START' });
-      if (res?.ok) { setRecorderActive(true); setRecorderManual(true); }
-    }
-  };
 
   const isBallMaeGyi = settings.activeEngineId === 'ballmaegyi';
   const isStockfish = settings.activeEngineId === 'stockfish';
@@ -157,18 +120,16 @@ export default function App() {
 
   return (
     <div className="popup-shell flex flex-col bg-base-100 text-base-content" data-theme="dark">
-      {/* Header */}
       <div className="navbar bg-base-200 px-3 py-2 min-h-0 border-b border-base-300">
         <div className="flex-1 flex items-center gap-2">
           <span className="text-2xl leading-none">♞</span>
           <div className="leading-tight">
             <div className="text-sm font-bold">Chess Engine</div>
-            <div className="text-[11px] opacity-60">by codewiththiha</div>
+            <div className="text-[11px] opacity-60">by codewiththiha · chess.com only</div>
           </div>
         </div>
       </div>
 
-      {/* Eval card */}
       {currentEval && (
         <div className="mx-3 mt-2 p-3 rounded-lg bg-base-200/70 border border-base-300">
           <div className="flex items-center justify-between text-xs mb-1">
@@ -194,14 +155,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Tabs */}
       <div role="tablist" className="tabs tabs-boxed tabs-sm m-2 mb-1 bg-base-200 p-1 rounded-lg">
         {([
           ['engine', <Server size={12}/>, 'Engine'],
           ['board', <Eye size={12}/>, 'Board'],
           ['analysis', <Sliders size={12}/>, 'Analysis'],
           ['strength', <ShieldAlert size={12}/>, 'Strength'],
-          ['opening', <BookOpen size={12}/>, 'Opening'],
+          ['opening', <span style={{fontSize:12}}>♞</span>, 'Opening'],
           ['advanced', <Terminal size={12}/>, 'UCI'],
         ] as const).map(([id, icon, label]) => (
           <button key={id} role="tab"
@@ -212,7 +172,6 @@ export default function App() {
         ))}
       </div>
 
-      {/* Body */}
       <div className="flex-1 scroll-y px-3 pb-3">
         {tab === 'engine' && (
           <div className="flex flex-col gap-3">
@@ -222,16 +181,12 @@ export default function App() {
                 {BUILTIN_ENGINES.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
               </select>
             </label>
+            <div className="text-xs opacity-60">The overlay runs only on chess.com. On any other site the extension stays idle.</div>
           </div>
         )}
 
         {tab === 'board' && (
           <div className="flex flex-col gap-2">
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-sm">Auto-record finished games</span>
-              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.autoRecordGames}
-                onChange={(e) => apply({ autoRecordGames: e.target.checked })}/>
-            </label>
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm">Highlight my moves</span>
               <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.highlightPlayerMoves}
@@ -298,7 +253,7 @@ export default function App() {
               </label>
             )}
             <label className="form-control w-full">
-              <div className="label py-1"><span className="label-text">MultiPV lines</span><span className="label-text-alt">{settings.multiPv}</span></div>
+              <div className="label py-1"><span className="label-text">Lines</span><span className="label-text-alt">{settings.multiPv}</span></div>
               <input type="range" className="range range-primary range-xs" min="1" max="4" step="1" value={settings.multiPv}
                 onChange={(e) => apply({ multiPv: parseInt(e.target.value,10) })}/>
             </label>
@@ -314,7 +269,7 @@ export default function App() {
           <div className="flex flex-col gap-3">
             <label className="form-control w-full">
               <div className="label py-1"><span className="label-text">Playstyle</span></div>
-              <select className="select select-bordered select-sm w-full" value={settings.ballmaegyiPersonality || 'aggressive'}
+              <select className="select select-bordered select-sm w-full" value={settings.ballmaegyiPersonality || 'human'}
                 onChange={(e) => apply({ ballmaegyiPersonality: e.target.value as any })}>
                 <option value="aggressive">Aggressive</option>
                 <option value="human">Human-like</option>
@@ -324,8 +279,8 @@ export default function App() {
             </label>
             {settings.ballmaegyiPersonality !== 'full_strength' && (
               <label className="form-control w-full">
-                <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{mapEloToBallMaeGyiSkill(settings.ballmaegyiElo ?? 2500).clampedElo}</span></div>
-                <input type="range" className="range range-primary range-xs" min="500" max="3000" step="100" value={settings.ballmaegyiElo ?? 2500}
+                <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{mapEloToBallMaeGyiSkill(settings.ballmaegyiElo ?? 2200).clampedElo}</span></div>
+                <input type="range" className="range range-primary range-xs" min="500" max="3000" step="100" value={settings.ballmaegyiElo ?? 2200}
                   onChange={(e) => apply({ ballmaegyiElo: parseInt(e.target.value,10) })}/>
               </label>
             )}
@@ -348,7 +303,7 @@ export default function App() {
               <input type="range" className="range range-primary range-xs" min={isMaia2 ? 1100 : 600} max={isMaia2 ? 1900 : 2600} step="100" value={settings.targetElo}
                 onChange={(e) => apply({ targetElo: parseInt(e.target.value,10) })}/>
               <div className="flex gap-1 mt-2 flex-wrap">
-                {(isMaia3 ? [600,1100,1500,1900,2600] : [1100,1300,1500,1700,1900]).map(e => (
+                {(isMaia3 ? [600,1100,1500,1900,2200,2600] : [1100,1300,1500,1700,1900]).map(e => (
                   <button key={e} className={`btn btn-xs ${Math.round(settings.targetElo/100)*100 === e ? 'btn-primary' : 'btn-ghost'}`} onClick={() => apply({ targetElo: e })}>{e}</button>
                 ))}
               </div>
@@ -371,8 +326,6 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'strength' && !isBallMaeGyi && !isMaia2 && !isMaia3 && !isStockfish && null}
-
         {tab === 'opening' && (
           <div className="flex flex-col gap-2">
             <label className="flex items-center justify-between cursor-pointer">
@@ -380,7 +333,7 @@ export default function App() {
               <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.opening.enabled}
                 onChange={(e) => apply({ opening: { ...settings.opening, enabled: e.target.checked } })}/>
             </label>
-            <label className="flex items-center justify-between cursor-pointer opacity-100" style={{ opacity: settings.opening.enabled ? 1 : 0.4 }}>
+            <label className="flex items-center justify-between cursor-pointer" style={{ opacity: settings.opening.enabled ? 1 : 0.4 }}>
               <span className="text-sm">Adaptive matching</span>
               <input type="checkbox" className="toggle toggle-primary toggle-sm" disabled={!settings.opening.enabled}
                 checked={settings.opening.adaptiveSelection ?? true}
@@ -451,18 +404,9 @@ export default function App() {
         )}
       </div>
 
-      {/* Footer */}
       <div className="flex gap-2 p-2 border-t border-base-300 bg-base-200 mt-auto">
-        <button
-          className={`btn btn-sm flex-1 gap-1 ${recorderActive && recorderManual ? 'btn-error' : 'btn-ghost border border-base-300'}`}
-          onClick={toggleRecording}
-          title="Manual record start/stop">
-          {recorderActive && recorderManual ? <Square size={14}/> : <Circle size={14}/>}
-          {recorderActive && recorderManual ? 'Stop' : 'Record'}
-        </button>
-        <button className="btn btn-sm flex-1 gap-1" onClick={openReview}><BookOpen size={14}/>Review</button>
-        <button className="btn btn-primary btn-sm flex-1 gap-1" onClick={openPlayground}><ExternalLink size={14}/>Play</button>
-        <button className="btn btn-sm btn-ghost px-2" onClick={resetTab} title={`Reset ${tab} tab`}><RotateCcw size={14}/></button>
+        <button className="btn btn-primary btn-sm flex-1 gap-1" onClick={openPlayground}><ExternalLink size={14}/>Playground</button>
+        <button className="btn btn-sm btn-ghost px-3" onClick={resetTab} title={`Reset ${tab} tab`}><RotateCcw size={14}/> Reset</button>
       </div>
 
       {savedBadge && (

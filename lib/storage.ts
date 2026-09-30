@@ -14,12 +14,6 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   ballmaegyiElo: 2200,
   ballmaegyiManualDepth: false,
   ballmaegyiPerformance: 'responsive',
-  reviewEngineId: 'stockfish',
-  reviewDepth: 18,
-  reviewMultiPv: 3,
-  autoRecordGames: true,
-  manualRecording: false,
-  autoReview: false,
   showHighlights: true,
   highlightPlayerMoves: true,
   highlightOpponentMoves: false,
@@ -99,7 +93,13 @@ export const DEFAULT_SETTINGS: EngineSettings = {
 function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings {
   // v1.3 rename: 'patricia' engine id → 'ballmaegyi'
   if ((loaded as any).activeEngineId === 'patricia') loaded.activeEngineId = 'ballmaegyi';
-  if ((loaded as any).reviewEngineId === 'patricia') loaded.reviewEngineId = 'ballmaegyi';
+  // v1.4 drop legacy review/recording keys
+  delete (loaded as any).reviewEngineId;
+  delete (loaded as any).reviewDepth;
+  delete (loaded as any).reviewMultiPv;
+  delete (loaded as any).autoRecordGames;
+  delete (loaded as any).manualRecording;
+  delete (loaded as any).autoReview;
   const loadedOpening = { ...(loaded.opening ?? {}) } as Partial<EngineSettings['opening']> & {
     strictLine?: boolean;
   };

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.4.0 - 2026-09-30
+
+### Removed
+
+- Post-game review feature removed entirely: `entrypoints/review/` page,
+  `lib/game-recorder.ts`, `lib/game-store.ts`, `lib/review-classifier.ts`,
+  and `lib/dual-engine-host.ts` deleted.
+- Manual Record / Stop button and the popup's Review/Play split removed
+  from the footer (only Playground + Reset remain).
+- Auto-record, manual-recording and auto-review settings stripped; legacy
+  saved keys are scrubbed by `normalizeSettings()`.
+- Manifest `description` updated to no longer mention post-game review.
+
+### Chess.com-only activation
+
+- Content script `matches` remains `*://*.chess.com/*`. An additional runtime
+  host check (`isChessDomain()`) bails out of `init()`, the board scanner,
+  MutationObserver callbacks and any async continuations if the hostname
+  is not `chess.com`, `www.chess.com`, or a subdomain thereof (belt-and-
+  suspenders in case of script mis-injection, dev reloads, or testers that
+  load content scripts on other origins).
+- Header subtitle now reads "by codewiththiha · chess.com only"; Engine tab
+  shows a one-line notice that the overlay is idle on non-chess.com sites.
+- Footer simplified to Playground + Reset tab.
+
 ## 1.3.2 - 2026-09-30
 
 ### Recording

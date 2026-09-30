@@ -2,7 +2,7 @@
   "name": "chess-ai-overlay",
   "description": "Educational tool for real-time Stockfish engine analysis and move square highlights on Chess.com.",
   "private": true,
-  "version": "1.3.2",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

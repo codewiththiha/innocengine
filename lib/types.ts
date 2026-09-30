@@ -2,8 +2,19 @@ import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
 
 export type { OpeningConfig, OpeningMode } from './openings/types';
 
-export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.3.2';
+export const APP_NAME = 'Chess Engine Overlay by codewiththiha';
+export const APP_VERSION = '1.4.0';
+
+export const CHESS_DOMAINS = [
+  'chess.com',
+  'www.chess.com',
+];
+
+export function isChessDomain(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return CHESS_DOMAINS.includes(host) || host.endsWith('.chess.com');
+}
 
 export interface UciOption {
   name: string;
@@ -55,12 +66,6 @@ export interface EngineSettings {
   ballmaegyiElo?: number;
   ballmaegyiManualDepth?: boolean;
   ballmaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
-  reviewEngineId?: 'stockfish' | 'ballmaegyi';
-  reviewDepth?: number;
-  reviewMultiPv?: number;
-  autoRecordGames?: boolean;
-  manualRecording?: boolean;
-  autoReview?: boolean;
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
   highlightOpponentMoves: boolean;
