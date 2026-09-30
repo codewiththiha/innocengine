@@ -18,332 +18,171 @@ interface OpeningBrowserProps {
 }
 
 const CATEGORY_LABELS: Record<OpeningCategory, string> = {
-  white: 'White',
-  black: 'Black',
-  universal: 'Universal',
-  aggressive: 'Aggressive',
-  solid: 'Solid',
-  positional: 'Positional',
-  tactical: 'Tactical',
-  sharp: 'Sharp',
-  risky: 'Risky',
-  gambit: 'Gambit',
-  trap: 'Trap',
-  meme: 'Meme',
-  weird: 'Weird',
-  fun: 'Fun',
-  chaos: 'Chaos',
-  beginner: 'Beginner',
-  classical: 'Classical',
-  hypermodern: 'Hypermodern',
-  flank: 'Flank',
-  indian: 'Indian',
-  sicilian: 'Sicilian',
-  french: 'French',
-  'caro-kann': 'Caro-Kann',
-  'kings-pawn': "King's Pawn",
-  'queens-pawn': "Queen's Pawn",
-  english: 'English',
-  dutch: 'Dutch',
-  offbeat: 'Offbeat',
-  romantic: 'Romantic',
-  system: 'System',
-  'ruy-lopez': 'Ruy Lopez',
-  'queens-gambit': "Queen's Gambit",
+  white: 'White', black: 'Black', universal: 'Universal',
+  aggressive: 'Aggressive', solid: 'Solid', positional: 'Positional',
+  tactical: 'Tactical', sharp: 'Sharp', risky: 'Risky',
+  gambit: 'Gambit', trap: 'Trap', meme: 'Meme', weird: 'Weird',
+  fun: 'Fun', chaos: 'Chaos', beginner: 'Beginner', classical: 'Classical',
+  hypermodern: 'Hypermodern', flank: 'Flank', indian: 'Indian',
+  sicilian: 'Sicilian', french: 'French', 'caro-kann': 'Caro-Kann',
+  'kings-pawn': "King's Pawn", 'queens-pawn': "Queen's Pawn",
+  english: 'English', dutch: 'Dutch', offbeat: 'Offbeat', romantic: 'Romantic',
+  system: 'System', 'ruy-lopez': 'Ruy Lopez', 'queens-gambit': "Queen's Gambit",
   'kingside-attack': 'Kingside Attack',
 };
 
 const BROWSE_CATEGORIES: OpeningCategory[] = [
-  'solid',
-  'positional',
-  'aggressive',
-  'tactical',
-  'gambit',
-  'classical',
-  'hypermodern',
-  'system',
+  'solid', 'positional', 'aggressive', 'tactical', 'gambit',
+  'classical', 'hypermodern', 'system',
 ];
 
 const PRESETS = [
-  {
-    name: 'Classical',
-    description: 'A compact classical repertoire',
-    ids: ['italian', 'queens-gambit', 'sicilian-najdorf', 'kings-indian'],
-  },
-  {
-    name: 'Solid',
-    description: 'Low-risk positional choices',
-    ids: ['london', 'catalan', 'caro-classical', 'slav-black'],
-  },
-  {
-    name: 'Sharp',
-    description: 'Tactical opening choices',
-    ids: ['kings-gambit-accepted', 'evans-gambit', 'sicilian-dragon', 'french-winawer'],
-  },
-  {
-    name: 'Gambits',
-    description: 'Sacrificial and trapping lines',
-    ids: ['fried-liver', 'danish-gambit', 'stafford-gambit', 'latvian-gambit'],
-  },
+  { name: 'Classical', ids: ['italian', 'queens-gambit', 'sicilian-najdorf', 'kings-indian'] },
+  { name: 'Solid', ids: ['london', 'catalan', 'caro-classical', 'slav-black'] },
+  { name: 'Sharp', ids: ['kings-gambit-accepted', 'evans-gambit', 'sicilian-dragon', 'french-winawer'] },
+  { name: 'Gambits', ids: ['fried-liver', 'danish-gambit', 'stafford-gambit', 'latvian-gambit'] },
 ];
 
 export default function OpeningBrowser({
-  openings,
-  selectedIds,
-  filters,
-  disabled = false,
-  onChange,
-  onFiltersChange,
+  openings, selectedIds, filters, disabled = false, onChange, onFiltersChange,
 }: OpeningBrowserProps) {
   const [query, setQuery] = useState('');
   const [sideFilter, setSideFilter] = useState<'all' | 'w' | 'b'>('all');
-  const activeCategories = useMemo(
-    () => new Set(filters.categories ?? []),
-    [filters.categories],
-  );
+  const activeCategories = useMemo(() => new Set(filters.categories ?? []), [filters.categories]);
   const maxRisk = filters.maxRisk ?? 5;
   const includeMeme = filters.includeMeme ?? false;
   const includeWeird = filters.includeWeird ?? false;
 
-  const whiteOpenings = useMemo(
-    () => openings.filter((opening) => opening.side === 'w' || opening.side === 'any'),
-    [openings],
-  );
-  const blackOpenings = useMemo(
-    () => openings.filter((opening) => opening.side === 'b' || opening.side === 'any'),
-    [openings],
-  );
+  const whiteOpenings = useMemo(() => openings.filter(o => o.side === 'w' || o.side === 'any'), [openings]);
+  const blackOpenings = useMemo(() => openings.filter(o => o.side === 'b' || o.side === 'any'), [openings]);
 
   const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-
-    return openings.filter((opening) => {
-      if (opening.enabled === false) return false;
-      if (sideFilter !== 'all' && opening.side !== 'any' && opening.side !== sideFilter) return false;
-      if (!includeMeme && opening.meme) return false;
-      if (!includeWeird && opening.categories.includes('weird')) return false;
-      if (opening.risk > maxRisk) return false;
-      if (activeCategories.size > 0 && !opening.categories.some((category) => activeCategories.has(category))) {
-        return false;
-      }
-      if (!normalizedQuery) return true;
-
-      return [
-        opening.id,
-        opening.name,
-        opening.eco ?? '',
-        opening.description ?? '',
-        ...(opening.tags ?? []),
-        ...opening.categories,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedQuery);
+    const q = query.trim().toLowerCase();
+    return openings.filter(o => {
+      if (o.enabled === false) return false;
+      if (sideFilter !== 'all' && o.side !== 'any' && o.side !== sideFilter) return false;
+      if (!includeMeme && o.meme) return false;
+      if (!includeWeird && o.categories.includes('weird')) return false;
+      if (o.risk > maxRisk) return false;
+      if (activeCategories.size > 0 && !o.categories.some(c => activeCategories.has(c))) return false;
+      if (!q) return true;
+      return [o.id, o.name, o.eco ?? '', o.description ?? '', ...(o.tags ?? []), ...o.categories]
+        .join(' ').toLowerCase().includes(q);
     });
   }, [activeCategories, includeMeme, includeWeird, maxRisk, openings, query, sideFilter]);
 
-  const updateSelection = (id: string) => {
+  const toggle = (id: string) => {
     if (disabled) return;
-    onChange(selectedIds.includes(id) ? selectedIds.filter((selected) => selected !== id) : [...selectedIds, id]);
+    onChange(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
   };
-
-  const toggleCategory = (category: OpeningCategory) => {
+  const toggleCategory = (c: OpeningCategory) => {
     if (disabled) return;
     const next = new Set(activeCategories);
-    if (next.has(category)) {
-      next.delete(category);
-    } else {
-      next.add(category);
-    }
+    next.has(c) ? next.delete(c) : next.add(c);
     onFiltersChange({ categories: Array.from(next) });
   };
-
-  const applyPreset = (ids: string[]) => {
-    if (disabled) return;
-    onChange(ids.filter((id) => openings.some((opening) => opening.id === id)));
-  };
-
-  const selectShown = () => {
-    if (disabled) return;
-    onChange(Array.from(new Set([...selectedIds, ...filtered.map((opening) => opening.id)])));
-  };
-
   const usesCatalogDefault = selectedIds.length === 0;
-  const selectedWhiteCount = useMemo(
-    () => usesCatalogDefault
-      ? whiteOpenings.length
-      : selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'w' || opening.side === 'any'))).length,
-    [openings, selectedIds, usesCatalogDefault, whiteOpenings.length],
-  );
-  const selectedBlackCount = useMemo(
-    () => usesCatalogDefault
-      ? blackOpenings.length
-      : selectedIds.filter((id) => openings.some((opening) => opening.id === id && (opening.side === 'b' || opening.side === 'any'))).length,
-    [blackOpenings.length, openings, selectedIds, usesCatalogDefault],
-  );
+  const selW = usesCatalogDefault ? whiteOpenings.length : selectedIds.filter(id => openings.some(o => o.id === id && (o.side === 'w' || o.side === 'any'))).length;
+  const selB = usesCatalogDefault ? blackOpenings.length : selectedIds.filter(id => openings.some(o => o.id === id && (o.side === 'b' || o.side === 'any'))).length;
 
   return (
-    <section className={`opening-browser ${disabled ? 'is-disabled' : ''}`} aria-label="Opening repertoire builder">
-      <div className="repertoire-presets" aria-label="Repertoire presets">
-        <span className="field-label">Start with</span>
-        <div className="preset-list">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.name}
-              type="button"
-              className="preset-button"
-              disabled={disabled}
-              onClick={() => applyPreset(preset.ids)}
-              title={preset.description}
-            >
-              {preset.name}
+    <div className={`flex flex-col gap-2 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* Presets */}
+      <div>
+        <div className="text-[11px] uppercase tracking-wide opacity-60 mb-1">Presets</div>
+        <div className="flex flex-wrap gap-1">
+          {PRESETS.map(p => (
+            <button key={p.name} type="button" className="btn btn-xs btn-ghost border border-base-300"
+              disabled={disabled} onClick={() => onChange(p.ids.filter(id => openings.some(o => o.id === id)))}>
+              {p.name}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="opening-side-tabs" role="group" aria-label="Opening side">
-        <button
-          type="button"
-          className={`side-tab ${sideFilter === 'all' ? 'active' : ''}`}
-          aria-pressed={sideFilter === 'all'}
-          disabled={disabled}
-          onClick={() => setSideFilter('all')}
-        >
-          All <span>{openings.length}</span>
-        </button>
-        <button
-          type="button"
-          className={`side-tab ${sideFilter === 'w' ? 'active' : ''}`}
-          aria-pressed={sideFilter === 'w'}
-          disabled={disabled}
-          onClick={() => setSideFilter('w')}
-        >
-          White <span>{selectedWhiteCount}/{whiteOpenings.length}</span>
-        </button>
-        <button
-          type="button"
-          className={`side-tab ${sideFilter === 'b' ? 'active' : ''}`}
-          aria-pressed={sideFilter === 'b'}
-          disabled={disabled}
-          onClick={() => setSideFilter('b')}
-        >
-          Black <span>{selectedBlackCount}/{blackOpenings.length}</span>
-        </button>
+      {/* Side filter */}
+      <div role="tablist" className="tabs tabs-boxed tabs-xs">
+        <button role="tab" className={`tab flex-1 ${sideFilter === 'all' ? 'tab-active' : ''}`} disabled={disabled} onClick={() => setSideFilter('all')}>All {openings.length}</button>
+        <button role="tab" className={`tab flex-1 ${sideFilter === 'w' ? 'tab-active' : ''}`} disabled={disabled} onClick={() => setSideFilter('w')}>White {selW}/{whiteOpenings.length}</button>
+        <button role="tab" className={`tab flex-1 ${sideFilter === 'b' ? 'tab-active' : ''}`} disabled={disabled} onClick={() => setSideFilter('b')}>Black {selB}/{blackOpenings.length}</button>
       </div>
 
-      <div className="opening-search-wrap">
-        <label className="sr-only" htmlFor="opening-search">Search openings</label>
-        <input
-          id="opening-search"
-          type="search"
-          placeholder="Search name, ECO, or style"
-          value={query}
-          disabled={disabled}
-          onChange={(event) => setQuery(event.target.value)}
-          className="opening-search-input"
-        />
-        {query && (
-          <button
-            type="button"
-            className="clear-search"
-            aria-label="Clear opening search"
-            disabled={disabled}
-            onClick={() => setQuery('')}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      {/* Search */}
+      <label className="input input-xs input-bordered flex items-center gap-2">
+        <input type="search" className="grow" placeholder="Search name, ECO, or style"
+          value={query} disabled={disabled} onChange={e => setQuery(e.target.value)}/>
+        {query && <button type="button" className="opacity-60 hover:opacity-100" disabled={disabled} onClick={() => setQuery('')}>×</button>}
+      </label>
 
-      <div className="opening-filter-row">
-        <label className="check-label">
-          <input
-            type="checkbox"
-            checked={includeMeme}
-            disabled={disabled}
-            onChange={(event) => onFiltersChange({ includeMeme: event.target.checked })}
-          />
+      {/* Checkboxes + risk */}
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 cursor-pointer text-xs">
+          <input type="checkbox" className="checkbox checkbox-xs" checked={includeMeme} disabled={disabled}
+            onChange={e => onFiltersChange({ includeMeme: e.target.checked })}/>
           Include meme lines
         </label>
-        <label className="check-label">
-          <input
-            type="checkbox"
-            checked={includeWeird}
-            disabled={disabled}
-            onChange={(event) => onFiltersChange({ includeWeird: event.target.checked })}
-          />
+        <label className="flex items-center gap-2 cursor-pointer text-xs">
+          <input type="checkbox" className="checkbox checkbox-xs" checked={includeWeird} disabled={disabled}
+            onChange={e => onFiltersChange({ includeWeird: e.target.checked })}/>
           Include offbeat lines
         </label>
-        <label className="risk-control">
-          <span>Risk ≤ {maxRisk}</span>
-          <input
-            type="range"
-            min="1"
-            max="5"
-            value={maxRisk}
-            disabled={disabled}
-            onChange={(event) => onFiltersChange({ maxRisk: Number(event.target.value) })}
-          />
+        <label className="form-control w-full">
+          <div className="flex items-center justify-between py-0.5">
+            <span className="text-[11px] opacity-70">Max risk</span>
+            <span className="text-[11px] font-semibold">{maxRisk}/5</span>
+          </div>
+          <input type="range" className="range range-xs range-primary" min="1" max="5" step="1"
+            value={maxRisk} disabled={disabled} onChange={e => onFiltersChange({ maxRisk: Number(e.target.value) })}/>
         </label>
       </div>
 
-      <div className="opening-category-row" aria-label="Opening style filters">
-        {BROWSE_CATEGORIES.map((category) => (
-          <button
-            key={category}
-            type="button"
-            className={`opening-chip ${activeCategories.has(category) ? 'active' : ''}`}
-            aria-pressed={activeCategories.has(category)}
-            disabled={disabled}
-            onClick={() => toggleCategory(category)}
-          >
-            {CATEGORY_LABELS[category]}
+      {/* Category chips */}
+      <div className="flex flex-wrap gap-1">
+        {BROWSE_CATEGORIES.map(c => (
+          <button key={c} type="button"
+            className={`btn btn-xs rounded-full ${activeCategories.has(c) ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+            aria-pressed={activeCategories.has(c)} disabled={disabled} onClick={() => toggleCategory(c)}>
+            {CATEGORY_LABELS[c]}
           </button>
         ))}
       </div>
 
-      <div className="opening-list-header">
-        <span>{filtered.length} shown · {usesCatalogDefault ? `all ${openings.length} catalog openings active` : `${selectedIds.length} selected`}</span>
-        <div>
-          <button type="button" className="text-button" disabled={disabled || filtered.length === 0} onClick={selectShown}>
-            Select shown
-          </button>
-          <button type="button" className="text-button" disabled={disabled || usesCatalogDefault} onClick={() => onChange([])}>
-            Use all
-          </button>
+      {/* List header */}
+      <div className="flex items-center justify-between text-[11px] pt-1">
+        <span className="opacity-70">
+          {filtered.length} shown · {usesCatalogDefault ? `all ${openings.length} active` : `${selectedIds.length} selected`}
+        </span>
+        <div className="flex gap-1">
+          <button type="button" className="btn btn-xs btn-ghost" disabled={disabled || filtered.length === 0}
+            onClick={() => onChange(Array.from(new Set([...selectedIds, ...filtered.map(o => o.id)])))}>Select shown</button>
+          <button type="button" className="btn btn-xs btn-ghost" disabled={disabled || usesCatalogDefault}
+            onClick={() => onChange([])}>Clear</button>
         </div>
       </div>
-      {usesCatalogDefault && (
-        <p className="opening-selection-note">Choose individual openings or a preset to create a narrower repertoire.</p>
-      )}
 
-      <div className="opening-list" aria-live="polite">
-        {filtered.map((opening) => {
-          const selected = selectedIds.includes(opening.id);
+      {/* Opening list */}
+      <div className="max-h-56 overflow-y-auto border border-base-300 rounded-lg bg-base-100">
+        {filtered.length === 0 ? (
+          <div className="text-center text-xs opacity-60 py-6">No openings match these filters.</div>
+        ) : filtered.map(o => {
+          const selected = selectedIds.includes(o.id);
           return (
-            <label key={opening.id} className={`opening-row ${selected ? 'selected' : ''}`}>
-              <input
-                type="checkbox"
-                checked={selected}
-                disabled={disabled}
-                onChange={() => updateSelection(opening.id)}
-              />
-              <span className="opening-row-main">
-                <span className="opening-row-title">{opening.name}</span>
-                <span className="opening-row-line">{opening.pgn}</span>
-              </span>
-              <span className="opening-row-meta">
-                {opening.eco && <span>{opening.eco}</span>}
-                <span>R{opening.risk}</span>
-              </span>
+            <label key={o.id} className={`flex items-start gap-2 p-2 border-b border-base-200 last:border-b-0 cursor-pointer hover:bg-base-200/50 ${selected ? 'bg-primary/10' : ''}`}>
+              <input type="checkbox" className="checkbox checkbox-xs mt-0.5" checked={selected} disabled={disabled} onChange={() => toggle(o.id)}/>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold truncate">{o.name}</span>
+                  <span className="flex items-center gap-1 text-[10px] opacity-60 shrink-0">
+                    {o.eco && <span className="badge badge-xs badge-ghost">{o.eco}</span>}
+                    <span>R{o.risk}</span>
+                  </span>
+                </div>
+                <div className="text-[10px] opacity-60 font-mono truncate">{o.pgn}</div>
+              </div>
             </label>
           );
         })}
-        {filtered.length === 0 && (
-          <p className="opening-empty">No openings match these filters.</p>
-        )}
       </div>
-    </section>
+    </div>
   );
 }

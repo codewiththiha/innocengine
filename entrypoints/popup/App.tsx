@@ -4,9 +4,9 @@ import { capsFor } from '../../lib/engine-capabilities';
 import { OPENING_CATALOG } from '../../lib/openings/catalog';
 import OpeningBrowser from './components/OpeningBrowser';
 import { getBallMaeGyiTuning, getStockfishTuning, mapEloToBallMaeGyiSkill } from '../../lib/engine-tuning';
-import type { EngineSettings, EngineEvaluation, EngineCapabilities, EngineTelemetry, OpeningMode } from '../../lib/types';
+import type { EngineSettings, EngineEvaluation, EngineCapabilities, OpeningMode } from '../../lib/types';
 import {
-  Activity, Cpu, BookOpen, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
+  Activity, BookOpen, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
   Server, Terminal,
 } from 'lucide-react';
 
@@ -87,13 +87,13 @@ export default function App() {
   const isDepthAuto = (isBallMaeGyi && !settings.ballmaegyiManualDepth && settings.ballmaegyiPersonality !== 'full_strength') || (isStockfish && settings.limitStrength) || isMaia2 || isMaia3;
 
   return (
-    <div className="popup-shell flex flex-col" data-theme="dark">
+    <div className="popup-shell flex flex-col bg-base-100 text-base-content" data-theme="dark">
       {/* Header */}
-      <div className="navbar bg-base-200 px-3 py-2 min-h-0">
+      <div className="navbar bg-base-200 px-3 py-2 min-h-0 border-b border-base-300">
         <div className="flex-1 flex items-center gap-2">
           <span className="text-2xl leading-none">♞</span>
           <div className="leading-tight">
-            <div className="text-sm font-semibold">Chess Engine</div>
+            <div className="text-sm font-bold">Chess Engine</div>
             <div className="text-[11px] opacity-60">by codewiththiha</div>
           </div>
         </div>
@@ -126,7 +126,7 @@ export default function App() {
       )}
 
       {/* Tabs */}
-      <div role="tablist" className="tabs tabs-boxed tabs-sm m-3 mb-2 flex-nowrap overflow-x-auto">
+      <div role="tablist" className="tabs tabs-boxed tabs-sm m-2 mb-1 bg-base-200 p-1 rounded-lg">
         {([
           ['engine', <Server size={12}/>, 'Engine'],
           ['board', <Eye size={12}/>, 'Board'],
@@ -135,8 +135,10 @@ export default function App() {
           ['opening', <BookOpen size={12}/>, 'Opening'],
           ['advanced', <Terminal size={12}/>, 'UCI'],
         ] as const).map(([id, icon, label]) => (
-          <button key={id} role="tab" className={`tab flex-1 gap-1 ${tab === id ? 'tab-active' : ''}`} onClick={() => setTab(id as Tab)}>
-            {icon}<span className="text-xs">{label}</span>
+          <button key={id} role="tab"
+            className={`tab flex-1 gap-1 h-8 text-xs rounded-md ${tab === id ? 'tab-active bg-primary text-primary-content shadow-sm' : 'opacity-70 hover:opacity-100'}`}
+            onClick={() => setTab(id as Tab)}>
+            {icon}<span>{label}</span>
           </button>
         ))}
       </div>
@@ -363,7 +365,7 @@ export default function App() {
       </div>
 
       {/* Footer */}
-      <div className="flex gap-2 p-3 pt-1 border-t border-base-300">
+      <div className="flex gap-2 p-2 border-t border-base-300 bg-base-200 mt-auto">
         <button className="btn btn-primary btn-sm flex-1 gap-1" onClick={openPlayground}><ExternalLink size={14}/>Test Bench</button>
         <button className="btn btn-sm flex-1 gap-1" onClick={openReview}><BookOpen size={14}/>Review</button>
         <button className="btn btn-sm btn-ghost px-2" onClick={reset} title="Reset defaults"><RotateCcw size={14}/></button>

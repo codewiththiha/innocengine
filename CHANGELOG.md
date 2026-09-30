@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.1 - 2026-09-30
+
+### Popup polish
+
+- Opening tab completely re-built with daisyUI components (preset buttons,
+  tabbed side filter, bordered search input, checkbox-xs filters, range-xs
+  risk slider, rounded-full category chips, a real scrollable opening list
+  with hover states and selection highlights) replacing the unstyled custom
+  classes that were rendering raw text.
+- Disabled repertoire controls now visibly gray out (opacity 0.4 +
+  pointer-events none); the disabled `range` slider for opening depth is no
+  longer interactive or visually prominent when the repertoire is off.
+- Tab bar now sits inside a `tabs-boxed` container with padding, rounded
+  corners, active primary fill with shadow, and inactive tabs at reduced
+  opacity so active tab is clearly visible.
+- Header uses `navbar bg-base-200 border-b base-300`; popup body uses
+  `bg-base-100 text-base-content`; footer sticks to bottom with a bg-base-200
+  strip and a top border.
+- Removed unused `Cpu` / `EngineTelemetry` imports and the leftover
+  `popup/style.css` that was pulling old tokens but no longer imported.
+- Added explicit disabled-state styling for ranges/selects/inputs so disabled
+  controls look uniformly grayed instead of appearing "broken".
+
 ## 1.3.0 - 2026-09-30
 
 ### Rebrand & UI refresh

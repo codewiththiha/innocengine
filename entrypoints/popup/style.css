@@ -1,8 +1,0 @@
-/* Shared popup defaults live in App.css. Kept minimal for entrypoint compatibility. */
-:root {
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Avenir Next", sans-serif;
-}
-
-body {
-  margin: 0;
-}
