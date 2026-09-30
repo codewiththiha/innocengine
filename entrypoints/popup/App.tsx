@@ -202,6 +202,10 @@ export default function App() {
     chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
   };
 
+  const openReview = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('review.html') });
+  };
+
   const maxHardwareThreads = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 8;
 
   return (
@@ -1270,7 +1274,10 @@ export default function App() {
 
       <footer className="popup-footer">
         <button type="button" className="action-button primary-btn" onClick={openPlayground}>
-          <ExternalLink size={14} style={{ marginRight: 6 }} /> Open Test Bench
+          <ExternalLink size={14} style={{ marginRight: 6 }} /> Test Bench
+        </button>
+        <button type="button" className="action-button secondary-btn" onClick={openReview} title="Game Review">
+          <BookOpen size={14} style={{ marginRight: 6 }} /> Review
         </button>
         <button
           type="button"

@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.2.0 - 2026-09-30
+
+### Added
+
+- **Post-game review page** (`chrome-extension://<id>/review.html`): a Chess.com-styled
+  analysis companion that opens in a new tab.
+  - List of all finished games auto-recorded from Chess.com (persisted to IndexedDB,
+    never leaves the device).
+  - Deep per-move engine analysis using a **separate review engine** (Stockfish 17 or
+    Patricia 5.1, depth 12–24, 2–5 MultiPV lines) independent from your live
+    highlight engine, so re-analysing a game never disrupts in-play hints.
+  - Chess.com-style move classification with colored glyphs and plain-English
+    explanations: Brilliant (!!), Great (!), Best (★), Book (B), Good (✓),
+    Inaccuracy (?!), Mistake (?), Blunder (??).
+  - Overall accuracy score per side (White/Black), summary chips, and a live
+    evaluation bar.
+  - Click any move in the move list to jump to it; arrow keys (←/→/Home/End/F)
+    navigate; Space toggles the best-move arrow.
+  - Better-move hint card with the engine's top reply and centipawn-loss figure.
+  - **Training mode**: guess the best move from each position and get instant
+    feedback — a spaced-repetition style way to drill lost positions.
+- **Draggable pieces and Chess.com-styled board** in the review page:
+  - #eeeed2/#769656 Chess.com green/brown square palette with embedded coordinates,
+    Unicode merida-style pieces with drop-shadows, drag-and-drop move input,
+    last-move yellow highlight, blue selected square, legal-move dots,
+    best-move green arrows, and blunder red highlights.
+  - Resize-aware (CSS `aspect-ratio`) and works down to mobile widths.
+- **Auto-record finished games** toggle (on by default). Every Chess.com game that
+  ends naturally is saved with URL, player color, SAN move list, final FEN, PGN,
+  timestamp, and result. All data is local to IndexedDB.
+- **Dual-engine architecture** — the new `dual-engine-host.ts` runs full-strength
+  deep reviews with longer movetime budgets and multipv without fighting with
+  the responsive highlight runner. A cancel button stops long reviews instantly.
+- New settings for review engine, depth, multi-PV, and auto-review.
+- A new **Review** button in the popup footer alongside Test Bench.
+
+### Design (anti-AI UX)
+
+- Human-first review layout: accuracy + result first, detail progressively
+  disclosed; explanations next to every classification chip.
+- Explicit AI state ("Analyzing move X/Y • depth N" + cancellable progress bar);
+  no silent spinners.
+- Plain-English copy, control boundaries visible (player chooses engine, depth,
+  when to start/cancel/review).
+- Capped accent colors — red/amber/green/teal only carry meaning (classification),
+  chrome stays neutral.
+- Escape hatch: every analysis can be cancelled, games can be deleted, and all
+  processing runs on device.
+
 ## 1.1.3 - 2026-09-30
 
 ### Added

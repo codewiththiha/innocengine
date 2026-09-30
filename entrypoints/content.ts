@@ -4,6 +4,7 @@ import { SvgOverlay } from '../lib/svg-overlay';
 import { EngineClient } from '../lib/engine-client';
 import { HighlightController } from '../lib/highlight-controller';
 import { getSettings, subscribeToSettings } from '../lib/storage';
+import { GameRecorder } from '../lib/game-recorder';
 import type { EngineSettings, BoardState } from '../lib/types';
 
 export default defineContentScript({
@@ -25,12 +26,14 @@ export default defineContentScript({
     let pendingScanRaf: number | null = null;
     let isHiddenByPrivacyHotkey: boolean = false;
     let disposed = false;
+    let gameRecorder: GameRecorder | null = null;
 
     async function init() {
       const settings = await getSettings();
       if (disposed) return;
       currentSettings = settings;
       engineClient = new EngineClient();
+      gameRecorder = new GameRecorder();
 
       engineClient.onEvaluation((evaluation) => {
         if (!overlay || !highlightController) return;
@@ -143,6 +146,15 @@ export default defineContentScript({
       currentBoard = board;
       lastPositionKey = '';
 
+      // If there was a previous board, game was replaced (navigation or new game)
+      if (gameRecorder && gameRecorder.isActive()) {
+        // no-op — previous game was either completed & saved in handleBoardChange, or
+        // aborted by navigation (we don't save aborted/navigated-away games).
+      }
+      if (gameRecorder && currentSettings.autoRecordGames) {
+        gameRecorder.start(board);
+      }
+
       highlightController?.destroy();
       if (overlay) {
         overlay.destroy();
@@ -245,6 +257,10 @@ export default defineContentScript({
       highlightController.setBoardState(state);
 
       if (!state.isGameActive) {
+        // Game over — persist if auto-record is enabled and we have a move list.
+        if (gameRecorder && gameRecorder.isActive() && state.moveHistory && state.moveHistory.length > 0) {
+          gameRecorder.onGameOver(currentBoard!, state.moveHistory, state.fen).catch(() => {});
+        }
         return;
       }
 

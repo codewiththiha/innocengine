@@ -3,7 +3,7 @@ import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
 export type { OpeningConfig, OpeningMode } from './openings/types';
 
 export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.1.3';
+export const APP_VERSION = '1.2.0';
 
 export interface UciOption {
   name: string;
@@ -55,6 +55,11 @@ export interface EngineSettings {
   patriciaElo?: number;
   patriciaManualDepth?: boolean;
   patriciaPerformance?: 'responsive' | 'balanced' | 'deep';
+  reviewEngineId?: 'stockfish' | 'patricia';
+  reviewDepth?: number;
+  reviewMultiPv?: number;
+  autoRecordGames?: boolean;
+  autoReview?: boolean;
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
   highlightOpponentMoves: boolean;
