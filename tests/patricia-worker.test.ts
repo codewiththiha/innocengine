@@ -110,17 +110,19 @@ console.log('\n2. Keeping handicapped analysis private until the chosen move...'
   beginLimitedSearch(harness);
 
   assert(harness.engine.commands.includes('setoption name MultiPV value 5'));
-  assert.strictEqual(harness.engine.commands.at(-1), 'go depth 2 movetime 150');
+  // Movetime respects the caller's budget (clamped to safe upper bound) for instant UI feedback.
+  assert.strictEqual(harness.engine.commands.at(-1), 'go depth 2 movetime 350');
 
+  // Progressive intermediate info is streamed for instant highlight feedback in
+  // human/aggressive modes. Final blunder-biased selection is still applied at bestmove.
   harness.engine.emit('info multipv 1 depth 2 score cp 42 pv e2e4 e7e5');
   harness.engine.emit('info multipv 2 depth 2 score cp -200 pv a2a3 e7e5');
-  assert.strictEqual(harness.output.length, 0, 'Unhandicapped intermediate lines must not reach the UI');
+  assert(harness.output.length >= 2, 'Intermediate depth info must stream to the UI for instant highlights');
+  assert(harness.output[0]?.includes('multipv 1') && harness.output[0]?.includes('score cp 42') && harness.output[0]?.includes('pv e2e4'), 'first output should be multipv 1 line');
 
   harness.engine.emit('bestmove e2e4');
-  assert.strictEqual(harness.output.length, 2);
-  assert(harness.output[0]?.includes('multipv 1 score cp 42 pv e2e4 e7e5'));
-  assert.strictEqual(harness.output[1], 'bestmove e2e4');
-  console.log('   ✓ Final synthetic line and bestmove stay coherent');
+  assert(harness.output.at(-1) === 'bestmove e2e4');
+  console.log('   ✓ Progressive info streams instantly and bestmove stays coherent');
 }
 
 console.log('\n3. Ignoring stale lines and never selecting an immediate forced loss...');
@@ -151,7 +153,8 @@ console.log('\n4. Restoring user MultiPV in full-strength mode...');
   harness.send('go depth 18 movetime 700');
 
   assert.strictEqual(harness.engine.commands.at(-2), 'setoption name MultiPV value 3');
-  assert.strictEqual(harness.engine.commands.at(-1), 'go depth 18 movetime 500');
+  // Caller-requested movetime wins (clamped to safe upper bound)
+  assert.strictEqual(harness.engine.commands.at(-1), 'go depth 18 movetime 700');
 
   harness.engine.emit('info multipv 1 depth 18 score cp 31 pv e2e4 e7e5');
   harness.engine.emit('bestmove e2e4 ponder e7e5');
@@ -159,11 +162,12 @@ console.log('\n4. Restoring user MultiPV in full-strength mode...');
   assert.strictEqual(harness.output[1], 'bestmove e2e4 ponder e7e5');
 
   harness.engine.commands.length = 0;
+  harness.output.length = 0;
   harness.send('setoption name Skill_Level value 1');
   harness.send('go depth 16 movetime 500');
   assert(harness.engine.commands.includes('setoption name Skill_Level value 1'));
   assert(harness.engine.commands.includes('setoption name MultiPV value 5'));
-  assert.strictEqual(harness.engine.commands.at(-1), 'go depth 2 movetime 150');
+  assert.strictEqual(harness.engine.commands.at(-1), 'go depth 2 movetime 350');
   console.log('   ✓ Full-strength searches preserve native UCI output and exit cleanly');
 }
 

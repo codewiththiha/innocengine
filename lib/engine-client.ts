@@ -66,6 +66,8 @@ export class EngineClient {
         patriciaPersonality: settings.patriciaPersonality,
         patriciaLimitStrength: settings.patriciaLimitStrength,
         patriciaElo: settings.patriciaElo,
+        patriciaPerformance: settings.patriciaPerformance,
+        patriciaManualDepth: settings.patriciaManualDepth,
         threads: settings.threads,
         hashMb: settings.hashMb,
       });

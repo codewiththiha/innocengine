@@ -28,7 +28,10 @@ export type OpeningCategory =
   | 'dutch'
   | 'offbeat'
   | 'romantic'
-  | 'system';
+  | 'system'
+  | 'ruy-lopez'
+  | 'queens-gambit'
+  | 'kingside-attack';
 
 export type OpeningSide = 'w' | 'b' | 'any';
 

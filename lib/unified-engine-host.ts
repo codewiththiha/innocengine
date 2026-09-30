@@ -17,6 +17,8 @@ export interface EngineRunOptions {
   patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
   patriciaLimitStrength?: boolean;
   patriciaElo?: number;
+  patriciaPerformance?: 'responsive' | 'balanced' | 'deep';
+  patriciaManualDepth?: boolean;
 }
 
 export interface IEngineRunner {
@@ -360,6 +362,7 @@ class PatriciaRunner implements IEngineRunner {
   public readonly name = 'Patricia 5.1 (Aggressive & Human)';
 
   private worker: Worker | null = null;
+  private standbyWorker: Worker | null = null;
   private parser: UciParser;
   private isReady: boolean = false;
   private isSearching: boolean = false;
@@ -385,6 +388,78 @@ class PatriciaRunner implements IEngineRunner {
     this.onStatus = onStatus;
   }
 
+  /**
+   * Spawn a new Patricia worker and return it once UCI initialization is done.
+   * The dual-worker strategy keeps a warm standby so we never block the UI
+   * waiting for WASM to recompile after an interrupted search.
+   */
+  private spawnWorker(label: string, timeoutMs: number = 6000): Promise<{ worker: Worker | null; ok: boolean }> {
+    return new Promise((resolve) => {
+      let worker: Worker | null = null;
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+
+      const done = (w: Worker | null, ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        resolve({ worker: w, ok });
+      };
+
+      try {
+        const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
+        worker = new Worker(workerUrl);
+      } catch (error) {
+        console.error(`[PatriciaRunner] ${label} spawn failed:`, error);
+        done(null, false);
+        return;
+      }
+
+      timeout = setTimeout(() => {
+        if (worker) {
+          try { worker.terminate(); } catch (_) {}
+        }
+        console.warn(`[PatriciaRunner] ${label} init timed out`);
+        done(null, false);
+      }, timeoutMs);
+
+      worker.onmessage = (event: MessageEvent) => {
+        const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
+        if (line === 'uciok' || line === 'readyok') {
+          // Detach listeners before returning; the caller will re-bind.
+          worker!.onmessage = null;
+          worker!.onerror = null;
+          done(worker, true);
+        }
+      };
+
+      worker.onerror = (error) => {
+        console.error(`[PatriciaRunner] ${label} failed:`, error);
+        if (worker) {
+          try { worker.terminate(); } catch (_) {}
+        }
+        done(null, false);
+      };
+
+      worker.postMessage('uci');
+      worker.postMessage('isready');
+      worker.postMessage('setoption name Hash value 32');
+      worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
+    });
+  }
+
+  /** Kick off a standby worker warm-up in the background (best effort). */
+  private warmStandby() {
+    if (this.standbyWorker) return;
+    this.spawnWorker('standby')
+      .then(({ worker }) => {
+        if (worker) {
+          this.standbyWorker = worker;
+        }
+      })
+      .catch(() => {});
+  }
+
   public init(): Promise<void> {
     return new Promise((resolve) => {
       try {
@@ -394,83 +469,70 @@ class PatriciaRunner implements IEngineRunner {
           } catch (_) {}
           this.worker = null;
         }
+        if (this.standbyWorker) {
+          try {
+            this.standbyWorker.terminate();
+          } catch (_) {}
+          this.standbyWorker = null;
+        }
 
         this.initializationFailed = false;
         this.isReady = false;
         this.isSearching = false;
         this.onStatus('loading', 'Initializing Patricia WASM...');
         this.currentSkillLevel = -1;
-        const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
-        this.worker = new Worker(workerUrl);
 
-        let settled = false;
-        let timeout: ReturnType<typeof setTimeout> | null = null;
-        const fail = (message: string, error?: unknown) => {
-          if (settled) return;
-          settled = true;
-          if (timeout) clearTimeout(timeout);
-          if (error) console.error('[PatriciaRunner] Initialization failed:', error);
-          this.initializationFailed = true;
-          this.isReady = false;
-          this.isSearching = false;
-          this.pendingAnalysis = null;
-          try {
-            this.worker?.terminate();
-          } catch (_) {}
-          this.worker = null;
-          this.onStatus('error', message);
-          resolve();
-        };
-        const markReady = () => {
-          if (settled) return;
-          settled = true;
-          if (timeout) clearTimeout(timeout);
+        this.spawnWorker('primary').then(({ worker, ok }) => {
+          if (!ok || !worker) {
+            this.initializationFailed = true;
+            this.isReady = false;
+            this.worker = null;
+            this.onStatus('error', 'Patricia worker did not complete UCI initialization');
+            resolve();
+            return;
+          }
+
+          this.worker = worker;
           this.isReady = true;
           this.isSearching = false;
+
+          this.worker.onmessage = (event: MessageEvent) => {
+            const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
+            if (line === 'uciok' || line === 'readyok') {
+              this.isReady = true;
+              this.isSearching = false;
+              this.onStatus('ready', 'Patricia 5.1 Ready');
+              return;
+            }
+            this.handleLine(line);
+          };
+
+          this.worker.onerror = (error) => {
+            console.error('[PatriciaRunner] Worker failed:', error);
+            this.initializationFailed = true;
+            this.isReady = false;
+            this.isSearching = false;
+            this.pendingAnalysis = null;
+            try {
+              this.worker?.terminate();
+            } catch (_) {}
+            this.worker = null;
+            this.onStatus('error', 'Patricia worker failed');
+          };
+
           this.onStatus('ready', 'Patricia 5.1 Ready');
           resolve();
+
+          // Kick off a standby warm-up AFTER primary is ready so we don't compete
+          // for the main thread during initial load.
+          this.warmStandby();
+
           if (this.pendingAnalysis) {
             const pending = this.pendingAnalysis;
             this.pendingAnalysis = null;
             this.analyze(pending.fen, pending.analysisId, pending.positionKey, pending.options);
           }
-        };
-
-        timeout = setTimeout(() => {
-          fail('Patricia worker did not complete UCI initialization');
-        }, 6000);
-
-        this.worker.onmessage = (event: MessageEvent) => {
-          const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
-          if (line === 'uciok' || line === 'readyok') {
-            markReady();
-            return;
-          }
-          this.handleLine(line);
-        };
-
-        this.worker.onerror = (error) => {
-          if (!settled) {
-            fail('Patricia worker failed to initialize', error);
-            return;
-          }
-
-          console.error('[PatriciaRunner] Worker failed:', error);
-          this.initializationFailed = true;
-          this.isReady = false;
-          this.isSearching = false;
-          this.pendingAnalysis = null;
-          try {
-            this.worker?.terminate();
-          } catch (_) {}
-          this.worker = null;
-          this.onStatus('error', 'Patricia worker failed');
-        };
-
-        this.worker.postMessage('uci');
-        this.worker.postMessage('isready');
-        this.worker.postMessage('setoption name Hash value 32');
-        this.worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
+        });
       } catch (error) {
         console.error('[PatriciaRunner] Initialization failed:', error);
         this.initializationFailed = true;
@@ -480,6 +542,50 @@ class PatriciaRunner implements IEngineRunner {
         resolve();
       }
     });
+  }
+
+  /**
+   * Atomically swap to a standby worker (or spawn one if none is ready).
+   * Returns true if the swap succeeded instantly.
+   */
+  private swapToStandby(): boolean {
+    const next = this.standbyWorker;
+    this.standbyWorker = null;
+    if (next) {
+      // Kill old
+      try {
+        this.worker?.terminate();
+      } catch (_) {}
+      this.worker = next;
+      this.isReady = true;
+      this.isSearching = false;
+      this.currentSkillLevel = -1;
+      this.worker.onmessage = (event: MessageEvent) => {
+        const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
+        if (line === 'uciok' || line === 'readyok') {
+          this.isReady = true;
+          this.isSearching = false;
+          this.onStatus('ready', 'Patricia 5.1 Ready');
+          return;
+        }
+        this.handleLine(line);
+      };
+      this.worker.onerror = (error) => {
+        console.error('[PatriciaRunner] Standby worker failed:', error);
+        this.initializationFailed = true;
+        this.isReady = false;
+        this.isSearching = false;
+        try {
+          this.worker?.terminate();
+        } catch (_) {}
+        this.worker = null;
+        this.onStatus('error', 'Patricia worker failed');
+      };
+      // Trigger warm of the next standby in the background
+      this.warmStandby();
+      return true;
+    }
+    return false;
   }
 
   private handleLine(line: string) {
@@ -560,22 +666,26 @@ class PatriciaRunner implements IEngineRunner {
     this.currentPositionKey = positionKey;
     this.senderTabId = options.senderTabId;
 
-    // INSTANT TERMINATION OF STALE SYNCHRONOUS SEARCH:
-    // Single-threaded WASM engines execute synchronous C++ loops that cannot be
-    // interrupted by postMessage('stop'). Terminating the busy worker immediately halts
-    // the old calculation in 0ms and eliminates the lagging queue backlog.
-    if (this.isSearching && this.worker) {
-      try {
-        this.worker.onerror = null;
-        this.worker.onmessage = null;
-        this.worker.terminate();
-      } catch (_) {}
-      this.worker = null;
-      this.isReady = false;
-      this.isSearching = false;
-      this.pendingAnalysis = { fen, analysisId, positionKey, options };
-      this.init();
-      return;
+    // INSTANT INTERRUPT OF STALE SYNCHRONOUS SEARCH:
+    // Patricia is single-threaded WASM; postMessage('stop') queues behind the
+    // running search. Instead we swap to a pre-warmed standby worker for 0ms
+    // handoff. If no standby is warm yet, fall back to terminate + re-init.
+    if (this.isSearching) {
+      if (this.swapToStandby()) {
+        // Successfully swapped; fall through and start the new search.
+      } else if (this.worker) {
+        try {
+          this.worker.onerror = null;
+          this.worker.onmessage = null;
+          this.worker.terminate();
+        } catch (_) {}
+        this.worker = null;
+        this.isReady = false;
+        this.isSearching = false;
+        this.pendingAnalysis = { fen, analysisId, positionKey, options };
+        this.init();
+        return;
+      }
     }
 
     if (this.initializationFailed) {
@@ -593,7 +703,7 @@ class PatriciaRunner implements IEngineRunner {
     this.parser.reset(fen, analysisId, positionKey);
 
     // Dynamic MultiPV
-    const targetMultiPv = Math.max(1, Math.min(4, options.multiPv || 1));
+    const targetMultiPv = Math.max(1, Math.min(5, options.multiPv || 1));
     if (this.currentMultiPv !== targetMultiPv) {
       this.worker.postMessage(`setoption name MultiPV value ${targetMultiPv}`);
       this.currentMultiPv = targetMultiPv;
@@ -606,6 +716,8 @@ class PatriciaRunner implements IEngineRunner {
       patriciaElo: options.patriciaElo ?? options.targetElo,
       depth: options.depth,
       multiPv: options.multiPv,
+      patriciaManualDepth: options.patriciaManualDepth,
+      patriciaPerformance: options.patriciaPerformance,
     } as any);
 
     this.worker.postMessage(`setoption name Personality value ${tuning.personality}`);
@@ -617,8 +729,8 @@ class PatriciaRunner implements IEngineRunner {
       this.currentSkillLevel = tuning.skillLevel;
     }
 
-    const targetDepth = tuning.isHuman ? tuning.recommendedDepth : (options.depth || 16);
-    const moveTime = tuning.isHuman ? Math.min(350, Math.max(120, targetDepth * 50)) : 500;
+    const targetDepth = tuning.recommendedDepth;
+    const moveTime = tuning.moveTimeMs;
 
     this.worker.postMessage(`position fen ${fen}`);
     this.worker.postMessage(`go depth ${targetDepth} movetime ${moveTime}`);
@@ -628,16 +740,21 @@ class PatriciaRunner implements IEngineRunner {
   public stop() {
     if (this.initializationFailed) return;
 
-    if (this.isSearching && this.worker) {
-      try {
-        this.worker.onerror = null;
-        this.worker.onmessage = null;
-        this.worker.terminate();
-      } catch (_) {}
-      this.worker = null;
-      this.isReady = false;
-      this.isSearching = false;
-      this.init();
+    if (this.isSearching) {
+      // Prefer swapping to a warm standby; fall back to terminate+reinit.
+      if (!this.swapToStandby() && this.worker) {
+        try {
+          this.worker.onerror = null;
+          this.worker.onmessage = null;
+          this.worker.terminate();
+        } catch (_) {}
+        this.worker = null;
+        this.isReady = false;
+        this.isSearching = false;
+        this.init();
+      } else {
+        this.isSearching = false;
+      }
     } else if (this.worker) {
       this.worker.postMessage('stop');
     }
@@ -653,6 +770,15 @@ class PatriciaRunner implements IEngineRunner {
         this.worker.terminate();
       } catch (_) {}
       this.worker = null;
+    }
+    if (this.standbyWorker) {
+      try {
+        this.standbyWorker.onerror = null;
+        this.standbyWorker.onmessage = null;
+        this.standbyWorker.postMessage('quit');
+        this.standbyWorker.terminate();
+      } catch (_) {}
+      this.standbyWorker = null;
     }
     this.isReady = false;
     this.isSearching = false;
@@ -879,6 +1005,8 @@ class UnifiedEngineHost {
             patriciaPersonality: message.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
             patriciaLimitStrength: message.patriciaLimitStrength ?? this.lastOptions.patriciaLimitStrength,
             patriciaElo: message.patriciaElo ?? this.lastOptions.patriciaElo,
+            patriciaPerformance: message.patriciaPerformance ?? this.lastOptions.patriciaPerformance,
+            patriciaManualDepth: message.patriciaManualDepth ?? this.lastOptions.patriciaManualDepth,
             threads: message.threads,
             hashMb: message.hashMb,
             senderTabId: message.senderTabId || sender?.tab?.id,
@@ -922,6 +1050,8 @@ class UnifiedEngineHost {
             patriciaPersonality: s.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
             patriciaLimitStrength: s.patriciaLimitStrength ?? this.lastOptions.patriciaLimitStrength,
             patriciaElo: s.patriciaElo ?? this.lastOptions.patriciaElo,
+            patriciaPerformance: s.patriciaPerformance ?? this.lastOptions.patriciaPerformance,
+            patriciaManualDepth: s.patriciaManualDepth ?? this.lastOptions.patriciaManualDepth,
             threads: s.threads ?? this.lastOptions.threads,
             hashMb: s.hashMb ?? this.lastOptions.hashMb,
           };

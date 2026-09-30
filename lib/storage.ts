@@ -12,6 +12,8 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   patriciaPersonality: 'aggressive',
   patriciaLimitStrength: true,
   patriciaElo: 2500,
+  patriciaManualDepth: false,
+  patriciaPerformance: 'responsive',
   showHighlights: true,
   highlightPlayerMoves: true,
   highlightOpponentMoves: false,

@@ -26,6 +26,8 @@ export interface PatriciaTuning {
   personality: 'aggressive' | 'human' | 'full_strength' | 'solid';
   multiPv: number;
   cpLoss: number;
+  useProgressiveInfo: boolean;
+  moveTimeMs: number;
 }
 
 export function mapEloToPatriciaSkill(targetElo: number): {
@@ -55,20 +57,32 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
 
   if (!limitStrength || personality === 'full_strength') {
+    const perfMode = settings.patriciaPerformance || 'responsive';
+    const baseDepth = Math.min(20, Math.max(12, settings.depth || 16));
+    const fullDepth =
+      perfMode === 'responsive' ? Math.min(16, baseDepth) :
+      perfMode === 'balanced' ? Math.min(18, baseDepth) :
+      Math.min(22, baseDepth);
     return {
       isHuman: false,
       skillLevel: 21,
       targetElo: 3500,
-      recommendedDepth: Math.min(18, Math.max(12, settings.depth || 16)),
+      recommendedDepth: fullDepth,
       personality: 'full_strength',
       multiPv,
       cpLoss: 0,
+      useProgressiveInfo: true,
+      moveTimeMs: perfMode === 'responsive' ? 350 : perfMode === 'balanced' ? 600 : 1200,
     };
   }
 
+  const manualDepth = !!settings.patriciaManualDepth;
+  const perfMode = settings.patriciaPerformance || 'responsive';
+  const userDepth = settings.depth || 16;
+
   const { skillLevel, clampedElo, cpLoss } = mapEloToPatriciaSkill(rawElo);
 
-  // Realistic novice-to-master depth scaling:
+  // Realistic novice-to-master depth scaling (baseline, "balanced" profile):
   // 500-600 Elo: depth 2 (novice 1-move tactical horizon)
   // 650-800 Elo: depth 3 (beginner 1.5-move horizon)
   // 850-1100 Elo: depth 4 (casual club horizon)
@@ -78,16 +92,44 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
   // 2101-2500 Elo: depth 10 (FIDE master / master)
   // 2501-2800 Elo: depth 12 (International / Grandmaster)
   // 2801+ Elo: depth 14 (Super-GM)
-  let recommendedDepth = 2;
-  if (clampedElo <= 600) recommendedDepth = 2;
-  else if (clampedElo <= 800) recommendedDepth = 3;
-  else if (clampedElo <= 1100) recommendedDepth = 4;
-  else if (clampedElo <= 1400) recommendedDepth = 5;
-  else if (clampedElo <= 1750) recommendedDepth = 6;
-  else if (clampedElo <= 2100) recommendedDepth = 8;
-  else if (clampedElo <= 2500) recommendedDepth = 10;
-  else if (clampedElo <= 2800) recommendedDepth = 12;
-  else recommendedDepth = 14;
+  let baselineDepth = 2;
+  if (clampedElo <= 600) baselineDepth = 2;
+  else if (clampedElo <= 800) baselineDepth = 3;
+  else if (clampedElo <= 1100) baselineDepth = 4;
+  else if (clampedElo <= 1400) baselineDepth = 5;
+  else if (clampedElo <= 1750) baselineDepth = 6;
+  else if (clampedElo <= 2100) baselineDepth = 8;
+  else if (clampedElo <= 2500) baselineDepth = 10;
+  else if (clampedElo <= 2800) baselineDepth = 12;
+  else baselineDepth = 14;
+
+  // Performance profile tweaks the auto-depth for near-instant feedback.
+  // "responsive" caps depth to keep highlights near-instantaneous.
+  let autoDepth = baselineDepth;
+  if (perfMode === 'responsive') {
+    autoDepth = Math.min(10, baselineDepth);
+  } else if (perfMode === 'balanced') {
+    autoDepth = baselineDepth;
+  } else {
+    // deep: allow +2 plies on stronger profiles; capped at 16 to prevent runaway lags
+    autoDepth = Math.min(16, baselineDepth + 2);
+  }
+
+  // Manual override: when user force-enables depth slider, respect their choice.
+  const recommendedDepth = manualDepth ? Math.max(2, Math.min(24, userDepth)) : autoDepth;
+
+  // Progressive info streaming is essential for instant highlight feedback.
+  // Always enable for aggro/human modes so early depths show highlights immediately.
+  const useProgressiveInfo = true;
+
+  // Tighten movetime budgets in "responsive" mode so the single-threaded WASM
+  // doesn't block the worker for hundreds of milliseconds past its target depth.
+  const moveTimeMs =
+    perfMode === 'responsive'
+      ? Math.min(220, Math.max(80, recommendedDepth * 22))
+      : perfMode === 'balanced'
+      ? Math.min(420, Math.max(120, recommendedDepth * 35))
+      : Math.min(900, Math.max(180, recommendedDepth * 60));
 
   return {
     isHuman: true,
@@ -97,6 +139,8 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
     personality,
     multiPv,
     cpLoss,
+    useProgressiveInfo,
+    moveTimeMs,
   };
 }
 

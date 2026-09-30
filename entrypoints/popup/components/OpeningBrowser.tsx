@@ -48,6 +48,9 @@ const CATEGORY_LABELS: Record<OpeningCategory, string> = {
   offbeat: 'Offbeat',
   romantic: 'Romantic',
   system: 'System',
+  'ruy-lopez': 'Ruy Lopez',
+  'queens-gambit': "Queen's Gambit",
+  'kingside-attack': 'Kingside Attack',
 };
 
 const BROWSE_CATEGORIES: OpeningCategory[] = [

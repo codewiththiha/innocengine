@@ -53,6 +53,8 @@ export interface EngineSettings {
   patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
   patriciaLimitStrength?: boolean;
   patriciaElo?: number;
+  patriciaManualDepth?: boolean;
+  patriciaPerformance?: 'responsive' | 'balanced' | 'deep';
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
   highlightOpponentMoves: boolean;

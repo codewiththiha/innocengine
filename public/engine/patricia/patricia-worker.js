@@ -279,7 +279,12 @@ async function initEngine() {
       const isSearchInfo = line.includes(' score ') && line.includes(' pv ');
       if (isSearchInfo) {
         collectSearchCandidate(line);
-        if (!isFullStrength()) return;
+        // Always stream progressive depth info so the UI gets instant highlight
+        // feedback even in human/aggressive modes. Human-mode blunder selection
+        // is applied at bestmove via chooseCandidate(), so streaming the raw
+        // engine favorites is safe and responsive.
+        postOutput(line);
+        return;
       }
 
       if (line.startsWith('bestmove')) {
@@ -380,14 +385,22 @@ function handleCommand(rawCommand) {
       const fullStrength = isFullStrength();
       const bounds = getEloSearchBounds(targetElo, fullStrength);
       const depthMatch = command.match(/\bdepth\s+(\d+)/);
+      const movetimeMatch = command.match(/\bmovetime\s+(\d+)/);
       const requestedDepth = depthMatch ? Number(depthMatch[1]) : 0;
+      const requestedMovetime = movetimeMatch ? Number(movetimeMatch[1]) : 0;
       const depth = fullStrength
         ? requestedDepth || bounds.depth
         : Math.min(bounds.depth, requestedDepth || bounds.depth);
 
+      // Respect the caller's movetime budget (host may tighten it for instant UI feedback)
+      // but never exceed the safe upper bound from the Elo table.
+      const movetime = requestedMovetime > 0
+        ? Math.min(requestedMovetime, bounds.movetime + 200)
+        : bounds.movetime;
+
       // Patricia resets MultiPV during its human search path, so restore it per search.
       syncEngineMultiPv();
-      engineInstance.postMessage(`go depth ${depth} movetime ${bounds.movetime}`);
+      engineInstance.postMessage(`go depth ${depth} movetime ${movetime}`);
       return;
     }
 

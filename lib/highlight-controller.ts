@@ -30,7 +30,10 @@ export class HighlightController {
   private activePositionKey: string = '';
   private readonly openingSelector = new AdaptiveOpeningSelector();
 
-  private readonly STABILITY_WINDOW_MS = 180;
+  // Tighter stability window because modern engines stream progressive
+  // iterative-deepening info. 60ms is ~3 animation frames — enough to absorb
+  // PV flips at depth 1-2, short enough that highlights feel instant.
+  private readonly STABILITY_WINDOW_MS = 60;
 
   constructor(settings: EngineSettings, renderCallback: HighlightRenderCallback) {
     this.settings = settings;

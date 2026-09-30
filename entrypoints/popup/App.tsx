@@ -85,8 +85,13 @@ export default function App() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resolveSynchronizedDepth = (current: EngineSettings): number => {
-    if (current.activeEngineId === 'patricia' && current.patriciaPersonality !== 'full_strength') {
-      return getPatriciaTuning(current).recommendedDepth;
+    if (current.activeEngineId === 'patricia') {
+      // Manual override takes precedence regardless of personality
+      if (current.patriciaManualDepth) return current.depth || 16;
+      // Full-strength without manual override still auto-syncs
+      if (current.patriciaPersonality !== 'full_strength') {
+        return getPatriciaTuning(current).recommendedDepth;
+      }
     }
     if (current.activeEngineId === 'stockfish' && current.limitStrength) {
       return getStockfishTuning(current).maxDepth;
@@ -101,7 +106,10 @@ export default function App() {
     const updated = { ...settings, ...patch };
     const autoDepth = resolveSynchronizedDepth(updated);
     const isAuto =
-      (updated.activeEngineId === 'patricia' && updated.patriciaPersonality !== 'full_strength') ||
+      (updated.activeEngineId === 'patricia' && !updated.patriciaManualDepth &&
+        (updated.patriciaPersonality !== 'full_strength' ||
+          // Also re-sync full-strength depth when switching profiles unless manual override
+          false)) ||
       (updated.activeEngineId === 'stockfish' && updated.limitStrength) ||
       updated.activeEngineId === 'maia2' ||
       updated.activeEngineId === 'maia3';
@@ -124,7 +132,7 @@ export default function App() {
     const updated = { ...settings, [key]: value };
     const autoDepth = resolveSynchronizedDepth(updated);
     const isAuto =
-      (updated.activeEngineId === 'patricia' && updated.patriciaPersonality !== 'full_strength') ||
+      (updated.activeEngineId === 'patricia' && !updated.patriciaManualDepth && updated.patriciaPersonality !== 'full_strength') ||
       (updated.activeEngineId === 'stockfish' && updated.limitStrength) ||
       updated.activeEngineId === 'maia2' ||
       updated.activeEngineId === 'maia3';
@@ -136,6 +144,15 @@ export default function App() {
 
     if (key === 'activeEngineId') {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(value) });
+    }
+
+    // When the user toggles manual depth OFF, snap depth back to the auto-calibrated value
+    // so the UX clearly returns to the locked/auto state rather than keeping the slider value.
+    if (key === 'patriciaManualDepth' && value === false) {
+      const snapDepth = getPatriciaTuning({ ...updated, patriciaManualDepth: false }).recommendedDepth;
+      updated.depth = snapDepth;
+      setSettings({ ...updated, depth: snapDepth });
+      chrome.runtime.sendMessage({ target: 'engine', type: 'UPDATE_SETTINGS', settings: { ...updated, depth: snapDepth } });
     }
 
     // Debounce storage persist to avoid flooding engine worker during slider dragging
@@ -478,7 +495,8 @@ export default function App() {
 
           {/* Calculation Depth: Active & unlocked for manual tuning, or locked with auto-calibrated depth */}
           {(() => {
-            const isPatriciaAuto = settings.activeEngineId === 'patricia' && settings.patriciaPersonality !== 'full_strength';
+            const isPatricia = settings.activeEngineId === 'patricia';
+            const isPatriciaAuto = isPatricia && !settings.patriciaManualDepth && settings.patriciaPersonality !== 'full_strength';
             const isStockfishAuto = settings.activeEngineId === 'stockfish' && settings.limitStrength;
             const isMaiaAuto = settings.activeEngineId === 'maia2' || settings.activeEngineId === 'maia3';
             const isDepthAuto = isPatriciaAuto || isStockfishAuto || isMaiaAuto;
@@ -489,7 +507,7 @@ export default function App() {
             if (isPatriciaAuto) {
               const tuning = getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 });
               effectiveDepth = tuning.recommendedDepth;
-              autoReason = `Auto-calibrated to ${effectiveDepth} ply for ${settings.patriciaElo ?? 2500} Elo handicap.`;
+              autoReason = `Auto-calibrated to ${effectiveDepth} ply for ${settings.patriciaElo ?? 2500} Elo in ${settings.patriciaPerformance || 'responsive'} mode.`;
             } else if (isStockfishAuto) {
               const sfTuning = getStockfishTuning(settings);
               effectiveDepth = sfTuning.maxDepth;
@@ -500,45 +518,63 @@ export default function App() {
             }
 
             return (
-              <div className="setting-item">
-                <div className="setting-label-row">
-                  <span className="setting-label">Calculation Depth</span>
-                  <span
-                    className="setting-value"
-                    style={{
-                      color: isDepthAuto ? '#38bdf8' : '#e2e8f0',
-                      fontWeight: isDepthAuto ? 600 : 500,
-                    }}
-                  >
-                    {isDepthAuto ? `Auto: ${effectiveDepth} ply` : `${settings.depth} ply`}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="24"
-                  step="1"
-                  value={effectiveDepth}
-                  disabled={isDepthAuto}
-                  onChange={(e) => {
-                    if (!isDepthAuto) {
-                      updateSetting('depth', parseInt(e.target.value, 10));
-                    }
-                  }}
-                  className="slider"
-                  style={isDepthAuto ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
-                />
-                <div className="slider-hints">
-                  <span>Novice (2)</span>
-                  <span>Balanced (16)</span>
-                  <span>Deep (24)</span>
-                </div>
-                {isDepthAuto && (
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.4 }}>
-                    {autoReason} Manual depth override is disabled to prevent engine overpower conflicts.
+              <>
+                <div className="setting-item">
+                  <div className="setting-label-row">
+                    <span className="setting-label">Calculation Depth</span>
+                    <span
+                      className="setting-value"
+                      style={{
+                        color: isDepthAuto ? '#38bdf8' : '#e2e8f0',
+                        fontWeight: isDepthAuto ? 600 : 500,
+                      }}
+                    >
+                      {isDepthAuto ? `Auto: ${effectiveDepth} ply` : `${settings.depth} ply`}
+                    </span>
                   </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="24"
+                    step="1"
+                    value={effectiveDepth}
+                    disabled={isDepthAuto}
+                    onChange={(e) => {
+                      if (!isDepthAuto) {
+                        updateSetting('depth', parseInt(e.target.value, 10));
+                      }
+                    }}
+                    className="slider"
+                    style={isDepthAuto ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
+                  />
+                  <div className="slider-hints">
+                    <span>Novice (2)</span>
+                    <span>Balanced (16)</span>
+                    <span>Deep (24)</span>
+                  </div>
+                  {isDepthAuto && (
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.4 }}>
+                      {autoReason} {isPatricia ? 'Use the manual override below to unlock the slider.' : 'Manual depth override is disabled to prevent engine overpower conflicts.'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Manual depth override for Patricia */}
+                {isPatricia && settings.patriciaPersonality !== 'full_strength' && (
+                  <label className="toggle-row" style={{ marginTop: 4 }}>
+                    <span>
+                      <span className="toggle-label">Manual depth override</span>
+                      <span className="setting-help">Unlock the ply slider to set a custom search depth instead of auto-calibrating to Elo.</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={!!settings.patriciaManualDepth}
+                      onChange={(e) => updateSetting('patriciaManualDepth', e.target.checked)}
+                      className="toggle-switch"
+                    />
+                  </label>
                 )}
-              </div>
+              </>
             );
           })()}
 
@@ -653,6 +689,33 @@ export default function App() {
                 </div>
               )}
 
+              {/* Performance / Responsiveness Profile (Patricia-specific) */}
+              <div className="setting-item" style={{ marginTop: 12 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Search Responsiveness</span>
+                  <span className="setting-value" style={{ textTransform: 'capitalize' }}>
+                    {settings.patriciaPerformance || 'responsive'}
+                  </span>
+                </div>
+                <select
+                  className="select-dropdown"
+                  value={settings.patriciaPerformance || 'responsive'}
+                  onChange={(e) => updateSetting('patriciaPerformance', e.target.value as any)}
+                >
+                  <option value="responsive">Instant (fast highlight, lower depth)</option>
+                  <option value="balanced">Balanced (default)</option>
+                  <option value="deep">Deep (higher depth, slightly slower)</option>
+                </select>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                  {(!settings.patriciaPerformance || settings.patriciaPerformance === 'responsive') &&
+                    'Responsive caps depth and tightens the move-time budget so highlights render instantly even at higher Elo handicaps.'}
+                  {settings.patriciaPerformance === 'balanced' &&
+                    'Balanced uses the authentic Elo-calibrated depth with a moderate time budget — the classic Patricia feel.'}
+                  {settings.patriciaPerformance === 'deep' &&
+                    'Deep adds a couple plies and a longer time budget for stronger analysis; highlights may take a fraction of a second longer to appear.'}
+                </div>
+              </div>
+
               {/* Dynamic Calibration Guide */}
               <div
                 style={{
@@ -667,7 +730,7 @@ export default function App() {
                   <Activity size={12} /> Dynamic Rating & Personality Calibration
                 </div>
                 <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and move time to match the selected rating. At low Elo (500–1000), search is restricted to authentic beginner tactical horizon instead of machine-like 20+ ply perfection.
+                  Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and move time to match the selected rating in {settings.patriciaPerformance || 'responsive'} mode. Progressive iterative-deepening updates are streamed immediately so highlights appear at the first stable depth instead of waiting for final bestmove.
                 </div>
               </div>
 
@@ -948,22 +1011,56 @@ export default function App() {
           )}
 
           {settings.activeEngineId === 'patricia' ? (
-            <div
-              style={{
-                marginTop: 12,
-                padding: '10px 12px',
-                borderRadius: 6,
-                background: 'rgba(30, 41, 59, 0.5)',
-                border: '1px solid rgba(244, 63, 94, 0.25)',
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
-                Patricia 5.1 WASM Execution Profile
+            <>
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: '1px solid rgba(244, 63, 94, 0.25)',
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
+                  Patricia 5.1 WASM Execution Profile
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                  Dual NNUE perspective networks (768×2→768→1) trained on aggressive filtered positions. Features asymmetric sacrifice evaluation, 30cp draw contempt, and MultiPV 5 human simulation. Search runs single-threaded inside a dedicated Web Worker so the main thread stays responsive.
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                Dual NNUE perspective networks (768x2-&gt;768-&gt;1) trained on aggressive filtered positions. Features asymmetric sacrifice evaluation, 30cp draw contempt, and MultiPV 5 human simulation.
+              <div className="setting-item" style={{ marginTop: 12 }}>
+                <div className="setting-label-row">
+                  <span className="setting-label">Performance Mode</span>
+                  <span className="setting-value" style={{ textTransform: 'capitalize' }}>
+                    {settings.patriciaPerformance || 'responsive'}
+                  </span>
+                </div>
+                <select
+                  className="select-dropdown"
+                  value={settings.patriciaPerformance || 'responsive'}
+                  onChange={(e) => updateSetting('patriciaPerformance', e.target.value as any)}
+                >
+                  <option value="responsive">Instant (fastest highlight)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="deep">Deep (strongest)</option>
+                </select>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                  Patricia is single-threaded WASM. More depth means more total CPU time before highlights settle, but progressive iterative-deepening output keeps the best-move square visible as soon as a stable candidate is found.
+                </div>
               </div>
-            </div>
+              <label className="toggle-row" style={{ marginTop: 6 }}>
+                <span>
+                  <span className="toggle-label">Manual depth override</span>
+                  <span className="setting-help">Force a custom ply count instead of the Elo-calibrated default.</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!!settings.patriciaManualDepth}
+                  onChange={(e) => updateSetting('patriciaManualDepth', e.target.checked)}
+                  className="toggle-switch"
+                />
+              </label>
+            </>
           ) : settings.activeEngineId === 'stockfish' ? (
             <div
               style={{
