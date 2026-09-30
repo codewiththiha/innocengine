@@ -7,10 +7,21 @@ import { getBallMaeGyiTuning, getStockfishTuning, mapEloToBallMaeGyiSkill } from
 import type { EngineSettings, EngineEvaluation, EngineCapabilities, OpeningMode } from '../../lib/types';
 import {
   Activity, BookOpen, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
-  Server, Terminal,
+  Server, Terminal, Circle, Square,
 } from 'lucide-react';
 
 type Tab = 'engine' | 'board' | 'analysis' | 'strength' | 'opening' | 'advanced';
+
+const TAB_RESET_KEYS: Record<Tab, (keyof EngineSettings)[]> = {
+  engine: ['activeEngineId'],
+  board: ['showHighlights', 'highlightPlayerMoves', 'highlightOpponentMoves', 'showArrows',
+    'showEvalBar', 'showHud', 'highlighterOpacity', 'showNumberCircles', 'highlightShape'],
+  analysis: ['depth', 'multiPv', 'autoAnalyze'],
+  strength: ['limitStrength', 'targetElo', 'ballmaegyiPersonality', 'ballmaegyiElo',
+    'ballmaegyiPerformance', 'ballmaegyiManualDepth'],
+  opening: ['opening'],
+  advanced: ['hashMb', 'threads'],
+};
 
 const BUILTIN_ENGINES = [
   { id: 'stockfish', label: 'Stockfish 17' },
@@ -26,23 +37,48 @@ export default function App() {
   const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
   const [savedBadge, setSavedBadge] = useState(false);
   const [optionSearch, setOptionSearch] = useState('');
+  const [recorderActive, setRecorderActive] = useState(false);
+  const [recorderManual, setRecorderManual] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabRef = useRef<Tab>('engine');
 
   useEffect(() => {
-    getSettings().then(setSettings);
+    getSettings().then((s) => {
+      setSettings(s);
+      const initialTab = ((s.lastPopupTab as Tab) || 'engine');
+      setTab(initialTab);
+      tabRef.current = initialTab;
+    });
     chrome.runtime.sendMessage({ target: 'popup', type: 'GET_CURRENT_EVAL' }, (res: any) => {
       if (res) {
         if (res.evaluation) setCurrentEval(res.evaluation);
         if (res.capabilities) setCapabilities(res.capabilities);
       }
     });
+    // Query initial recorder state
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (tabId) {
+        chrome.tabs.sendMessage(tabId, { target: 'content', type: 'RECORDER_STATE' }, (res: any) => {
+          if (chrome.runtime.lastError) return;
+          if (res) { setRecorderActive(!!res.active); setRecorderManual(!!res.manual); }
+        });
+      }
+    });
     const onMsg = (msg: any) => {
       if (msg.target === 'content' && msg.type === 'EVAL_UPDATE') setCurrentEval(msg.evaluation);
       else if (msg.target === 'popup' && msg.type === 'ENGINE_CAPABILITIES') setCapabilities(msg.capabilities);
+      else if (msg.target === 'popup' && msg.type === 'GAME_SAVED') setRecorderActive(false);
     };
     chrome.runtime.onMessage.addListener(onMsg);
     return () => chrome.runtime.onMessage.removeListener(onMsg);
   }, []);
+
+  const setActiveTab = (t: Tab) => {
+    setTab(t);
+    tabRef.current = t;
+    saveSettings({ lastPopupTab: t });
+  };
 
   const activeCaps = capsFor(settings.activeEngineId, capabilities);
   const maxThreads = navigator.hardwareConcurrency || 8;
@@ -75,9 +111,42 @@ export default function App() {
     }, 100);
   };
 
-  const reset = async () => { setSettings(DEFAULT_SETTINGS); await saveSettings(DEFAULT_SETTINGS); setSavedBadge(true); setTimeout(() => setSavedBadge(false), 1000); };
+  const resetTab = async () => {
+    const keys = TAB_RESET_KEYS[tabRef.current] || [];
+    const patch: Partial<EngineSettings> = {};
+    for (const k of keys) {
+      (patch as any)[k] = (DEFAULT_SETTINGS as any)[k];
+    }
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    await saveSettings(next);
+    setSavedBadge(true);
+    setTimeout(() => setSavedBadge(false), 1000);
+  };
+
   const openPlayground = () => chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
   const openReview = () => chrome.tabs.create({ url: chrome.runtime.getURL('review.html') });
+
+  const sendToActiveTab = (msg: any) => new Promise<any>((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const id = tabs[0]?.id;
+      if (!id) return resolve(null);
+      chrome.tabs.sendMessage(id, msg, (res) => {
+        if (chrome.runtime.lastError) return resolve(null);
+        resolve(res);
+      });
+    });
+  });
+
+  const toggleRecording = async () => {
+    if (recorderActive && recorderManual) {
+      await sendToActiveTab({ target: 'content', type: 'RECORDER_STOP' });
+      setRecorderActive(false); setRecorderManual(false);
+    } else {
+      const res = await sendToActiveTab({ target: 'content', type: 'RECORDER_START' });
+      if (res?.ok) { setRecorderActive(true); setRecorderManual(true); }
+    }
+  };
 
   const isBallMaeGyi = settings.activeEngineId === 'ballmaegyi';
   const isStockfish = settings.activeEngineId === 'stockfish';
@@ -137,7 +206,7 @@ export default function App() {
         ] as const).map(([id, icon, label]) => (
           <button key={id} role="tab"
             className={`tab flex-1 gap-1 h-8 text-xs rounded-md ${tab === id ? 'tab-active bg-primary text-primary-content shadow-sm' : 'opacity-70 hover:opacity-100'}`}
-            onClick={() => setTab(id as Tab)}>
+            onClick={() => setActiveTab(id as Tab)}>
             {icon}<span>{label}</span>
           </button>
         ))}
@@ -158,6 +227,11 @@ export default function App() {
 
         {tab === 'board' && (
           <div className="flex flex-col gap-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Auto-record finished games</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.autoRecordGames}
+                onChange={(e) => apply({ autoRecordGames: e.target.checked })}/>
+            </label>
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm">Highlight my moves</span>
               <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.highlightPlayerMoves}
@@ -180,12 +254,25 @@ export default function App() {
             </label>
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm">HUD</span>
-              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.showHud}
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.showHud}
                 onChange={(e) => apply({ showHud: e.target.checked })}/>
             </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Move number badges</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.showNumberCircles}
+                onChange={(e) => apply({ showNumberCircles: e.target.checked })}/>
+            </label>
             <label className="form-control w-full">
-              <div className="label py-1"><span className="label-text">Opacity · {Math.round((settings.highlighterOpacity ?? 0.35)*100)}%</span></div>
-              <input type="range" className="range range-primary range-xs" min="0.15" max="0.80" step="0.05" value={settings.highlighterOpacity ?? 0.35}
+              <div className="label py-1"><span className="label-text">Square corners</span></div>
+              <select className="select select-bordered select-sm w-full" value={settings.highlightShape || 'square'}
+                onChange={(e) => apply({ highlightShape: e.target.value as 'square' | 'rounded' })}>
+                <option value="square">Square</option>
+                <option value="rounded">Rounded</option>
+              </select>
+            </label>
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Opacity · {Math.round((settings.highlighterOpacity ?? 0.28)*100)}%</span></div>
+              <input type="range" className="range range-primary range-xs" min="0.10" max="0.60" step="0.05" value={settings.highlighterOpacity ?? 0.28}
                 onChange={(e) => apply({ highlighterOpacity: parseFloat(e.target.value) })}/>
             </label>
             <div className="divider my-1"></div>
@@ -366,9 +453,16 @@ export default function App() {
 
       {/* Footer */}
       <div className="flex gap-2 p-2 border-t border-base-300 bg-base-200 mt-auto">
-        <button className="btn btn-primary btn-sm flex-1 gap-1" onClick={openPlayground}><ExternalLink size={14}/>Test Bench</button>
+        <button
+          className={`btn btn-sm flex-1 gap-1 ${recorderActive && recorderManual ? 'btn-error' : 'btn-ghost border border-base-300'}`}
+          onClick={toggleRecording}
+          title="Manual record start/stop">
+          {recorderActive && recorderManual ? <Square size={14}/> : <Circle size={14}/>}
+          {recorderActive && recorderManual ? 'Stop' : 'Record'}
+        </button>
         <button className="btn btn-sm flex-1 gap-1" onClick={openReview}><BookOpen size={14}/>Review</button>
-        <button className="btn btn-sm btn-ghost px-2" onClick={reset} title="Reset defaults"><RotateCcw size={14}/></button>
+        <button className="btn btn-primary btn-sm flex-1 gap-1" onClick={openPlayground}><ExternalLink size={14}/>Play</button>
+        <button className="btn btn-sm btn-ghost px-2" onClick={resetTab} title={`Reset ${tab} tab`}><RotateCcw size={14}/></button>
       </div>
 
       {savedBadge && (

@@ -541,7 +541,7 @@ console.log('\n6. Testing storage fallback when chrome.storage is undefined...')
   const { getSettings, saveSettings, subscribeToSettings } = await import('../lib/storage');
   const s = await getSettings();
   assert(s);
-  assert.strictEqual(s.activeEngineId, 'stockfish');
+  assert.strictEqual(s.activeEngineId, 'ballmaegyi');
 
   // Should not throw
   await saveSettings({ depth: 20 });

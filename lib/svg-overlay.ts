@@ -11,53 +11,53 @@ interface ColorDefinition {
 
 const PALETTES: Record<number, ColorDefinition> = {
   1: {
-    primary: '#f59e0b',
-    sourceFill: (op) => `rgba(245, 158, 11, ${op * 0.4})`,
-    targetFill: (op) => `rgba(245, 158, 11, ${op})`,
-    stroke: (op) => `rgba(245, 158, 11, ${Math.min(1.0, op + 0.45)})`,
-    arrow: '#f59e0b',
+    primary: '#b08a4a',
+    sourceFill: (op) => `rgba(176, 138, 74, ${op * 0.55})`,
+    targetFill: (op) => `rgba(176, 138, 74, ${op})`,
+    stroke: (op) => `rgba(120, 92, 48, ${Math.min(1.0, op + 0.5)})`,
+    arrow: '#b08a4a',
     markerId: 'ai-marker-pv1',
   },
   2: {
-    primary: '#3b82f6',
-    sourceFill: (op) => `rgba(59, 130, 246, ${op * 0.4})`,
-    targetFill: (op) => `rgba(59, 130, 246, ${op})`,
-    stroke: (op) => `rgba(59, 130, 246, ${Math.min(1.0, op + 0.45)})`,
-    arrow: '#3b82f6',
+    primary: '#6b7b8d',
+    sourceFill: (op) => `rgba(107, 123, 141, ${op * 0.55})`,
+    targetFill: (op) => `rgba(107, 123, 141, ${op})`,
+    stroke: (op) => `rgba(80, 95, 115, ${Math.min(1.0, op + 0.5)})`,
+    arrow: '#6b7b8d',
     markerId: 'ai-marker-pv2',
   },
   3: {
-    primary: '#8b5cf6',
-    sourceFill: (op) => `rgba(139, 92, 246, ${op * 0.4})`,
-    targetFill: (op) => `rgba(139, 92, 246, ${op})`,
-    stroke: (op) => `rgba(139, 92, 246, ${Math.min(1.0, op + 0.45)})`,
-    arrow: '#8b5cf6',
+    primary: '#8b7aa8',
+    sourceFill: (op) => `rgba(139, 122, 168, ${op * 0.55})`,
+    targetFill: (op) => `rgba(139, 122, 168, ${op})`,
+    stroke: (op) => `rgba(95, 80, 130, ${Math.min(1.0, op + 0.5)})`,
+    arrow: '#8b7aa8',
     markerId: 'ai-marker-pv3',
   },
   4: {
-    primary: '#f43f5e',
-    sourceFill: (op) => `rgba(244, 63, 94, ${op * 0.4})`,
-    targetFill: (op) => `rgba(244, 63, 94, ${op})`,
-    stroke: (op) => `rgba(244, 63, 94, ${Math.min(1.0, op + 0.45)})`,
-    arrow: '#f43f5e',
+    primary: '#a06b6b',
+    sourceFill: (op) => `rgba(160, 107, 107, ${op * 0.55})`,
+    targetFill: (op) => `rgba(160, 107, 107, ${op})`,
+    stroke: (op) => `rgba(120, 75, 75, ${Math.min(1.0, op + 0.5)})`,
+    arrow: '#a06b6b',
     markerId: 'ai-marker-pv4',
   },
   5: {
-    primary: '#06b6d4',
-    sourceFill: (op) => `rgba(6, 182, 212, ${op * 0.4})`,
-    targetFill: (op) => `rgba(6, 182, 212, ${op})`,
-    stroke: (op) => `rgba(6, 182, 212, ${Math.min(1.0, op + 0.45)})`,
-    arrow: '#06b6d4',
+    primary: '#6b9a9e',
+    sourceFill: (op) => `rgba(107, 154, 158, ${op * 0.55})`,
+    targetFill: (op) => `rgba(107, 154, 158, ${op})`,
+    stroke: (op) => `rgba(70, 120, 125, ${Math.min(1.0, op + 0.5)})`,
+    arrow: '#6b9a9e',
     markerId: 'ai-marker-pv5',
   },
 };
 
 const BOOK_COLOR: ColorDefinition = {
-  primary: '#10b981',
-  sourceFill: (op) => `rgba(16, 185, 129, ${op * 0.45})`,
-  targetFill: (op) => `rgba(16, 185, 129, ${op * 1.1})`,
-  stroke: (op) => `rgba(16, 185, 129, ${Math.min(1.0, op + 0.5)})`,
-  arrow: '#10b981',
+  primary: '#7a9265',
+  sourceFill: (op) => `rgba(122, 146, 101, ${op * 0.55})`,
+  targetFill: (op) => `rgba(122, 146, 101, ${op})`,
+  stroke: (op) => `rgba(80, 105, 60, ${Math.min(1.0, op + 0.5)})`,
+  arrow: '#7a9265',
   markerId: 'ai-marker-book',
 };
 
@@ -354,8 +354,10 @@ export class SvgOverlay {
       return;
     }
 
-    const op = Math.max(0.15, Math.min(0.85, this.settings.highlighterOpacity ?? 0.35));
-    const showArrows = this.settings.showArrows ?? this.settings.showConnectors ?? true;
+    const op = Math.max(0.10, Math.min(0.65, this.settings.highlighterOpacity ?? 0.28));
+    const showArrows = this.settings.showArrows ?? true;
+    const showCircles = this.settings.showNumberCircles ?? false;
+    const squareRx = this.settings.highlightShape === 'rounded' ? 0.08 : 0;
 
     const newKey = `${this.isFlipped ? 'F' : 'N'}_${op}_${showArrows ? 'A' : 'N'}_${candidates
       .map((c) => `${c.pvId}:${c.from}${c.to}:${c.isBookMove ? 'bk' : ''}`)
@@ -392,7 +394,7 @@ export class SvgOverlay {
       rectFrom.setAttribute('y', fromPos.y.toString());
       rectFrom.setAttribute('width', '1');
       rectFrom.setAttribute('height', '1');
-      rectFrom.setAttribute('rx', '0.08');
+      rectFrom.setAttribute('rx', squareRx.toString());
       rectFrom.setAttribute('fill', colorDef.sourceFill(op));
       rectFrom.setAttribute('stroke', colorDef.stroke(op));
       rectFrom.setAttribute('stroke-width', '0.028');
@@ -404,14 +406,14 @@ export class SvgOverlay {
       rectTo.setAttribute('y', toPos.y.toString());
       rectTo.setAttribute('width', '1');
       rectTo.setAttribute('height', '1');
-      rectTo.setAttribute('rx', '0.08');
+      rectTo.setAttribute('rx', squareRx.toString());
       rectTo.setAttribute('fill', colorDef.targetFill(op));
       rectTo.setAttribute('stroke', colorDef.stroke(op));
       rectTo.setAttribute('stroke-width', '0.028');
       hlLayer.appendChild(rectTo);
 
-      // 3. Move Rank Badge on Destination Square (e.g. ①, ②, 📖)
-      if (badgeLayer) {
+      // 3. Move Rank Badge on Destination Square (e.g. ①, ②, B)
+      if (badgeLayer && showCircles) {
         const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         const badgeCx = toPos.x + 0.82;
         const badgeCy = toPos.y + 0.18;
@@ -454,7 +456,7 @@ export class SvgOverlay {
           rectOppTo.setAttribute('y', oppToPos.y.toString());
           rectOppTo.setAttribute('width', '1');
           rectOppTo.setAttribute('height', '1');
-          rectOppTo.setAttribute('rx', '0.08');
+          rectOppTo.setAttribute('rx', squareRx.toString());
           rectOppTo.setAttribute('fill', OPPONENT_COLOR.targetFill(op * 0.6));
           rectOppTo.setAttribute('stroke', OPPONENT_COLOR.stroke(op));
           rectOppTo.setAttribute('stroke-width', '0.02');

@@ -3,7 +3,7 @@ import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
 export type { OpeningConfig, OpeningMode } from './openings/types';
 
 export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.3.1';
+export const APP_VERSION = '1.3.2';
 
 export interface UciOption {
   name: string;
@@ -59,6 +59,7 @@ export interface EngineSettings {
   reviewDepth?: number;
   reviewMultiPv?: number;
   autoRecordGames?: boolean;
+  manualRecording?: boolean;
   autoReview?: boolean;
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
@@ -69,9 +70,12 @@ export interface EngineSettings {
   showOpponentMoves: boolean;
   showEvalBar: boolean;
   showHud: boolean;
+  showNumberCircles?: boolean;
+  highlightShape?: 'square' | 'rounded';
   autoAnalyze: boolean;
   controlledColor: 'auto' | 'w' | 'b';
   activeEngineId: string;
+  lastPopupTab?: string;
   captureResistantOverlay: boolean;
   opening: OpeningSettingsConfig;
   customOptions: Record<string, string | number | boolean>;

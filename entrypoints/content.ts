@@ -102,6 +102,35 @@ export default defineContentScript({
       setupPrivacyHotkey();
       startBoardScanner();
       startGameOverWatcher();
+
+      // Popup → content messages for manual record start/stop
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg?.target === 'content') {
+          if (msg.type === 'RECORDER_START') {
+            if (gameRecorder && currentBoard) {
+              const s = BoardParser.extractBoardState(currentBoard);
+              gameRecorder.startManual(currentBoard, s?.moveHistory || []);
+              sendResponse?.({ ok: true });
+            } else {
+              sendResponse?.({ ok: false, reason: 'no-board' });
+            }
+          } else if (msg.type === 'RECORDER_STOP') {
+            (async () => {
+              if (gameRecorder) {
+                const s = currentBoard ? BoardParser.extractBoardState(currentBoard) : null;
+                await gameRecorder.stop(currentBoard, s?.moveHistory, s?.fen);
+                sendResponse?.({ ok: true });
+              } else {
+                sendResponse?.({ ok: false });
+              }
+            })();
+            return true; // async response
+          } else if (msg.type === 'RECORDER_STATE') {
+            sendResponse?.({ active: !!gameRecorder?.isActive(), manual: !!gameRecorder?.isManual() });
+          }
+        }
+        return false;
+      });
     }
 
     /**
@@ -194,7 +223,7 @@ export default defineContentScript({
 
       // When replacing the current board, flush the previous game if it
       // actually had moves (protects against missed game-over events).
-      if (currentBoard && gameRecorder && gameRecorder.isActive() && currentSettings.autoRecordGames) {
+      if (currentBoard && gameRecorder && gameRecorder.isActive()) {
         const prevState = BoardParser.extractBoardState(currentBoard);
         if (prevState && prevState.moveHistory && prevState.moveHistory.length >= 2) {
           const auth = GameStateAdapter.extractGameState(currentBoard, prevState.turn, prevState);
@@ -205,8 +234,13 @@ export default defineContentScript({
       currentBoard = board;
       lastPositionKey = '';
 
-      if (gameRecorder && currentSettings.autoRecordGames) {
-        gameRecorder.start(board);
+      // Always keep a recorder instance warm so we can answer RECORDER_STATE and
+      // the manual Record button works even with auto-record off. Snapshots
+      // existing moves for mid-game attachments.
+      const initialState = BoardParser.extractBoardState(board);
+      const initialMoves = initialState?.moveHistory || [];
+      if (gameRecorder) {
+        gameRecorder.start(board, initialMoves);
       }
 
       highlightController?.destroy();
@@ -332,10 +366,17 @@ export default defineContentScript({
         lastObservedMoveCount = moveCount;
       }
 
+      // Feed moves to the recorder every tick so it has the same list the highlights use.
+      const mvHistory = state.moveHistory || [];
+      if (gameRecorder && gameRecorder.isActive()) {
+        gameRecorder.observe(mvHistory, state.fen);
+      }
+
       if (!state.isGameActive) {
-        // Game over — persist if auto-record is enabled and we have a move list.
-        if (gameRecorder && gameRecorder.isActive() && state.moveHistory && state.moveHistory.length >= 2) {
-          gameRecorder.onGameOver(currentBoard!, state.moveHistory, state.fen).catch(() => {});
+        // Game over — persist if recording is on (auto or manual).
+        const autoOn = currentSettings.autoRecordGames;
+        if (gameRecorder && gameRecorder.isActive() && (autoOn || gameRecorder.isManual()) && mvHistory.length >= 2) {
+          gameRecorder.onGameOver(currentBoard!, mvHistory, state.fen).catch(() => {});
         }
         return;
       }

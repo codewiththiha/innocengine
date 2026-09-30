@@ -25,21 +25,26 @@ export class GameRecorder {
   private startedAt = 0;
   private lastSavedKey = '';
   private gameActive = false;
+  private manualMode = false; // when true, only stop() saves (auto game-over still saves for safety)
   private playerColor: 'w' | 'b' = 'w';
   private url = '';
+  private moves: string[] = [];
+  private lastSeenFen = '';
   private pendingSave: Promise<void> | null = null;
 
   constructor() {
     this.url = typeof location !== 'undefined' ? location.href : '';
   }
 
-  /** Reset at start of a new game. */
-  start(boardEl?: HTMLElement) {
+  /** Start recording. If moves are already on the board (e.g. attaching mid-game),
+   *  we snapshot the existing move list so we don't start from empty. */
+  start(boardEl?: HTMLElement, initialMoves?: string[]) {
     this.initialFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     this.startedAt = Date.now();
     this.gameActive = true;
-    // Never overwrite lastSavedKey here — that key guards duplicate saves of
-    // the SAME game; new games will produce a different gameId.
+    this.manualMode = false;
+    this.moves = Array.isArray(initialMoves) ? initialMoves.slice() : [];
+    this.lastSeenFen = '';
     try {
       if (boardEl) {
         const flipped = BoardParser.isBoardFlipped(boardEl);
@@ -51,6 +56,33 @@ export class GameRecorder {
       this.playerColor = 'w';
     }
   }
+
+  /** Explicit user-controlled start (Record button). */
+  startManual(boardEl?: HTMLElement, initialMoves?: string[]) {
+    this.start(boardEl, initialMoves);
+    this.manualMode = true;
+  }
+
+  /** Explicit user-controlled stop — saves whatever we have right now. */
+  async stop(boardEl?: HTMLElement | null, overrideMoves?: string[], overrideFen?: string) {
+    if (!this.gameActive) return undefined;
+    const moves = overrideMoves && overrideMoves.length >= 2 ? overrideMoves : this.moves;
+    const fen = overrideFen || this.lastSeenFen;
+    return this.onGameOver(boardEl || null, moves, fen);
+  }
+
+  /** Accept the canonical move list each tick so the recorder is in sync with
+   *  what the overlay sees (same detection path as highlights). */
+  observe(moveHistory: string[], fen: string) {
+    if (!this.gameActive) return;
+    if (!moveHistory) return;
+    if (moveHistory.length >= this.moves.length) {
+      this.moves = moveHistory.slice();
+    }
+    if (fen) this.lastSeenFen = fen;
+  }
+
+  isManual() { return this.manualMode; }
 
   /** Inspect Chess.com's game-over dialog for the result string. */
   private detectResultFromDom(): StoredGame['result'] {
@@ -107,22 +139,22 @@ export class GameRecorder {
    * Called when the board becomes inactive or the game-over DOM appears.
    * Returns the saved game record (or undefined if save was skipped).
    */
-  async onGameOver(boardEl: HTMLElement | null, moveHistory: string[], fen: string, forcedResult?: StoredGame['result']): Promise<StoredGame | undefined> {
+  async onGameOver(boardEl: HTMLElement | null, moveHistory?: string[] | null, fen?: string | null, forcedResult?: StoredGame['result']): Promise<StoredGame | undefined> {
     if (!this.gameActive) return;
-    if (!moveHistory || moveHistory.length < 2) {
-      // Too short to be a real game — usually opening-practice or abandoned.
+    const moves = (moveHistory && moveHistory.length >= this.moves.length) ? moveHistory.slice() : this.moves.slice();
+    if (!moves || moves.length < 2) {
       this.gameActive = false;
       return;
     }
 
-    const id = gameId(this.initialFen, moveHistory);
-    if (id === this.lastSavedKey) return; // idempotent
+    const id = gameId(this.initialFen, moves);
+    if (id === this.lastSavedKey) return;
     this.lastSavedKey = id;
     this.gameActive = false;
 
     const chess = new Chess();
     let replayOk = true;
-    for (const san of moveHistory) {
+    for (const san of moves) {
       try { if (!chess.move(san)) { replayOk = false; break; } }
       catch { replayOk = false; break; }
     }
@@ -146,8 +178,8 @@ export class GameRecorder {
       playerColor: this.playerColor,
       result,
       initialFen: this.initialFen,
-      moves: moveHistory.slice(),
-      finalFen: replayOk ? chess.fen() : fen,
+      moves: moves.slice(),
+      finalFen: replayOk ? chess.fen() : (fen || this.lastSeenFen),
       pgn: replayOk ? chess.pgn() : undefined,
       reviewStatus: 'none',
     };
@@ -168,10 +200,13 @@ export class GameRecorder {
   }
 
   /** Force-finish any active game (used when the board element is replaced
-   *  by a new game, to avoid losing the previous one). */
-  async flush(boardEl: HTMLElement | null, moveHistory: string[], fen: string) {
-    if (this.gameActive && moveHistory && moveHistory.length >= 2) {
-      return this.onGameOver(boardEl, moveHistory, fen);
+   *  by a new game, to avoid losing the previous one). In manual mode we do
+   *  NOT auto-save on board replacement — the user will hit Stop. */
+  async flush(boardEl: HTMLElement | null, moveHistory?: string[], fen?: string) {
+    if (this.manualMode) return;
+    const moves = (moveHistory && moveHistory.length >= this.moves.length) ? moveHistory : this.moves;
+    if (this.gameActive && moves && moves.length >= 2) {
+      return this.onGameOver(boardEl, moves, fen);
     }
     this.gameActive = false;
   }

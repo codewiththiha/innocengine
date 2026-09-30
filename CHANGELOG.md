@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.3.2 - 2026-09-30
+
+### Recording
+
+- Added a manual **Record / Stop** button in the popup footer. It messages the
+  active tab to start/stop recording; Stop flushes the currently-captured
+  move list to IndexedDB and notifies the Review page. Manual recordings are
+  not auto-saved on board replacement (only on explicit Stop or game-over).
+- Recorder is now always warmed up when a board attaches (snapshots existing
+  moves on attach and is fed the same canonical SAN list the highlight
+  controller reads every frame), so it never starts from an empty slate
+  mid-game. `manualRecording` flag is tracked per-session.
+- `autoRecordGames` toggle added to the Board tab so auto-save can be turned
+  off and only the manual Record button is used.
+
+### Defaults
+
+- Default engine: **BallMaeGyi 5.1** (was Stockfish).
+- Default personality: **human-like**.
+- Default BallMaeGyi / target Elo: **2200**.
+- Default MultiPV (variation count): **1** (was 2).
+- Default HUD: **off** (was on).
+- Default highlight shape: **square** (no rounded corners).
+- Default highlight opacity: **0.28** (quieter palette, less flash).
+- Default number badges on destination squares: **off**.
+
+### Highlighter polish
+
+- Replaced the neon palette (amber/blue/violet/rose/cyan) with muted warm
+  earth-tones that sit quietly on the Chess.com board (ochre, slate,
+  mauve-gray, muted brick, teal-gray; book green is now a soft moss).
+- Square highlights default to `rx=0` (hard corners) per setting
+  `highlightShape: 'square'`; a "Rounded" option is offered in the Board
+  tab.
+- Number circle badges (① ② etc.) hidden by default (`showNumberCircles:
+  false`) with a toggle in the Board tab.
+- Stroke opacity dialed down; fills capped to 0.65 max instead of 0.85.
+
+### Popup UX
+
+- **Tab persistence**: the last open tab is saved in `lastPopupTab` and
+  restored on next open.
+- **Reset button is scoped to the current tab**: clicking the rotate icon
+  only resets settings that belong to the tab you're on (Engine, Board,
+  Analysis, Strength, Opening, Advanced) instead of nuking everything.
+- Record/Stop button, Review, Play (Test Bench) and Reset split the footer
+  evenly.
+- Board tab now also contains an Auto-record toggle, "Move number badges"
+  toggle, and "Square corners" select.
+
 ## 1.3.1 - 2026-09-30
 
 ### Popup polish
