@@ -1,1298 +1,376 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
-import { EngineRegistry } from '../../lib/engine-registry';
 import { capsFor } from '../../lib/engine-capabilities';
 import { OPENING_CATALOG } from '../../lib/openings/catalog';
 import OpeningBrowser from './components/OpeningBrowser';
-import { getEngineStrengthDescription, mapEloToPatriciaSkill, getPatriciaTuning, getStockfishTuning } from '../../lib/engine-tuning';
-import type {
-  EngineSettings,
-  EngineEvaluation,
-  EngineCapabilities,
-  EngineTelemetry,
-  CustomEngineMeta,
-  OpeningMode,
-} from '../../lib/types';
+import { getBallMaeGyiTuning, getStockfishTuning, mapEloToBallMaeGyiSkill } from '../../lib/engine-tuning';
+import type { EngineSettings, EngineEvaluation, EngineCapabilities, EngineTelemetry, OpeningMode } from '../../lib/types';
 import {
-  Sliders,
-  Eye,
-  ExternalLink,
-  RotateCcw,
-  Activity,
-  CheckCircle2,
-  Cpu,
-  BookOpen,
-  Terminal,
-  ShieldAlert,
-  Server,
-  UploadCloud,
-  Lock,
-  Flame,
+  Activity, Cpu, BookOpen, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
+  Server, Terminal,
 } from 'lucide-react';
-import './App.css';
 
-type SettingsTab = 'engine' | 'board' | 'analysis' | 'strength' | 'resources' | 'opening' | 'advanced';
+type Tab = 'engine' | 'board' | 'analysis' | 'strength' | 'opening' | 'advanced';
+
+const BUILTIN_ENGINES = [
+  { id: 'stockfish', label: 'Stockfish 17' },
+  { id: 'ballmaegyi', label: 'BallMaeGyi 5.1' },
+  { id: 'maia3', label: 'Maia-3' },
+  { id: 'maia2', label: 'Maia-2' },
+];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('engine');
+  const [tab, setTab] = useState<Tab>('engine');
   const [settings, setSettings] = useState<EngineSettings>(DEFAULT_SETTINGS);
   const [currentEval, setCurrentEval] = useState<EngineEvaluation | null>(null);
   const [capabilities, setCapabilities] = useState<EngineCapabilities | null>(null);
-  const [telemetry, setTelemetry] = useState<EngineTelemetry | null>(null);
-  const [installedEngines, setInstalledEngines] = useState<CustomEngineMeta[]>([]);
-  const [engineStatus, setEngineStatus] = useState<'ready' | 'loading' | 'analyzing'>('ready');
-  const [savedBadge, setSavedBadge] = useState<boolean>(false);
-  const [optionSearch, setOptionSearch] = useState<string>('');
-  const [importStatus, setImportStatus] = useState<string | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const activeCaps = capsFor(settings.activeEngineId, capabilities);
+  const [savedBadge, setSavedBadge] = useState(false);
+  const [optionSearch, setOptionSearch] = useState('');
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    getSettings().then((s) => setSettings(s));
-    refreshEnginesList();
-
+    getSettings().then(setSettings);
     chrome.runtime.sendMessage({ target: 'popup', type: 'GET_CURRENT_EVAL' }, (res: any) => {
       if (res) {
-        if (res.evaluation) {
-          setCurrentEval(res.evaluation);
-          if (res.evaluation.isCalculating) setEngineStatus('analyzing');
-        }
+        if (res.evaluation) setCurrentEval(res.evaluation);
         if (res.capabilities) setCapabilities(res.capabilities);
-        if (res.telemetry) setTelemetry(res.telemetry);
       }
     });
-
-    const listener = (msg: any) => {
-      if (msg.target === 'content' && msg.type === 'EVAL_UPDATE') {
-        setCurrentEval(msg.evaluation);
-        setEngineStatus(msg.evaluation.isCalculating ? 'analyzing' : 'ready');
-      } else if (msg.target === 'popup') {
-        if (msg.type === 'ENGINE_CAPABILITIES') setCapabilities(msg.capabilities);
-        if (msg.type === 'TELEMETRY_UPDATE') setTelemetry(msg.telemetry);
-      }
+    const onMsg = (msg: any) => {
+      if (msg.target === 'content' && msg.type === 'EVAL_UPDATE') setCurrentEval(msg.evaluation);
+      else if (msg.target === 'popup' && msg.type === 'ENGINE_CAPABILITIES') setCapabilities(msg.capabilities);
     };
-
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
+    chrome.runtime.onMessage.addListener(onMsg);
+    return () => chrome.runtime.onMessage.removeListener(onMsg);
   }, []);
 
-  const refreshEnginesList = async () => {
-    const list = await EngineRegistry.getInstalledEngines();
-    setInstalledEngines(list);
+  const activeCaps = capsFor(settings.activeEngineId, capabilities);
+  const maxThreads = navigator.hardwareConcurrency || 8;
+
+  const resolveDepth = (s: EngineSettings): number => {
+    if (s.activeEngineId === 'ballmaegyi' && !s.ballmaegyiManualDepth && s.ballmaegyiPersonality !== 'full_strength')
+      return getBallMaeGyiTuning(s).recommendedDepth;
+    if (s.activeEngineId === 'stockfish' && s.limitStrength) return getStockfishTuning(s).maxDepth;
+    if (s.activeEngineId === 'maia2' || s.activeEngineId === 'maia3') return 1;
+    return s.depth || 16;
   };
 
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const resolveSynchronizedDepth = (current: EngineSettings): number => {
-    if (current.activeEngineId === 'patricia') {
-      // Manual override takes precedence regardless of personality
-      if (current.patriciaManualDepth) return current.depth || 16;
-      // Full-strength without manual override still auto-syncs
-      if (current.patriciaPersonality !== 'full_strength') {
-        return getPatriciaTuning(current).recommendedDepth;
-      }
-    }
-    if (current.activeEngineId === 'stockfish' && current.limitStrength) {
-      return getStockfishTuning(current).maxDepth;
-    }
-    if (current.activeEngineId === 'maia2' || current.activeEngineId === 'maia3') {
-      return 1;
-    }
-    return current.depth || 16;
-  };
-
-  const updateSettingsBatch = async (patch: Partial<EngineSettings>) => {
-    const updated = { ...settings, ...patch };
-    const autoDepth = resolveSynchronizedDepth(updated);
+  const apply = async (patch: Partial<EngineSettings>) => {
+    const next = { ...settings, ...patch };
+    const autoDepth = resolveDepth(next);
     const isAuto =
-      (updated.activeEngineId === 'patricia' && !updated.patriciaManualDepth &&
-        (updated.patriciaPersonality !== 'full_strength' ||
-          // Also re-sync full-strength depth when switching profiles unless manual override
-          false)) ||
-      (updated.activeEngineId === 'stockfish' && updated.limitStrength) ||
-      updated.activeEngineId === 'maia2' ||
-      updated.activeEngineId === 'maia3';
-
-    if (isAuto && updated.depth !== autoDepth) {
-      updated.depth = autoDepth;
-      patch.depth = autoDepth;
-    }
-    setSettings(updated);
-
+      (next.activeEngineId === 'ballmaegyi' && !next.ballmaegyiManualDepth && next.ballmaegyiPersonality !== 'full_strength') ||
+      (next.activeEngineId === 'stockfish' && next.limitStrength) ||
+      next.activeEngineId === 'maia2' || next.activeEngineId === 'maia3';
+    if (isAuto) next.depth = autoDepth;
+    setSettings(next);
     if (patch.activeEngineId) {
       chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(patch.activeEngineId) });
     }
-
-    await saveSettings({ ...patch, ...(isAuto ? { depth: autoDepth } : {}) });
-    showSavedNotification();
-  };
-
-  const updateSetting = <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
-    const updated = { ...settings, [key]: value };
-    const autoDepth = resolveSynchronizedDepth(updated);
-    const isAuto =
-      (updated.activeEngineId === 'patricia' && !updated.patriciaManualDepth && updated.patriciaPersonality !== 'full_strength') ||
-      (updated.activeEngineId === 'stockfish' && updated.limitStrength) ||
-      updated.activeEngineId === 'maia2' ||
-      updated.activeEngineId === 'maia3';
-
-    if (isAuto && updated.depth !== autoDepth) {
-      updated.depth = autoDepth;
-    }
-    setSettings(updated);
-
-    if (key === 'activeEngineId') {
-      chrome.runtime.sendMessage({ target: 'engine', type: 'SWITCH_ENGINE', engineId: String(value) });
-    }
-
-    // When the user toggles manual depth OFF, snap depth back to the auto-calibrated value
-    // so the UX clearly returns to the locked/auto state rather than keeping the slider value.
-    if (key === 'patriciaManualDepth' && value === false) {
-      const snapDepth = getPatriciaTuning({ ...updated, patriciaManualDepth: false }).recommendedDepth;
-      updated.depth = snapDepth;
-      setSettings({ ...updated, depth: snapDepth });
-      chrome.runtime.sendMessage({ target: 'engine', type: 'UPDATE_SETTINGS', settings: { ...updated, depth: snapDepth } });
-    }
-
-    // Debounce storage persist to avoid flooding engine worker during slider dragging
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-    saveTimeoutRef.current = setTimeout(async () => {
-      await saveSettings(updated);
-      showSavedNotification();
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      await saveSettings(next);
+      setSavedBadge(true);
+      setTimeout(() => setSavedBadge(false), 1000);
     }, 100);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const reset = async () => { setSettings(DEFAULT_SETTINGS); await saveSettings(DEFAULT_SETTINGS); setSavedBadge(true); setTimeout(() => setSavedBadge(false), 1000); };
+  const openPlayground = () => chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
+  const openReview = () => chrome.tabs.create({ url: chrome.runtime.getURL('review.html') });
 
-    if (!file.name.endsWith('.wasm')) {
-      setImportStatus('Error: Please select a valid .wasm binary');
-      return;
-    }
-
-    try {
-      setImportStatus('Importing engine binary...');
-      const buffer = await file.arrayBuffer();
-      const meta = await EngineRegistry.saveCustomEngine(file.name.replace('.wasm', ''), buffer);
-      await refreshEnginesList();
-      await updateSetting('activeEngineId', meta.id);
-      setImportStatus(`Success: ${meta.name} imported!`);
-      setTimeout(() => setImportStatus(null), 3000);
-    } catch (err: any) {
-      setImportStatus(`Import failed: ${err?.message || 'Invalid binary'}`);
-    }
-  };
-
-  const showSavedNotification = () => {
-    setSavedBadge(true);
-    setTimeout(() => setSavedBadge(false), 1200);
-  };
-
-  const handleResetDefaults = async () => {
-    setSettings(DEFAULT_SETTINGS);
-    await saveSettings(DEFAULT_SETTINGS);
-    showSavedNotification();
-  };
-
-  const openPlayground = () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
-  };
-
-  const openReview = () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('review.html') });
-  };
-
-  const maxHardwareThreads = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 8;
+  const isBallMaeGyi = settings.activeEngineId === 'ballmaegyi';
+  const isStockfish = settings.activeEngineId === 'stockfish';
+  const isMaia2 = settings.activeEngineId === 'maia2';
+  const isMaia3 = settings.activeEngineId === 'maia3';
+  const effectiveDepth = resolveDepth(settings);
+  const isDepthAuto = (isBallMaeGyi && !settings.ballmaegyiManualDepth && settings.ballmaegyiPersonality !== 'full_strength') || (isStockfish && settings.limitStrength) || isMaia2 || isMaia3;
 
   return (
-    <div className="popup-container">
-      <header className="popup-header">
-        <div className="popup-title-group">
-          <div className="logo-icon" aria-hidden="true">♞</div>
-          <div>
-            <h1 className="popup-title">Chess Engine</h1>
-            <p className="popup-subtitle">Overlay controls · {capabilities?.name || 'Stockfish 17'}</p>
+    <div className="popup-shell flex flex-col" data-theme="dark">
+      {/* Header */}
+      <div className="navbar bg-base-200 px-3 py-2 min-h-0">
+        <div className="flex-1 flex items-center gap-2">
+          <span className="text-2xl leading-none">♞</span>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold">Chess Engine</div>
+            <div className="text-[11px] opacity-60">by codewiththiha</div>
           </div>
         </div>
-        <div className={`status-badge status-${engineStatus}`}>
-          <span className="status-dot"></span>
-          <span className="status-text">{engineStatus === 'analyzing' ? 'Thinking' : 'Ready'}</span>
-        </div>
-      </header>
+      </div>
 
+      {/* Eval card */}
       {currentEval && (
-        <div className="eval-card">
-          <div className="eval-header">
-            <span className="eval-tag">
-              <Activity size={12} style={{ marginRight: 4 }} /> Live Position
-            </span>
-            <span className="eval-depth">Depth {currentEval.depth}</span>
+        <div className="mx-3 mt-2 p-3 rounded-lg bg-base-200/70 border border-base-300">
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className="flex items-center gap-1 opacity-80"><Activity size={12}/> Live position</span>
+            <span className="badge badge-sm badge-ghost">depth {currentEval.depth}</span>
           </div>
-          <div className="eval-body">
-            <div className="eval-score">
+          <div className="flex items-center justify-between">
+            <span className="text-xl font-bold font-mono">
               {(() => {
                 const isBlack = currentEval.fen?.split(' ')[1] === 'b';
-                const whiteCp = currentEval.whiteScoreCp ?? (currentEval.scoreCp !== null ? (isBlack ? -currentEval.scoreCp : currentEval.scoreCp) : null);
-                const whiteMate = currentEval.whiteScoreMate ?? (currentEval.scoreMate !== null ? (isBlack ? -currentEval.scoreMate : currentEval.scoreMate) : null);
-                if (whiteMate !== null) {
-                  return `M${whiteMate > 0 ? '+' : ''}${whiteMate}`;
-                }
-                if (whiteCp !== null) {
-                  return `${whiteCp > 0 ? '+' : ''}${(whiteCp / 100).toFixed(2)}`;
-                }
+                const wcp = currentEval.whiteScoreCp ?? (currentEval.scoreCp != null ? (isBlack ? -currentEval.scoreCp : currentEval.scoreCp) : null);
+                const wm = currentEval.whiteScoreMate ?? (currentEval.scoreMate != null ? (isBlack ? -currentEval.scoreMate : currentEval.scoreMate) : null);
+                if (wm != null) return `M${wm > 0 ? '+' : ''}${wm}`;
+                if (wcp != null) return `${wcp > 0 ? '+' : ''}${(wcp/100).toFixed(2)}`;
                 return '0.00';
               })()}
-            </div>
-            <div className="eval-best-move">
-              <span className="best-move-label">Best Move:</span>
-              <span className="best-move-algebraic">{currentEval.bestMove || 'Calculating...'}</span>
-            </div>
-          </div>
-          <div className="eval-meta">
-            <span>Raw PV: {currentEval.multiPvLines?.length || 0}</span>
-            <span>Player: {settings.highlightPlayerMoves ? 'ON' : 'OFF'}</span>
-            <span>Opponent: {settings.highlightOpponentMoves ? 'ON' : 'OFF'}</span>
-            <span>Arrows: {settings.showArrows ? 'ON' : 'OFF'}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Navigation Tabs */}
-      <nav className="tab-bar">
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'engine' ? 'active' : ''}`}
-          onClick={() => setActiveTab('engine')}
-        >
-          <Server size={12} /> Engine
-        </button>
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'board' ? 'active' : ''}`}
-          onClick={() => setActiveTab('board')}
-        >
-          <Eye size={12} /> Board
-        </button>
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`}
-          onClick={() => setActiveTab('analysis')}
-        >
-          <Sliders size={12} /> Analysis
-        </button>
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'strength' ? 'active' : ''}`}
-          onClick={() => setActiveTab('strength')}
-        >
-          <ShieldAlert size={12} /> Strength
-        </button>
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'resources' ? 'active' : ''}`}
-          onClick={() => setActiveTab('resources')}
-        >
-          <Cpu size={12} /> Resources
-        </button>
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'opening' ? 'active' : ''}`}
-          onClick={() => setActiveTab('opening')}
-        >
-          <BookOpen size={12} /> Opening
-        </button>
-        <button
-          type="button"
-          className={`tab-btn ${activeTab === 'advanced' ? 'active' : ''}`}
-          onClick={() => setActiveTab('advanced')}
-        >
-          <Terminal size={12} /> UCI
-        </button>
-      </nav>
-
-      {/* Tab: Engine Switcher & Custom WASM */}
-      {activeTab === 'engine' && (
-        <div className="settings-section">
-          <div className="section-title">
-            <Server size={14} /> Active Engine & Registry
-          </div>
-
-          <div className="setting-item">
-            <div className="setting-label-row">
-              <span className="setting-label">Selected Engine</span>
-            </div>
-            <select
-              className="select-dropdown"
-              value={settings.activeEngineId}
-              onChange={(e) => updateSetting('activeEngineId', e.target.value)}
-            >
-              {installedEngines.map((eng) => (
-                <option key={eng.id} value={eng.id}>
-                  {eng.name} {eng.isBuiltIn ? '(Built-in)' : '(Custom WASM)'}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept=".wasm"
-              style={{ display: 'none' }}
-              onChange={handleFileUpload}
-            />
-            <button
-              type="button"
-              className="btn"
-              style={{ width: '100%', justifyContent: 'center' }}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <UploadCloud size={14} /> Import Custom WASM Engine (.wasm)
-            </button>
-            {importStatus && (
-              <div style={{ fontSize: 11, color: '#38bdf8', marginTop: 6, textAlign: 'center' }}>
-                {importStatus}
-              </div>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 10 }}>
-            Supports any UCI-compliant WebAssembly chess binary with standard protocol handshake.
-          </div>
-
-          {settings.activeEngineId === 'maia3' && (
-            <div style={{ marginTop: 10, padding: 8, background: 'rgba(56, 189, 248, 0.08)', borderRadius: 6, border: '1px solid rgba(56, 189, 248, 0.2)', fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Maia-3 Human Engine Active:</span> Predicts moves human players make at target Elo rating rather than ruthless engine tactics.
-            </div>
-          )}
-
-          {settings.activeEngineId === 'maia2' && (
-            <div style={{ marginTop: 10, padding: 8, background: 'rgba(56, 189, 248, 0.08)', borderRadius: 6, border: '1px solid rgba(56, 189, 248, 0.2)', fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Maia-2 Unified Model Active:</span> NeurIPS 2024 unified human-AI chess policy modeling natural human play from 1100 to 1900 Elo.
-            </div>
-          )}
-
-          {settings.activeEngineId === 'patricia' && (
-            <div style={{ marginTop: 10, padding: 8, background: 'rgba(244, 63, 94, 0.08)', borderRadius: 6, border: '1px solid rgba(244, 63, 94, 0.25)', fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-              <span style={{ color: '#f43f5e', fontWeight: 600 }}>Patricia 5.1 Active:</span> Adam Kulju’s romantic aggressive engine (EAS 430,000) with calibrated human blunder simulation and tactical piece sacrifices.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab: Board */}
-      {activeTab === 'board' && (
-        <div className="settings-section">
-          <div className="section-title">
-            <Eye size={14} /> Board Presentation
-          </div>
-          <div className="toggle-list">
-            <label className="toggle-row">
-              <span className="toggle-label">Highlight Player's Moves</span>
-              <input
-                type="checkbox"
-                checked={settings.highlightPlayerMoves}
-                onChange={(e) => {
-                  updateSettingsBatch({
-                    highlightPlayerMoves: e.target.checked,
-                    showHighlights: e.target.checked || settings.highlightOpponentMoves,
-                  });
-                }}
-                className="toggle-switch"
-              />
-            </label>
-
-            <label className="toggle-row">
-              <span className="toggle-label">Highlight Opponent's Moves</span>
-              <input
-                type="checkbox"
-                checked={settings.highlightOpponentMoves}
-                onChange={(e) => {
-                  updateSettingsBatch({
-                    highlightOpponentMoves: e.target.checked,
-                    showOpponentMoves: e.target.checked,
-                    showHighlights: e.target.checked || settings.highlightPlayerMoves,
-                  });
-                }}
-                className="toggle-switch"
-              />
-            </label>
-
-            <label className="toggle-row">
-              <span className="toggle-label">Show Move Arrows</span>
-              <input
-                type="checkbox"
-                checked={settings.showArrows}
-                onChange={(e) => {
-                  updateSettingsBatch({
-                    showArrows: e.target.checked,
-                    showConnectors: e.target.checked,
-                  });
-                }}
-                className="toggle-switch"
-              />
-            </label>
-
-            <div className="setting-item" style={{ marginTop: 12 }}>
-              <div className="setting-label-row">
-                <span className="setting-label">Highlighter Strength / Opacity</span>
-                <span className="setting-value">{Math.round((settings.highlighterOpacity ?? 0.35) * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min="0.15"
-                max="0.80"
-                step="0.05"
-                value={settings.highlighterOpacity ?? 0.35}
-                onChange={(e) => updateSetting('highlighterOpacity', parseFloat(e.target.value))}
-                className="slider"
-              />
-              <div className="slider-hints">
-                <span>Soft (20%)</span>
-                <span>Balanced (35%)</span>
-                <span>Vivid (65%+)</span>
-              </div>
-            </div>
-
-            <label className="toggle-row">
-              <span className="toggle-label">Evaluation Bar</span>
-              <input
-                type="checkbox"
-                checked={settings.showEvalBar}
-                onChange={(e) => updateSetting('showEvalBar', e.target.checked)}
-                className="toggle-switch"
-              />
-            </label>
-
-            <label className="toggle-row">
-              <span className="toggle-label">Compact Board HUD</span>
-              <input
-                type="checkbox"
-                checked={settings.showHud}
-                onChange={(e) => updateSetting('showHud', e.target.checked)}
-                className="toggle-switch"
-              />
-            </label>
-          </div>
-
-          <div className="setting-item" style={{ marginTop: 12 }}>
-            <div className="section-title" style={{ marginTop: 6 }}>
-              <Lock size={13} /> Capture Privacy (Resistance)
-            </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-              Press <b>Alt + H</b> anytime on Chess.com to immediately toggle the overlay visibility.
+            </span>
+            <div className="text-right">
+              <div className="text-[10px] opacity-60 uppercase tracking-wide">Best move</div>
+              <div className="font-mono text-sm font-semibold text-success">{currentEval.bestMove || '…'}</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Tab: Analysis */}
-      {activeTab === 'analysis' && (
-        <div className="settings-section">
-          <div className="section-title">
-            <Sliders size={14} /> Search Budget & Variations
+      {/* Tabs */}
+      <div role="tablist" className="tabs tabs-boxed tabs-sm m-3 mb-2 flex-nowrap overflow-x-auto">
+        {([
+          ['engine', <Server size={12}/>, 'Engine'],
+          ['board', <Eye size={12}/>, 'Board'],
+          ['analysis', <Sliders size={12}/>, 'Analysis'],
+          ['strength', <ShieldAlert size={12}/>, 'Strength'],
+          ['opening', <BookOpen size={12}/>, 'Opening'],
+          ['advanced', <Terminal size={12}/>, 'UCI'],
+        ] as const).map(([id, icon, label]) => (
+          <button key={id} role="tab" className={`tab flex-1 gap-1 ${tab === id ? 'tab-active' : ''}`} onClick={() => setTab(id as Tab)}>
+            {icon}<span className="text-xs">{label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 scroll-y px-3 pb-3">
+        {tab === 'engine' && (
+          <div className="flex flex-col gap-3">
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Engine</span></div>
+              <select className="select select-bordered select-sm w-full" value={settings.activeEngineId} onChange={(e) => apply({ activeEngineId: e.target.value })}>
+                {BUILTIN_ENGINES.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
+              </select>
+            </label>
           </div>
+        )}
 
-          {/* Calculation Depth: Active & unlocked for manual tuning, or locked with auto-calibrated depth */}
-          {(() => {
-            const isPatricia = settings.activeEngineId === 'patricia';
-            const isPatriciaAuto = isPatricia && !settings.patriciaManualDepth && settings.patriciaPersonality !== 'full_strength';
-            const isStockfishAuto = settings.activeEngineId === 'stockfish' && settings.limitStrength;
-            const isMaiaAuto = settings.activeEngineId === 'maia2' || settings.activeEngineId === 'maia3';
-            const isDepthAuto = isPatriciaAuto || isStockfishAuto || isMaiaAuto;
-
-            let effectiveDepth = settings.depth;
-            let autoReason = '';
-
-            if (isPatriciaAuto) {
-              const tuning = getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 });
-              effectiveDepth = tuning.recommendedDepth;
-              autoReason = `Auto-calibrated to ${effectiveDepth} ply for ${settings.patriciaElo ?? 2500} Elo in ${settings.patriciaPerformance || 'responsive'} mode.`;
-            } else if (isStockfishAuto) {
-              const sfTuning = getStockfishTuning(settings);
-              effectiveDepth = sfTuning.maxDepth;
-              autoReason = `Auto-calibrated to ${effectiveDepth} ply for ${settings.targetElo ?? 2000} Elo strength limiter.`;
-            } else if (isMaiaAuto) {
-              effectiveDepth = 1;
-              autoReason = `Auto-calibrated to 1 ply (zero-search policy) for Maia neural model.`;
-            }
-
-            return (
-              <>
-                <div className="setting-item">
-                  <div className="setting-label-row">
-                    <span className="setting-label">Calculation Depth</span>
-                    <span
-                      className="setting-value"
-                      style={{
-                        color: isDepthAuto ? '#38bdf8' : '#e2e8f0',
-                        fontWeight: isDepthAuto ? 600 : 500,
-                      }}
-                    >
-                      {isDepthAuto ? `Auto: ${effectiveDepth} ply` : `${settings.depth} ply`}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="24"
-                    step="1"
-                    value={effectiveDepth}
-                    disabled={isDepthAuto}
-                    onChange={(e) => {
-                      if (!isDepthAuto) {
-                        updateSetting('depth', parseInt(e.target.value, 10));
-                      }
-                    }}
-                    className="slider"
-                    style={isDepthAuto ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
-                  />
-                  <div className="slider-hints">
-                    <span>Novice (2)</span>
-                    <span>Balanced (16)</span>
-                    <span>Deep (24)</span>
-                  </div>
-                  {isDepthAuto && (
-                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.4 }}>
-                      {autoReason} {isPatricia ? 'Use the manual override below to unlock the slider.' : 'Manual depth override is disabled to prevent engine overpower conflicts.'}
-                    </div>
-                  )}
-                </div>
-
-                {/* Manual depth override for Patricia */}
-                {isPatricia && settings.patriciaPersonality !== 'full_strength' && (
-                  <label className="toggle-row" style={{ marginTop: 4 }}>
-                    <span>
-                      <span className="toggle-label">Manual depth override</span>
-                      <span className="setting-help">Unlock the ply slider to set a custom search depth instead of auto-calibrating to Elo.</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={!!settings.patriciaManualDepth}
-                      onChange={(e) => updateSetting('patriciaManualDepth', e.target.checked)}
-                      className="toggle-switch"
-                    />
-                  </label>
-                )}
-              </>
-            );
-          })()}
-
-          <div className="setting-item">
-            <div className="setting-label-row">
-              <span className="setting-label">MultiPV Variations</span>
-              <span className="setting-value">{settings.multiPv}</span>
-            </div>
-            <input
-              type="range"
-              min="1"
-              max="4"
-              step="1"
-              value={settings.multiPv}
-              onChange={(e) => updateSetting('multiPv', parseInt(e.target.value, 10))}
-              className="slider"
-            />
-            <div className="slider-hints">
-              <span>1 (Amber)</span>
-              <span>2 (+Blue)</span>
-              <span>3 (+Violet)</span>
-              <span>4 (+Slate)</span>
-            </div>
+        {tab === 'board' && (
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Highlight my moves</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.highlightPlayerMoves}
+                onChange={(e) => apply({ highlightPlayerMoves: e.target.checked, showHighlights: e.target.checked || settings.highlightOpponentMoves })}/>
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Highlight opponent moves</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.highlightOpponentMoves}
+                onChange={(e) => apply({ highlightOpponentMoves: e.target.checked, showOpponentMoves: e.target.checked, showHighlights: e.target.checked || settings.highlightPlayerMoves })}/>
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Show arrows</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.showArrows}
+                onChange={(e) => apply({ showArrows: e.target.checked, showConnectors: e.target.checked })}/>
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Evaluation bar</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.showEvalBar}
+                onChange={(e) => apply({ showEvalBar: e.target.checked })}/>
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">HUD</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.showHud}
+                onChange={(e) => apply({ showHud: e.target.checked })}/>
+            </label>
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Opacity · {Math.round((settings.highlighterOpacity ?? 0.35)*100)}%</span></div>
+              <input type="range" className="range range-primary range-xs" min="0.15" max="0.80" step="0.05" value={settings.highlighterOpacity ?? 0.35}
+                onChange={(e) => apply({ highlighterOpacity: parseFloat(e.target.value) })}/>
+            </label>
+            <div className="divider my-1"></div>
+            <div className="text-xs opacity-70">Press <kbd className="kbd kbd-xs">Alt</kbd>+<kbd className="kbd kbd-xs">H</kbd> to hide the overlay.</div>
           </div>
+        )}
 
-          <label className="toggle-row" style={{ marginTop: 12 }}>
-            <span className="toggle-label">Auto-Analyze Moves</span>
-            <input
-              type="checkbox"
-              checked={settings.autoAnalyze}
-              onChange={(e) => updateSetting('autoAnalyze', e.target.checked)}
-              className="toggle-switch"
-            />
-          </label>
-        </div>
-      )}
-
-      {/* Tab: Strength */}
-      {activeTab === 'strength' && (
-        <div className="settings-section">
-          {settings.activeEngineId === 'patricia' ? (
-            <>
-              <div className="section-title">
-                <Flame size={14} color="#f43f5e" /> Patricia 5.1 Style & Strength Settings
+        {tab === 'analysis' && (
+          <div className="flex flex-col gap-3">
+            <label className="form-control w-full">
+              <div className="label py-1">
+                <span className="label-text">Depth</span>
+                <span className={`label-text-alt ${isDepthAuto ? 'text-info' : ''}`}>{isDepthAuto ? `Auto · ${effectiveDepth}` : `${settings.depth} ply`}</span>
               </div>
-
-              {/* Personality / Playstyle Mode */}
-              <div className="setting-item" style={{ marginTop: 8 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Personality / Playstyle</span>
-                  <span className="setting-value" style={{ textTransform: 'capitalize' }}>
-                    {settings.patriciaPersonality === 'human'
-                      ? 'Human-Like'
-                      : settings.patriciaPersonality === 'full_strength'
-                      ? 'Full Strength (3500+)'
-                      : settings.patriciaPersonality === 'solid'
-                      ? 'Solid Positional'
-                      : 'Aggressive (EAS 430k)'}
-                  </span>
-                </div>
-                <select
-                  className="select-dropdown"
-                  value={settings.patriciaPersonality || 'aggressive'}
-                  onChange={(e) => updateSetting('patriciaPersonality', e.target.value as any)}
-                >
-                  <option value="aggressive">Aggressive (EAS 430,000 Sacrificial)</option>
-                  <option value="human">Human-Like (Calibrated Elo Model)</option>
-                  <option value="full_strength">Full Strength (CCRL 3500+ Grandmaster)</option>
-                  <option value="solid">Solid / Classical (Controlled Aggression)</option>
-                </select>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                  {settings.patriciaPersonality === 'aggressive' && 'Patricia’s signature romantic play: searches for tactical piece sacrifices, avoids draws with high contempt, and hunts the king.'}
-                  {settings.patriciaPersonality === 'human' && 'Weakens search using MultiPV 5 error distribution and human blunder probabilities calibrated across rating bands.'}
-                  {settings.patriciaPersonality === 'full_strength' && 'Maximum tactical computation (3500+ Elo CCRL Blitz rating) without blunder handicapping.'}
-                  {settings.patriciaPersonality === 'solid' && 'Balanced attacking style with lower blunder variance and sound opening structures.'}
-                </div>
-              </div>
-
-              {/* Target Elo Rating Slider for Aggressive, Human-Like, and Solid modes */}
-              {settings.patriciaPersonality !== 'full_strength' && (
-                <div className="setting-item" style={{ marginTop: 12 }}>
-                  <div className="setting-label-row">
-                    <span className="setting-label">Target Elo Rating (UCI_Elo)</span>
-                    <span className="setting-value">
-                      {mapEloToPatriciaSkill(settings.patriciaElo ?? 2500).clampedElo} Elo (Skill {mapEloToPatriciaSkill(settings.patriciaElo ?? 2500).skillLevel}/20 • Depth {getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply)
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="500"
-                    max="3000"
-                    step="100"
-                    value={settings.patriciaElo ?? 2500}
-                    onChange={(e) => updateSetting('patriciaElo', parseInt(e.target.value, 10))}
-                    className="slider"
-                  />
-                  <div className="slider-hints">
-                    <span>500 (Novice)</span>
-                    <span>1000 (Club)</span>
-                    <span>1500 (Intermediate)</span>
-                    <span>2000 (Expert)</span>
-                    <span>2500 (Master)</span>
-                    <span>3000 (Super-GM)</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, lineHeight: 1.4 }}>
-                    {settings.patriciaPersonality === 'aggressive'
-                      ? 'Aggressive Mode: Prioritizes tactical sacrifices, checks, and king attacks while constrained to authentic rating blunder probabilities and depth limits.'
-                      : settings.patriciaPersonality === 'solid'
-                      ? 'Solid Positional Mode: Prioritizes king safety, central pawn stability, and penalizes unsound speculative sacrifices.'
-                      : 'Human Mode: Authentic rating-calibrated blunder and mistake distribution modeled from human game statistics.'}
-                  </div>
-                </div>
-              )}
-
-              {/* Performance / Responsiveness Profile (Patricia-specific) */}
-              <div className="setting-item" style={{ marginTop: 12 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Search Responsiveness</span>
-                  <span className="setting-value" style={{ textTransform: 'capitalize' }}>
-                    {settings.patriciaPerformance || 'responsive'}
-                  </span>
-                </div>
-                <select
-                  className="select-dropdown"
-                  value={settings.patriciaPerformance || 'responsive'}
-                  onChange={(e) => updateSetting('patriciaPerformance', e.target.value as any)}
-                >
-                  <option value="responsive">Instant (fast highlight, lower depth)</option>
-                  <option value="balanced">Balanced (default)</option>
-                  <option value="deep">Deep (higher depth, slightly slower)</option>
-                </select>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                  {(!settings.patriciaPerformance || settings.patriciaPerformance === 'responsive') &&
-                    'Responsive caps depth and tightens the move-time budget so highlights render instantly even at higher Elo handicaps.'}
-                  {settings.patriciaPerformance === 'balanced' &&
-                    'Balanced uses the authentic Elo-calibrated depth with a moderate time budget — the classic Patricia feel.'}
-                  {settings.patriciaPerformance === 'deep' &&
-                    'Deep adds a couple plies and a longer time budget for stronger analysis; highlights may take a fraction of a second longer to appear.'}
-                </div>
-              </div>
-
-              {/* Dynamic Calibration Guide */}
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: '1px solid rgba(244, 63, 94, 0.25)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
-                  <Activity size={12} /> Dynamic Rating & Personality Calibration
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  Patricia dynamically throttles search depth ({getPatriciaTuning({ ...settings, patriciaElo: settings.patriciaElo ?? 2500 }).recommendedDepth} ply) and move time to match the selected rating in {settings.patriciaPerformance || 'responsive'} mode. Progressive iterative-deepening updates are streamed immediately so highlights appear at the first stable depth instead of waiting for final bestmove.
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 10,
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#38bdf8', marginBottom: 4 }}>
-                  {getEngineStrengthDescription(settings).detail}
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  {getEngineStrengthDescription(settings).subtext}
-                </div>
-              </div>
-            </>
-          ) : settings.activeEngineId === 'maia2' ? (
-            <>
-              <div className="section-title">
-                <ShieldAlert size={14} /> Maia-2 Human Policy Rating Checkpoint
-              </div>
-
-              <div className="setting-item" style={{ marginTop: 8 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Target Human Elo Rating</span>
-                  <span className="setting-value">{Math.max(1100, Math.min(1900, Math.round((settings.targetElo || 1500) / 100) * 100))} Elo</span>
-                </div>
-
-                <div className="elo-pills">
-                  {[1100, 1300, 1500, 1700, 1900].map((elo) => (
-                    <button
-                      key={elo}
-                      type="button"
-                      className={`elo-pill ${Math.round((settings.targetElo || 1500) / 100) * 100 === elo ? 'active' : ''}`}
-                      onClick={() => updateSetting('targetElo', elo)}
-                    >
-                      {elo}
-                    </button>
-                  ))}
-                </div>
-
-                <input
-                  type="range"
-                  min="1100"
-                  max="1900"
-                  step="100"
-                  value={Math.max(1100, Math.min(1900, Math.round((settings.targetElo || 1500) / 100) * 100))}
-                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
-                  className="slider"
-                />
-                <div className="slider-hints">
-                  <span>1100 (Casual)</span>
-                  <span>1300</span>
-                  <span>1500 (Club)</span>
-                  <span>1700</span>
-                  <span>1900 (Expert)</span>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: '1px solid rgba(56, 189, 248, 0.25)',
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#38bdf8', marginBottom: 4 }}>
-                  {getEngineStrengthDescription(settings).detail}
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  {getEngineStrengthDescription(settings).subtext}
-                </div>
-              </div>
-            </>
-          ) : settings.activeEngineId === 'maia3' ? (
-            <>
-              <div className="section-title">
-                <ShieldAlert size={14} /> Maia-3 Human Policy Rating Checkpoint
-              </div>
-
-              <div className="setting-item" style={{ marginTop: 8 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Target Human Elo Rating</span>
-                  <span className="setting-value">{Math.round((settings.targetElo || 1500) / 100) * 100} Elo</span>
-                </div>
-
-                <div className="elo-pills">
-                  {[600, 1100, 1300, 1500, 1700, 1900, 2200, 2600].map((elo) => (
-                    <button
-                      key={elo}
-                      type="button"
-                      className={`elo-pill ${Math.round((settings.targetElo || 1500) / 100) * 100 === elo ? 'active' : ''}`}
-                      onClick={() => updateSetting('targetElo', elo)}
-                    >
-                      {elo}
-                    </button>
-                  ))}
-                </div>
-
-                <input
-                  type="range"
-                  min="600"
-                  max="2600"
-                  step="100"
-                  value={Math.round((settings.targetElo || 1500) / 100) * 100}
-                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
-                  className="slider"
-                />
-                <div className="slider-hints">
-                  <span>600 (Novice)</span>
-                  <span>1100 (Casual)</span>
-                  <span>1500 (Club)</span>
-                  <span>1900 (Expert)</span>
-                  <span>2600 (Master)</span>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: '1px solid rgba(56, 189, 248, 0.25)',
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#38bdf8', marginBottom: 4 }}>
-                  {getEngineStrengthDescription(settings).detail}
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  {getEngineStrengthDescription(settings).subtext}
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="section-title">
-                <ShieldAlert size={14} /> Stockfish WASM Strength Limiter
-              </div>
-
-              <label className="toggle-row">
-                <span className="toggle-label">Limit Engine Strength</span>
-                <input
-                  type="checkbox"
-                  checked={settings.limitStrength}
-                  onChange={(e) => updateSetting('limitStrength', e.target.checked)}
-                  className="toggle-switch"
-                />
+              <input type="range" className="range range-primary range-xs" min="1" max="24" step="1" value={effectiveDepth} disabled={isDepthAuto}
+                onChange={(e) => !isDepthAuto && apply({ depth: parseInt(e.target.value,10) })}/>
+            </label>
+            {isBallMaeGyi && settings.ballmaegyiPersonality !== 'full_strength' && (
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm">Manual depth</span>
+                <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.ballmaegyiManualDepth}
+                  onChange={(e) => apply({ ballmaegyiManualDepth: e.target.checked })}/>
               </label>
-
-              <div className="setting-item" style={{ marginTop: 10, opacity: settings.limitStrength ? 1 : 0.45 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Target Elo Rating</span>
-                  <span className="setting-value">{settings.targetElo} Elo</span>
-                </div>
-                <input
-                  type="range"
-                  min="800"
-                  max="3000"
-                  step="25"
-                  disabled={!settings.limitStrength}
-                  value={settings.targetElo}
-                  onChange={(e) => updateSetting('targetElo', parseInt(e.target.value, 10))}
-                  className="slider"
-                />
-                <div className="slider-hints">
-                  <span>Novice (1000)</span>
-                  <span>Club (1500)</span>
-                  <span>Master (2200)</span>
-                  <span>GM (2800+)</span>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: `1px solid ${settings.limitStrength ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: settings.limitStrength ? '#f59e0b' : '#10b981',
-                    marginBottom: 4,
-                  }}
-                >
-                  {getEngineStrengthDescription(settings).detail}
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  {getEngineStrengthDescription(settings).subtext}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Tab: Resources */}
-      {activeTab === 'resources' && (
-        <div className="settings-section">
-          <div className="section-title">
-            <Cpu size={14} /> Compute & Memory Resources
+            )}
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">MultiPV lines</span><span className="label-text-alt">{settings.multiPv}</span></div>
+              <input type="range" className="range range-primary range-xs" min="1" max="4" step="1" value={settings.multiPv}
+                onChange={(e) => apply({ multiPv: parseInt(e.target.value,10) })}/>
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Auto-analyze</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.autoAnalyze}
+                onChange={(e) => apply({ autoAnalyze: e.target.checked })}/>
+            </label>
           </div>
+        )}
 
-          <div className="resource-strip">
-            <div className="res-card">
-              <span className="res-label">Estimated Memory</span>
-              <span className="res-val">
-                {settings.activeEngineId === 'patricia'
-                  ? '~64 MB'
-                  : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2')
-                  ? '~12 MB'
-                  : `~${settings.hashMb + 48} MB`}
-              </span>
-              <span className="res-sub">
-                {settings.activeEngineId === 'patricia'
-                  ? 'Dual NNUE + Hash'
-                  : (settings.activeEngineId === 'maia3' || settings.activeEngineId === 'maia2')
-                  ? 'Model Weights'
-                  : `Hash: ${settings.hashMb} MB`}
-              </span>
-            </div>
-            <div className="res-card">
-              <span className="res-label">Engine Activity</span>
-              <div className="activity-sparkline">
-                {(telemetry?.history || [4, 6, 8, 12, 10, 15, 14, 18, 16, 20]).map((h, i) => (
-                  <span key={i} className="spark-bar" style={{ height: `${Math.min(100, h * 4)}%` }} />
+        {tab === 'strength' && isBallMaeGyi && (
+          <div className="flex flex-col gap-3">
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Playstyle</span></div>
+              <select className="select select-bordered select-sm w-full" value={settings.ballmaegyiPersonality || 'aggressive'}
+                onChange={(e) => apply({ ballmaegyiPersonality: e.target.value as any })}>
+                <option value="aggressive">Aggressive</option>
+                <option value="human">Human-like</option>
+                <option value="full_strength">Full strength</option>
+                <option value="solid">Solid</option>
+              </select>
+            </label>
+            {settings.ballmaegyiPersonality !== 'full_strength' && (
+              <label className="form-control w-full">
+                <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{mapEloToBallMaeGyiSkill(settings.ballmaegyiElo ?? 2500).clampedElo}</span></div>
+                <input type="range" className="range range-primary range-xs" min="500" max="3000" step="100" value={settings.ballmaegyiElo ?? 2500}
+                  onChange={(e) => apply({ ballmaegyiElo: parseInt(e.target.value,10) })}/>
+              </label>
+            )}
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Responsiveness</span></div>
+              <select className="select select-bordered select-sm w-full" value={settings.ballmaegyiPerformance || 'responsive'}
+                onChange={(e) => apply({ ballmaegyiPerformance: e.target.value as any })}>
+                <option value="responsive">Instant</option>
+                <option value="balanced">Balanced</option>
+                <option value="deep">Deep</option>
+              </select>
+            </label>
+          </div>
+        )}
+
+        {tab === 'strength' && (isMaia2 || isMaia3) && (
+          <div className="flex flex-col gap-3">
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{settings.targetElo}</span></div>
+              <input type="range" className="range range-primary range-xs" min={isMaia2 ? 1100 : 600} max={isMaia2 ? 1900 : 2600} step="100" value={settings.targetElo}
+                onChange={(e) => apply({ targetElo: parseInt(e.target.value,10) })}/>
+              <div className="flex gap-1 mt-2 flex-wrap">
+                {(isMaia3 ? [600,1100,1500,1900,2600] : [1100,1300,1500,1700,1900]).map(e => (
+                  <button key={e} className={`btn btn-xs ${Math.round(settings.targetElo/100)*100 === e ? 'btn-primary' : 'btn-ghost'}`} onClick={() => apply({ targetElo: e })}>{e}</button>
                 ))}
               </div>
-              <span className="res-sub">Active Worker</span>
-            </div>
-          </div>
-
-          {activeCaps.hasHash && (
-            <div className="setting-item" style={{ marginTop: 12 }}>
-              <div className="setting-label-row">
-                <span className="setting-label">Hash Table Size (RAM)</span>
-                <span className="setting-value">{settings.hashMb} MB</span>
-              </div>
-              <input
-                type="range"
-                min="16"
-                max="256"
-                step="16"
-                value={settings.hashMb}
-                onChange={(e) => updateSetting('hashMb', parseInt(e.target.value, 10))}
-                className="slider"
-              />
-            </div>
-          )}
-
-          {activeCaps.hasThreads && (
-            <div className="setting-item">
-              <div className="setting-label-row">
-                <span className="setting-label">Search Threads</span>
-                <span className="setting-value">{settings.threads} / {maxHardwareThreads}</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max={maxHardwareThreads}
-                step="1"
-                value={settings.threads}
-                onChange={(e) => updateSetting('threads', parseInt(e.target.value, 10))}
-                className="slider"
-              />
-            </div>
-          )}
-
-          {settings.activeEngineId === 'patricia' ? (
-            <>
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: '1px solid rgba(244, 63, 94, 0.25)',
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#f43f5e', marginBottom: 4 }}>
-                  Patricia 5.1 WASM Execution Profile
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                  Dual NNUE perspective networks (768×2→768→1) trained on aggressive filtered positions. Features asymmetric sacrifice evaluation, 30cp draw contempt, and MultiPV 5 human simulation. Search runs single-threaded inside a dedicated Web Worker so the main thread stays responsive.
-                </div>
-              </div>
-              <div className="setting-item" style={{ marginTop: 12 }}>
-                <div className="setting-label-row">
-                  <span className="setting-label">Performance Mode</span>
-                  <span className="setting-value" style={{ textTransform: 'capitalize' }}>
-                    {settings.patriciaPerformance || 'responsive'}
-                  </span>
-                </div>
-                <select
-                  className="select-dropdown"
-                  value={settings.patriciaPerformance || 'responsive'}
-                  onChange={(e) => updateSetting('patriciaPerformance', e.target.value as any)}
-                >
-                  <option value="responsive">Instant (fastest highlight)</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="deep">Deep (strongest)</option>
-                </select>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                  Patricia is single-threaded WASM. More depth means more total CPU time before highlights settle, but progressive iterative-deepening output keeps the best-move square visible as soon as a stable candidate is found.
-                </div>
-              </div>
-              <label className="toggle-row" style={{ marginTop: 6 }}>
-                <span>
-                  <span className="toggle-label">Manual depth override</span>
-                  <span className="setting-help">Force a custom ply count instead of the Elo-calibrated default.</span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={!!settings.patriciaManualDepth}
-                  onChange={(e) => updateSetting('patriciaManualDepth', e.target.checked)}
-                  className="toggle-switch"
-                />
-              </label>
-            </>
-          ) : settings.activeEngineId === 'stockfish' ? (
-            <div
-              style={{
-                marginTop: 12,
-                padding: '10px 12px',
-                borderRadius: 6,
-                background: 'rgba(30, 41, 59, 0.5)',
-                border: '1px solid rgba(255,255,255,0.08)',
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
-                Stockfish WASM Execution Profile
-              </div>
-              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                Runs safely in a dedicated Web Worker (1 thread, 16 MB Hash). Worker thread allocation and hash size are managed without sending unsupported UCI commands that stall the engine.
-              </div>
-            </div>
-          ) : (
-            <div
-              style={{
-                marginTop: 12,
-                padding: '10px 12px',
-                borderRadius: 6,
-                background: 'rgba(30, 41, 59, 0.5)',
-                border: '1px solid rgba(255,255,255,0.08)',
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
-                {activeCaps.name} Execution Profile
-              </div>
-              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-                Direct neural policy execution in memory. Instantaneous 1-node inference without tree search threads or transposition tables.
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab: Opening */}
-      {activeTab === 'opening' && (
-        <div className="settings-section">
-          <div className="section-title">
-            <BookOpen size={14} /> Opening Book & Repertoire Engine
-          </div>
-
-          <label className="toggle-row">
-            <span className="toggle-label">Enable Opening Repertoire</span>
-            <input
-              type="checkbox"
-              checked={settings.opening.enabled}
-              onChange={(e) =>
-                updateSetting('opening', { ...settings.opening, enabled: e.target.checked })
-              }
-              className="toggle-switch"
-            />
-          </label>
-
-          <label className="toggle-row opening-adaptive-row" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
-            <span>
-              <span className="toggle-label">Adaptive repertoire matching</span>
-              <span className="setting-help">Continue a matching selected line, then switch to another selected match after either player deviates.</span>
-            </span>
-            <input
-              type="checkbox"
-              disabled={!settings.opening.enabled}
-              checked={settings.opening.adaptiveSelection ?? true}
-              onChange={(e) =>
-                updateSetting('opening', { ...settings.opening, adaptiveSelection: e.target.checked })
-              }
-              className="toggle-switch"
-            />
-          </label>
-
-          <div className="setting-item opening-setting" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Suggestion mode</span>
-            </div>
-            <select
-              className="select-dropdown"
-              disabled={!settings.opening.enabled}
-              value={settings.opening.mode}
-              onChange={(e) =>
-                updateSetting('opening', { ...settings.opening, mode: e.target.value as OpeningMode })
-              }
-            >
-              <option value="adaptive">Adaptive safety</option>
-              <option value="parallel">Theory + engine</option>
-              <option value="coexist">Share variation slots</option>
-              <option value="prefer">Prefer theory</option>
-              <option value="hint">Theory when a slot is free</option>
-              <option value="book-only">Theory only</option>
-              <option value="off">Disable theory</option>
-            </select>
-            <p className="setting-help">
-              {settings.opening.mode === 'adaptive' && 'Show theory only when the engine does not find a meaningful disagreement.'}
-              {settings.opening.mode === 'parallel' && 'Show a safe theory step and every selected engine variation independently through the depth limit.'}
-              {settings.opening.mode === 'coexist' && 'Reserve one configured variation slot for a safe theory step.'}
-              {settings.opening.mode === 'prefer' && 'Place a safe theory step ahead of the engine variations.'}
-              {settings.opening.mode === 'hint' && 'Add theory only when the chosen variation count leaves room.'}
-              {settings.opening.mode === 'book-only' && 'Show safe theory steps while the selected line remains available.'}
-              {settings.opening.mode === 'off' && 'Keep the repertoire saved without drawing opening suggestions.'}
-            </p>
-          </div>
-
-          <div className="setting-item" style={{ marginTop: 10, opacity: settings.opening.enabled ? 1 : 0.45 }}>
-            <div className="setting-label-row">
-              <span className="setting-label">Repertoire Depth Limit</span>
-              <span className="setting-value">{settings.opening.maxPlies} plies ({settings.opening.maxPlies / 2} moves)</span>
-            </div>
-            <input
-              type="range"
-              min="4"
-              max="24"
-              step="2"
-              disabled={!settings.opening.enabled}
-              value={settings.opening.maxPlies}
-              onChange={(e) =>
-                updateSetting('opening', { ...settings.opening, maxPlies: parseInt(e.target.value, 10) })
-              }
-              className="slider"
-            />
-            <div className="slider-hints">
-              <span>Short (6 plies)</span>
-              <span>Standard (14 plies)</span>
-              <span>Deep (24 plies)</span>
-            </div>
-          </div>
-
-          {(settings.opening.mode === 'adaptive' || settings.opening.mode === 'coexist') && (
-            <label className="toggle-row opening-reserve-row" style={{ opacity: settings.opening.enabled ? 1 : 0.45 }}>
-              <span className="toggle-label">Reserve one variation slot for theory</span>
-              <input
-                type="checkbox"
-                disabled={!settings.opening.enabled}
-                checked={settings.opening.reserveSlot ?? true}
-                onChange={(e) =>
-                  updateSetting('opening', { ...settings.opening, reserveSlot: e.target.checked })
-                }
-                className="toggle-switch"
-              />
             </label>
-          )}
+          </div>
+        )}
 
-          <div className="opening-builder-section" style={{ opacity: settings.opening.enabled ? 1 : 0.45 }}>
-            <div className="section-title opening-builder-title">
-              <BookOpen size={13} /> Opening catalog
+        {tab === 'strength' && isStockfish && (
+          <div className="flex flex-col gap-3">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Limit strength</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.limitStrength}
+                onChange={(e) => apply({ limitStrength: e.target.checked })}/>
+            </label>
+            <label className="form-control w-full">
+              <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{settings.targetElo}</span></div>
+              <input type="range" className="range range-primary range-xs" min="800" max="3000" step="25" value={settings.targetElo} disabled={!settings.limitStrength}
+                onChange={(e) => apply({ targetElo: parseInt(e.target.value,10) })}/>
+            </label>
+          </div>
+        )}
+
+        {tab === 'strength' && !isBallMaeGyi && !isMaia2 && !isMaia3 && !isStockfish && null}
+
+        {tab === 'opening' && (
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Enable repertoire</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={settings.opening.enabled}
+                onChange={(e) => apply({ opening: { ...settings.opening, enabled: e.target.checked } })}/>
+            </label>
+            <label className="flex items-center justify-between cursor-pointer opacity-100" style={{ opacity: settings.opening.enabled ? 1 : 0.4 }}>
+              <span className="text-sm">Adaptive matching</span>
+              <input type="checkbox" className="toggle toggle-primary toggle-sm" disabled={!settings.opening.enabled}
+                checked={settings.opening.adaptiveSelection ?? true}
+                onChange={(e) => apply({ opening: { ...settings.opening, adaptiveSelection: e.target.checked } })}/>
+            </label>
+            <label className="form-control w-full" style={{ opacity: settings.opening.enabled ? 1 : 0.4 }}>
+              <div className="label py-1"><span className="label-text">Mode</span></div>
+              <select className="select select-bordered select-sm w-full" disabled={!settings.opening.enabled} value={settings.opening.mode}
+                onChange={(e) => apply({ opening: { ...settings.opening, mode: e.target.value as OpeningMode } })}>
+                <option value="adaptive">Adaptive safety</option>
+                <option value="parallel">Theory + engine</option>
+                <option value="coexist">Share slots</option>
+                <option value="prefer">Prefer theory</option>
+                <option value="hint">Theory hint</option>
+                <option value="book-only">Book only</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label className="form-control w-full" style={{ opacity: settings.opening.enabled ? 1 : 0.4 }}>
+              <div className="label py-1"><span className="label-text">Depth</span><span className="label-text-alt">{settings.opening.maxPlies} plies</span></div>
+              <input type="range" className="range range-primary range-xs" min="4" max="24" step="2" disabled={!settings.opening.enabled} value={settings.opening.maxPlies}
+                onChange={(e) => apply({ opening: { ...settings.opening, maxPlies: parseInt(e.target.value,10) } })}/>
+            </label>
+            <div style={{ opacity: settings.opening.enabled ? 1 : 0.4 }}>
+              <OpeningBrowser
+                openings={OPENING_CATALOG}
+                selectedIds={settings.opening.selectedOpeningIds || []}
+                filters={{ categories: settings.opening.categories, includeMeme: settings.opening.includeMeme, includeWeird: settings.opening.includeWeird, maxRisk: settings.opening.maxRisk }}
+                disabled={!settings.opening.enabled}
+                onChange={(ids) => apply({ opening: { ...settings.opening, selectedOpeningIds: ids, repertoireId: ids.length === 1 ? ids[0]! : 'auto' } })}
+                onFiltersChange={(patch) => apply({ opening: { ...settings.opening, ...patch } })}
+              />
             </div>
-            <OpeningBrowser
-              openings={OPENING_CATALOG}
-              selectedIds={settings.opening.selectedOpeningIds || []}
-              filters={{
-                categories: settings.opening.categories,
-                includeMeme: settings.opening.includeMeme,
-                includeWeird: settings.opening.includeWeird,
-                maxRisk: settings.opening.maxRisk,
-              }}
-              disabled={!settings.opening.enabled}
-              onChange={(ids) => {
-                updateSetting('opening', {
-                  ...settings.opening,
-                  selectedOpeningIds: ids,
-                  repertoireId: ids.length === 1 ? ids[0]! : 'auto',
-                });
-              }}
-              onFiltersChange={(patch) => {
-                updateSetting('opening', { ...settings.opening, ...patch });
-              }}
-            />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab: Advanced UCI */}
-      {activeTab === 'advanced' && (
-        <div className="settings-section">
-          <div className="section-title">
-            <Terminal size={14} /> UCI Options & Inspector
-          </div>
-
-          <input
-            type="text"
-            placeholder="Search engine options..."
-            value={optionSearch}
-            onChange={(e) => setOptionSearch(e.target.value)}
-            className="uci-search-input"
-          />
-
-          <div className="uci-options-list">
-            {capabilities?.options ? (
-              Object.values(capabilities.options)
-                .filter((opt) => opt.name.toLowerCase().includes(optionSearch.toLowerCase()))
-                .map((opt) => (
-                  <div key={opt.name} className="uci-opt-row">
-                    <div>
-                      <span className="uci-opt-name">{opt.name}</span>
-                      <span className="uci-opt-type">{opt.type}</span>
-                    </div>
-                    <span className="uci-opt-def">{opt.default !== undefined ? String(opt.default) : '-'}</span>
-                  </div>
-                ))
-            ) : (
-              <div style={{ fontSize: 12, color: '#64748b' }}>UCI options discovered dynamically upon engine initialization.</div>
+        {tab === 'advanced' && (
+          <div className="flex flex-col gap-2">
+            {activeCaps.hasHash && (
+              <label className="form-control w-full">
+                <div className="label py-1"><span className="label-text">Hash (MB)</span><span className="label-text-alt">{settings.hashMb}</span></div>
+                <input type="range" className="range range-primary range-xs" min="16" max="256" step="16" value={settings.hashMb}
+                  onChange={(e) => apply({ hashMb: parseInt(e.target.value,10) })}/>
+              </label>
             )}
+            {activeCaps.hasThreads && (
+              <label className="form-control w-full">
+                <div className="label py-1"><span className="label-text">Threads</span><span className="label-text-alt">{settings.threads}/{maxThreads}</span></div>
+                <input type="range" className="range range-primary range-xs" min="1" max={maxThreads} step="1" value={settings.threads}
+                  onChange={(e) => apply({ threads: parseInt(e.target.value,10) })}/>
+              </label>
+            )}
+            <div className="divider my-1">UCI options</div>
+            <input type="text" placeholder="Search…" value={optionSearch} onChange={(e) => setOptionSearch(e.target.value)} className="input input-bordered input-sm w-full"/>
+            <div className="max-h-52 overflow-y-auto">
+              <table className="table table-xs">
+                <thead><tr><th>Option</th><th>Type</th><th>Default</th></tr></thead>
+                <tbody>
+                  {capabilities?.options ? Object.values(capabilities.options)
+                    .filter(o => o.name.toLowerCase().includes(optionSearch.toLowerCase()))
+                    .map(o => (
+                      <tr key={o.name}><td className="font-mono text-[11px]">{o.name}</td><td>{o.type}</td><td className="opacity-70">{o.default !== undefined ? String(o.default) : '—'}</td></tr>
+                    )) : <tr><td colSpan={3} className="text-xs opacity-60">Engine not initialized.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <footer className="popup-footer">
-        <button type="button" className="action-button primary-btn" onClick={openPlayground}>
-          <ExternalLink size={14} style={{ marginRight: 6 }} /> Test Bench
-        </button>
-        <button type="button" className="action-button secondary-btn" onClick={openReview} title="Game Review">
-          <BookOpen size={14} style={{ marginRight: 6 }} /> Review
-        </button>
-        <button
-          type="button"
-          className="action-button secondary-btn"
-          onClick={handleResetDefaults}
-          title="Reset to Defaults"
-        >
-          <RotateCcw size={14} />
-        </button>
-      </footer>
+      {/* Footer */}
+      <div className="flex gap-2 p-3 pt-1 border-t border-base-300">
+        <button className="btn btn-primary btn-sm flex-1 gap-1" onClick={openPlayground}><ExternalLink size={14}/>Test Bench</button>
+        <button className="btn btn-sm flex-1 gap-1" onClick={openReview}><BookOpen size={14}/>Review</button>
+        <button className="btn btn-sm btn-ghost px-2" onClick={reset} title="Reset defaults"><RotateCcw size={14}/></button>
+      </div>
 
       {savedBadge && (
-        <div className="saved-toast">
-          <CheckCircle2 size={12} style={{ marginRight: 4 }} /> Saved
-        </div>
+        <div className="toast toast-end toast-bottom"><div className="alert alert-success alert-sm text-xs py-1 px-2">Saved</div></div>
       )}
     </div>
   );

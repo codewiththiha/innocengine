@@ -7,9 +7,9 @@ export default defineConfig({
     const isFirefox = browser === 'firefox';
 
     return {
-      name: 'Chess Engine AI Overlay',
-      description: 'Educational tool for real-time Stockfish analysis and board move square highlights on Chess.com.',
-      version: '1.2.1',
+      name: 'Chess Engine Overlay by codewiththiha',
+      description: 'Real-time Stockfish & BallMaeGyi analysis with board highlights, eval bar and post-game review on Chess.com.',
+      version: '1.3.0',
       permissions: isFirefox
         ? ['storage', 'activeTab', 'tabs']
         : ['storage', 'activeTab', 'tabs', 'offscreen'],
@@ -30,7 +30,7 @@ export default defineConfig({
             'engine/stockfish.js',
             'engine/stockfish.wasm',
             'engine/stockfish.wasm.js',
-            'engine/patricia/*',
+            'engine/ballmaegyi/*',
             'icon/*.png',
           ],
           matches: ['*://*.chess.com/*'],

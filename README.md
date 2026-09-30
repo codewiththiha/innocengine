@@ -147,9 +147,9 @@ To install permanently in Waterfox without signature rejection:
 
 ---
 
-### 6. Patricia 5.1 Engine & Dynamic Personality Calibration
-Patricia 5.1 is integrated with full native WebAssembly execution, supporting dynamic rating adjustment (500–3000 Elo) and distinct playstyle personalities:
-- **Aggressive (EAS 430,000 Sacrificial)**: Patricia's hallmark romantic style with high draw contempt and bonuses for piece sacrifices and king attacks. Scaled dynamically to your target rating.
+### 6. BallMaeGyi 5.1 Engine & Dynamic Personality Calibration
+BallMaeGyi 5.1 is integrated with full native WebAssembly execution, supporting dynamic rating adjustment (500–3000 Elo) and distinct playstyle personalities:
+- **Aggressive (EAS 430,000 Sacrificial)**: BallMaeGyi's hallmark romantic style with high draw contempt and bonuses for piece sacrifices and king attacks. Scaled dynamically to your target rating.
 - **Human-Like**: Calibrated human blunder and mistake distribution modeled from CCRL and Lichess error rates. Throttles search depth (2–14 ply) and move time to match genuine human tactical vision.
 - **Solid Positional**: Focuses on king safety, central pawn control, and avoids speculative sacrifices.
 - **Full Strength (CCRL 3500+)**: Unrestricted grandmaster computation with maximum tactical depth.

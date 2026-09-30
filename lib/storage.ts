@@ -9,11 +9,11 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   hashMb: 32,
   limitStrength: false,
   targetElo: 2000,
-  patriciaPersonality: 'aggressive',
-  patriciaLimitStrength: true,
-  patriciaElo: 2500,
-  patriciaManualDepth: false,
-  patriciaPerformance: 'responsive',
+  ballmaegyiPersonality: 'aggressive',
+  ballmaegyiLimitStrength: true,
+  ballmaegyiElo: 2500,
+  ballmaegyiManualDepth: false,
+  ballmaegyiPerformance: 'responsive',
   reviewEngineId: 'stockfish',
   reviewDepth: 18,
   reviewMultiPv: 3,
@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
         allowRisky: false,
         allowMeme: false,
       },
-      patricia: {
+      ballmaegyi: {
         mode: 'adaptive',
         maxLossCp: 300,
         minEngineDepth: 2,
@@ -93,6 +93,9 @@ export const DEFAULT_SETTINGS: EngineSettings = {
 };
 
 function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings {
+  // v1.3 rename: 'patricia' engine id → 'ballmaegyi'
+  if ((loaded as any).activeEngineId === 'patricia') loaded.activeEngineId = 'ballmaegyi';
+  if ((loaded as any).reviewEngineId === 'patricia') loaded.reviewEngineId = 'ballmaegyi';
   const loadedOpening = { ...(loaded.opening ?? {}) } as Partial<EngineSettings['opening']> & {
     strictLine?: boolean;
   };

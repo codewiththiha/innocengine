@@ -13,12 +13,12 @@ export interface MaiaTuning {
   maxNodes: number; // Force 1 node search (zero-search human policy)
 }
 
-export const PATRICIA_SKILL_LEVELS = [
+export const BALLMAEGYI_SKILL_LEVELS = [
   500, 800, 1000, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
   1900, 2000, 2100, 2200, 2300, 2400, 2500, 2650, 2800, 3000,
 ];
 
-export interface PatriciaTuning {
+export interface BallMaeGyiTuning {
   isHuman: boolean;
   skillLevel: number; // 1..20 for human mode, 21 for full strength
   targetElo: number;
@@ -30,7 +30,7 @@ export interface PatriciaTuning {
   moveTimeMs: number;
 }
 
-export function mapEloToPatriciaSkill(targetElo: number): {
+export function mapEloToBallMaeGyiSkill(targetElo: number): {
   skillLevel: number;
   clampedElo: number;
   cpLoss: number;
@@ -38,8 +38,8 @@ export function mapEloToPatriciaSkill(targetElo: number): {
   const clampedElo = Math.max(500, Math.min(3000, targetElo));
   let closestIdx = 0;
   let minDiff = Infinity;
-  for (let i = 0; i < PATRICIA_SKILL_LEVELS.length; i++) {
-    const diff = Math.abs(PATRICIA_SKILL_LEVELS[i]! - clampedElo);
+  for (let i = 0; i < BALLMAEGYI_SKILL_LEVELS.length; i++) {
+    const diff = Math.abs(BALLMAEGYI_SKILL_LEVELS[i]! - clampedElo);
     if (diff < minDiff) {
       minDiff = diff;
       closestIdx = i;
@@ -50,14 +50,14 @@ export function mapEloToPatriciaSkill(targetElo: number): {
   return { skillLevel, clampedElo, cpLoss };
 }
 
-export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
-  const personality = settings.patriciaPersonality || 'aggressive';
-  const limitStrength = settings.patriciaLimitStrength ?? (personality !== 'full_strength');
-  const rawElo = settings.patriciaElo ?? settings.targetElo ?? 2500;
+export function getBallMaeGyiTuning(settings: EngineSettings): BallMaeGyiTuning {
+  const personality = settings.ballmaegyiPersonality || 'aggressive';
+  const limitStrength = settings.ballmaegyiLimitStrength ?? (personality !== 'full_strength');
+  const rawElo = settings.ballmaegyiElo ?? settings.targetElo ?? 2500;
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
 
   if (!limitStrength || personality === 'full_strength') {
-    const perfMode = settings.patriciaPerformance || 'responsive';
+    const perfMode = settings.ballmaegyiPerformance || 'responsive';
     const baseDepth = Math.min(20, Math.max(12, settings.depth || 16));
     const fullDepth =
       perfMode === 'responsive' ? Math.min(16, baseDepth) :
@@ -76,11 +76,11 @@ export function getPatriciaTuning(settings: EngineSettings): PatriciaTuning {
     };
   }
 
-  const manualDepth = !!settings.patriciaManualDepth;
-  const perfMode = settings.patriciaPerformance || 'responsive';
+  const manualDepth = !!settings.ballmaegyiManualDepth;
+  const perfMode = settings.ballmaegyiPerformance || 'responsive';
   const userDepth = settings.depth || 16;
 
-  const { skillLevel, clampedElo, cpLoss } = mapEloToPatriciaSkill(rawElo);
+  const { skillLevel, clampedElo, cpLoss } = mapEloToBallMaeGyiSkill(rawElo);
 
   // Realistic novice-to-master depth scaling (baseline, "balanced" profile):
   // 500-600 Elo: depth 2 (novice 1-move tactical horizon)
@@ -241,30 +241,30 @@ export function getEngineStrengthDescription(settings: EngineSettings): {
     };
   }
 
-  if (settings.activeEngineId === 'patricia') {
-    const patricia = getPatriciaTuning(settings);
-    if (!patricia.isHuman || patricia.personality === 'full_strength') {
+  if (settings.activeEngineId === 'ballmaegyi') {
+    const ballmaegyi = getBallMaeGyiTuning(settings);
+    if (!ballmaegyi.isHuman || ballmaegyi.personality === 'full_strength') {
       return {
-        badge: 'Patricia 5.1 (CCRL ~3500+)',
+        badge: 'BallMaeGyi 5.1 (CCRL ~3500+)',
         detail: 'Skill Level 21 • Full Strength (EAS 430,000 Aggressive)',
         subtext: "Adam Kulju's romantic aggressive engine at maximum tactical strength. High draw contempt and ruthless piece sacrifices.",
       };
     }
     const modeLabel =
-      patricia.personality === 'aggressive'
+      ballmaegyi.personality === 'aggressive'
         ? 'Aggressive (EAS 430k)'
-        : patricia.personality === 'solid'
+        : ballmaegyi.personality === 'solid'
         ? 'Solid Positional'
         : 'Human-Like';
     return {
-      badge: `Patricia ${modeLabel.split(' ')[0]} (${patricia.targetElo})`,
-      detail: `${modeLabel} • Skill Level ${patricia.skillLevel} / 20 (${patricia.targetElo} Elo) • Depth ${patricia.recommendedDepth} ply`,
+      badge: `BallMaeGyi ${modeLabel.split(' ')[0]} (${ballmaegyi.targetElo})`,
+      detail: `${modeLabel} • Skill Level ${ballmaegyi.skillLevel} / 20 (${ballmaegyi.targetElo} Elo) • Depth ${ballmaegyi.recommendedDepth} ply`,
       subtext:
-        patricia.personality === 'aggressive'
-          ? `Tactical sacrifices and king attack with search scaled to ~${patricia.targetElo} Elo.`
-          : patricia.personality === 'solid'
-          ? `Positional king safety and classical solid lines calibrated to ~${patricia.targetElo} Elo.`
-          : `Calibrated human blunder rate with MultiPV error distribution for authentic ~${patricia.targetElo} Elo play.`,
+        ballmaegyi.personality === 'aggressive'
+          ? `Tactical sacrifices and king attack with search scaled to ~${ballmaegyi.targetElo} Elo.`
+          : ballmaegyi.personality === 'solid'
+          ? `Positional king safety and classical solid lines calibrated to ~${ballmaegyi.targetElo} Elo.`
+          : `Calibrated human blunder rate with MultiPV error distribution for authentic ~${ballmaegyi.targetElo} Elo play.`,
     };
   }
 

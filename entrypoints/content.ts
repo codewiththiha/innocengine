@@ -52,14 +52,14 @@ export default defineContentScript({
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
         const depthChanged = newSettings.depth !== currentSettings.depth;
         const engineChanged = newSettings.activeEngineId !== currentSettings.activeEngineId;
-        const patriciaChanged =
-          newSettings.patriciaElo !== currentSettings.patriciaElo ||
-          newSettings.patriciaPersonality !== currentSettings.patriciaPersonality ||
-          newSettings.patriciaLimitStrength !== currentSettings.patriciaLimitStrength;
+        const ballmaegyiChanged =
+          newSettings.ballmaegyiElo !== currentSettings.ballmaegyiElo ||
+          newSettings.ballmaegyiPersonality !== currentSettings.ballmaegyiPersonality ||
+          newSettings.ballmaegyiLimitStrength !== currentSettings.ballmaegyiLimitStrength;
         const eloChanged =
           newSettings.limitStrength !== currentSettings.limitStrength ||
           newSettings.targetElo !== currentSettings.targetElo ||
-          patriciaChanged;
+          ballmaegyiChanged;
         const openingChanged =
           JSON.stringify(newSettings.opening) !== JSON.stringify(currentSettings.opening);
         const visualChanged =

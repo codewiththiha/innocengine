@@ -36,7 +36,7 @@ async function createWorkerHarness(randomValue: number): Promise<WorkerHarness> 
     postMessage: (line: string) => void;
     onmessage: ((event: { data: unknown }) => void) | null;
   } = {
-    location: { href: 'chrome-extension://test/engine/patricia/patricia-worker.js' },
+    location: { href: 'chrome-extension://test/engine/ballmaegyi/ballmaegyi-worker.js' },
     postMessage(line) {
       output.push(line);
     },
@@ -44,23 +44,23 @@ async function createWorkerHarness(randomValue: number): Promise<WorkerHarness> 
   };
   const math = Object.create(Math) as Math;
   math.random = () => randomValue;
-  const source = fs.readFileSync(path.resolve('public/engine/patricia/patricia-worker.js'), 'utf8');
+  const source = fs.readFileSync(path.resolve('public/engine/ballmaegyi/ballmaegyi-worker.js'), 'utf8');
   const context = vm.createContext({
     self,
     Math: math,
     URL,
     console,
     importScripts: () => undefined,
-    Patricia: async () => engine,
+    BallMaeGyi: async () => engine,
   });
 
-  vm.runInContext(source, context, { filename: 'patricia-worker.js' });
+  vm.runInContext(source, context, { filename: 'ballmaegyi-worker.js' });
   for (let tick = 0; tick < 10 && !listener; tick++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  assert(listener, 'Patricia worker should initialize its engine listener');
-  assert(self.onmessage, 'Patricia worker should accept commands after initialization');
+  assert(listener, 'BallMaeGyi worker should initialize its engine listener');
+  assert(self.onmessage, 'BallMaeGyi worker should accept commands after initialization');
   return {
     engine,
     output,
@@ -80,7 +80,7 @@ function beginLimitedSearch(harness: WorkerHarness, multiPv: number = 1) {
   harness.send('go depth 16 movetime 500');
 }
 
-console.log('=== TEST SUITE: Patricia Worker UCI Safety ===\n');
+console.log('=== TEST SUITE: BallMaeGyi Worker UCI Safety ===\n');
 
 console.log('1. Restricting advertised MultiPV and adding custom options...');
 {
@@ -92,7 +92,7 @@ console.log('1. Restricting advertised MultiPV and adding custom options...');
   assert.strictEqual(
     harness.output.filter((line) => line.startsWith('option name MultiPV')).length,
     1,
-    'Patricia must advertise one MultiPV option with the worker limit'
+    'BallMaeGyi must advertise one MultiPV option with the worker limit'
   );
   assert(harness.output.includes('option name UCI_LimitStrength type check default true'));
   assert(harness.output.includes('option name UCI_Elo type spin default 2500 min 500 max 3000'));
@@ -171,4 +171,4 @@ console.log('\n4. Restoring user MultiPV in full-strength mode...');
   console.log('   ✓ Full-strength searches preserve native UCI output and exit cleanly');
 }
 
-console.log('\n=== ALL PATRICIA WORKER TESTS PASSED ===');
+console.log('\n=== ALL BALLMAEGYI WORKER TESTS PASSED ===');

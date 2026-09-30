@@ -130,7 +130,7 @@ export class UciParser {
     let candidates = this.buildCandidates(sortedLines);
 
     // CRITICAL: When the engine finishes search and emits `bestmove <uci>`, that move is the
-    // authoritative choice of the engine (e.g. human blunder selection in Patricia or Maia).
+    // authoritative choice of the engine (e.g. human blunder selection in BallMaeGyi or Maia).
     // If candidates[0] does not match bestMove, promote or inject bestMove as candidates[0]!
     if (bestMove && bestMove !== '(none)' && bestMove.length >= 4) {
       const matchIdx = candidates.findIndex(

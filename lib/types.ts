@@ -3,7 +3,7 @@ import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
 export type { OpeningConfig, OpeningMode } from './openings/types';
 
 export const APP_NAME = 'Chess Engine AI Overlay';
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.3.0';
 
 export interface UciOption {
   name: string;
@@ -50,12 +50,12 @@ export interface EngineSettings {
   hashMb: number;
   limitStrength: boolean;
   targetElo: number;
-  patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
-  patriciaLimitStrength?: boolean;
-  patriciaElo?: number;
-  patriciaManualDepth?: boolean;
-  patriciaPerformance?: 'responsive' | 'balanced' | 'deep';
-  reviewEngineId?: 'stockfish' | 'patricia';
+  ballmaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  ballmaegyiLimitStrength?: boolean;
+  ballmaegyiElo?: number;
+  ballmaegyiManualDepth?: boolean;
+  ballmaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
+  reviewEngineId?: 'stockfish' | 'ballmaegyi';
   reviewDepth?: number;
   reviewMultiPv?: number;
   autoRecordGames?: boolean;
@@ -168,9 +168,9 @@ export type ExtensionMessage =
       activeEngineId?: string;
       limitStrength?: boolean;
       targetElo?: number;
-      patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
-      patriciaLimitStrength?: boolean;
-      patriciaElo?: number;
+      ballmaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+      ballmaegyiLimitStrength?: boolean;
+      ballmaegyiElo?: number;
       threads?: number;
       hashMb?: number;
       tabId?: number;

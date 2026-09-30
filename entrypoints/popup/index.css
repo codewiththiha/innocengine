@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Shared popup/review base tokens */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: hsl(var(--b1));
+  color: hsl(var(--bc));
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.popup-shell {
+  width: 380px;
+  min-height: 480px;
+  background: hsl(var(--b1));
+}
+
+/* Compact range inputs for daisyUI sliders */
+input[type='range'].range {
+  --range-shdw: hsl(var(--p));
+}
+
+/* Hide native file input */
+.hidden-file { display: none; }
+
+/* Scrollable content area inside popup */
+.scroll-y {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* Chess board palette helpers */
+.board-light { background-color: #eeeed2; }
+.board-dark  { background-color: #769656; }

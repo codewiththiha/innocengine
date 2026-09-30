@@ -5,6 +5,10 @@
    - Transparent AI state: "Analyzing…" and progress are always visible, never a silent spinner.
    - Calm palette — warm neutrals, accent colors reserved for meaning (not chrome).
    - Explanations next to every classification chip. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --bg: #1d1f22;
   --bg-elev: #26292d;

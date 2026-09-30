@@ -317,42 +317,41 @@ export default function App() {
     <div className="review-shell">
       {/* LEFT: Game library */}
       <aside className="col-left">
-        <div className="card">
-          <h1 className="page-title"><BookOpen size={20} /> Game Review</h1>
-          <p className="page-subtitle">
-            A human-first post-game analysis companion. Engine help appears only when
-            you ask, and every label comes with a plain-English explanation.
-          </p>
-          <div className="toolbar">
-            <button className="btn" onClick={refreshGames}><RefreshCw size={14} /> Refresh</button>
+        <div className="card bg-base-200 shadow-sm">
+          <h1 className="text-lg font-bold flex items-center gap-2 mb-2"><BookOpen size={18} /> Game Review</h1>
+          <div className="flex gap-2 mb-3">
+            <button className="btn btn-sm btn-ghost gap-1" onClick={refreshGames}><RefreshCw size={14} /> Refresh</button>
           </div>
-          <div className="section-title">Recorded games</div>
+          <div className="text-xs uppercase tracking-wide opacity-60 mb-2">Recorded games</div>
           {games.length === 0 ? (
-            <div className="empty-state">
-              No saved games yet. Play a game on Chess.com with auto-record enabled
-              and finished matches will appear here.
-            </div>
+            <div className="text-sm opacity-70 py-6 text-center">No saved games yet.</div>
           ) : (
-            <div className="game-list">
+            <div className="flex flex-col gap-1 max-h-[60vh] overflow-y-auto">
               {games.map((g) => (
                 <div
                   key={g.id}
-                  className={`game-item ${activeGame?.id === g.id ? 'active' : ''}`}
+                  className={`card card-compact cursor-pointer border transition-colors ${activeGame?.id === g.id ? 'bg-primary/15 border-primary' : 'bg-base-100 border-base-300 hover:bg-base-200'}`}
                   onClick={() => selectGame(g.id)}
                 >
-                  <div className="title">
-                    {g.result === 'win' ? '🏆 Win' : g.result === 'loss' ? '✗ Loss' : g.result === 'draw' ? '½ Draw' : '•'}
-                    {' '}
-                    {g.moves.length} moves — {(g.endedAt ? new Date(g.endedAt).toLocaleString() : '—')}
-                  </div>
-                  <div className="meta">
-                    Played {g.playerColor === 'w' ? 'White' : 'Black'} • {g.reviewStatus === 'reviewed' ? 'Reviewed' : g.reviewStatus}
-                  </div>
-                  {g.reviewStatus === 'reviewed' && g.review && (
-                    <div className="acc">
-                      Accuracy: W {g.review.accuracy.white} • B {g.review.accuracy.black}
+                  <div className="card-body p-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold">
+                        {g.result === 'win' ? '🏆 Win' : g.result === 'loss' ? '✗ Loss' : g.result === 'draw' ? '½ Draw' : '•'}
+                      </span>
+                      <span className="opacity-60">{g.moves.length} moves</span>
                     </div>
-                  )}
+                    <div className="text-[11px] opacity-60">
+                      {g.playerColor === 'w' ? 'White' : 'Black'} · {new Date(g.endedAt || g.startedAt).toLocaleString()}
+                    </div>
+                    {g.reviewStatus === 'reviewed' && g.review && (
+                      <div className="text-[11px]">W {g.review.accuracy.white} / B {g.review.accuracy.black}</div>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-xs absolute top-1 right-1 text-error"
+                    onClick={(e) => { e.stopPropagation(); deleteGameEntry(g.id); }}
+                    title="Delete"
+                  ><Trash2 size={12}/></button>
                 </div>
               ))}
             </div>
@@ -363,13 +362,11 @@ export default function App() {
       {/* CENTER: Board + moves */}
       <main className="col-center">
         {!activeGame ? (
-          <div className="card">
-            <div className="empty-state" style={{ padding: '60px 20px' }}>
-              <Sparkles size={32} style={{ color: 'var(--accent)', marginBottom: 12 }} />
-              <h2 style={{ margin: '0 0 8px' }}>Pick a game to review</h2>
-              <p>Select a recorded game from the left. Or finish a game on Chess.com —
-                with auto-record on, it will appear here automatically.</p>
-              <span className="ai-badge neutral">Engine results are suggestions, not truth</span>
+          <div className="card bg-base-200 shadow-sm">
+            <div className="card-body items-center text-center py-16">
+              <Sparkles size={28} className="text-primary mb-2"/>
+              <h2 className="card-title">Pick a game to review</h2>
+              <p className="text-sm opacity-70 max-w-xs">Select a game from the left, or finish a game on Chess.com.</p>
             </div>
           </div>
         ) : (
@@ -530,141 +527,100 @@ export default function App() {
       </main>
 
       {/* RIGHT: Engine, review controls, accuracy */}
-      <aside className="col-right">
-        <div className="card">
-          <div className="section-title">
-            <Sparkles size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
-            Analysis engine
-            <span className="ai-badge neutral" style={{ float: 'right' }}>You stay in control</span>
+      <aside className="col-right flex flex-col gap-3">
+        <div className="card bg-base-200 shadow-sm">
+          <div className="card-body p-3 gap-3">
+            <h2 className="card-title text-sm"><Sparkles size={14}/> Analysis</h2>
+
+            {activeGame ? (
+              <>
+                <label className="form-control w-full">
+                  <div className="label py-0.5"><span className="label-text text-xs">Engine</span></div>
+                  <select className="select select-sm select-bordered w-full" value={settings.reviewEngineId}
+                    onChange={(e) => updateSetting({ reviewEngineId: e.target.value as any })}>
+                    <option value="stockfish">Stockfish 17</option>
+                    <option value="ballmaegyi">BallMaeGyi 5.1</option>
+                  </select>
+                </label>
+                <label className="form-control w-full">
+                  <div className="label py-0.5"><span className="label-text text-xs">Depth</span><span className="label-text-alt">{settings.reviewDepth} ply</span></div>
+                  <input type="range" className="range range-primary range-xs" min={12} max={24} step={1} value={settings.reviewDepth}
+                    onChange={(e) => updateSetting({ reviewDepth: parseInt(e.target.value,10) })}/>
+                </label>
+                <label className="form-control w-full">
+                  <div className="label py-0.5"><span className="label-text text-xs">Lines</span><span className="label-text-alt">{settings.reviewMultiPv}</span></div>
+                  <input type="range" className="range range-primary range-xs" min={2} max={5} step={1} value={settings.reviewMultiPv}
+                    onChange={(e) => updateSetting({ reviewMultiPv: parseInt(e.target.value,10) })}/>
+                </label>
+
+                {reviewProgress ? (
+                  <>
+                    <button className="btn btn-sm btn-error" onClick={cancelReview}><Pause size={14} /> Cancel</button>
+                    <progress className="progress progress-primary w-full" value={reviewProgress.ply} max={Math.max(1, reviewProgress.total)}></progress>
+                    <div className="text-xs opacity-60">Move {reviewProgress.ply + 1} / {reviewProgress.total} · depth {reviewProgress.depth}</div>
+                  </>
+                ) : (
+                  <button className="btn btn-sm btn-primary" onClick={startReview}
+                    disabled={reviewCanceller !== null || activeGame.reviewStatus === 'reviewing'}>
+                    <Sparkles size={14}/>
+                    {activeGame.reviewStatus === 'reviewed' ? 'Re-analyze' : 'Analyze game'}
+                  </button>
+                )}
+                {reviewError && <div className="text-xs text-error">{reviewError}</div>}
+              </>
+            ) : (
+              <div className="text-xs opacity-60 py-2">Select a game first.</div>
+            )}
           </div>
-          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 0 }}>
-            This engine is separate from your live highlight engine so you can review
-            deeply without disturbing in-play hints. You can cancel any time and your
-            moves stay private on your device.
-          </p>
-
-          {activeGame ? (
-            <div className="engine-controls">
-              <div>
-                <label>Engine</label>
-                <select
-                  value={settings.reviewEngineId}
-                  onChange={(e) => updateSetting({ reviewEngineId: e.target.value as any })}
-                >
-                  <option value="stockfish">Stockfish 17 (analytical)</option>
-                  <option value="patricia">Patricia 5.1 (aggressive NNUE)</option>
-                </select>
-              </div>
-              <div>
-                <label>Depth: <strong>{settings.reviewDepth} ply</strong></label>
-                <input
-                  type="range" min={12} max={24} step={1}
-                  value={settings.reviewDepth}
-                  onChange={(e) => updateSetting({ reviewDepth: parseInt(e.target.value, 10) })}
-                />
-              </div>
-              <div>
-                <label>Lines: <strong>{settings.reviewMultiPv}</strong></label>
-                <input
-                  type="range" min={2} max={5} step={1}
-                  value={settings.reviewMultiPv}
-                  onChange={(e) => updateSetting({ reviewMultiPv: parseInt(e.target.value, 10) })}
-                />
-              </div>
-
-              {reviewProgress ? (
-                <>
-                  <button className="btn danger" onClick={cancelReview}><Pause size={14} /> Cancel review</button>
-                  <div className="progress-track">
-                    <div className="fill" style={{ width: `${(reviewProgress.ply / Math.max(1, reviewProgress.total)) * 100}%` }} />
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                    Analyzing move {reviewProgress.ply + 1} / {reviewProgress.total} · depth {reviewProgress.depth}
-                  </div>
-                </>
-              ) : (
-                <button
-                  className="btn primary"
-                  onClick={startReview}
-                  disabled={reviewCanceller !== null || activeGame.reviewStatus === 'reviewing'}
-                >
-                  <Sparkles size={14} />
-                  {activeGame.reviewStatus === 'reviewed' ? 'Re-analyze game' : 'Analyze game'}
-                </button>
-              )}
-
-              {reviewError && (
-                <div style={{ color: 'var(--danger)', fontSize: 12 }}>{reviewError}</div>
-              )}
-            </div>
-          ) : (
-            <div className="empty-state" style={{ padding: 16 }}>Select a game first.</div>
-          )}
         </div>
 
         {activeGame?.review && accuracy && (
-          <div className="card">
-            <div className="section-title">Accuracy</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div className="accuracy-dial">
-                <div className="dial-big" style={{ color: '#fff' }}>{accuracy.white}</div>
-                <div className="dial-sub">White</div>
+          <div className="card bg-base-200 shadow-sm">
+            <div className="card-body p-3">
+              <h2 className="card-title text-sm mb-1">Accuracy</h2>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="stat bg-base-100 rounded-lg p-2 flex-1 text-center">
+                  <div className="stat-value text-xl">{accuracy.white}</div>
+                  <div className="stat-desc">White</div>
+                </div>
+                <div className="stat bg-base-100 rounded-lg p-2 flex-1 text-center">
+                  <div className="stat-value text-xl">{accuracy.black}</div>
+                  <div className="stat-desc">Black</div>
+                </div>
               </div>
-              <div className="accuracy-dial">
-                <div className="dial-big" style={{ color: 'var(--text-dim)' }}>{accuracy.black}</div>
-                <div className="dial-sub">Black</div>
-              </div>
-            </div>
-            <div className="class-legend">
-              {MOVE_CLASS_ORDER.map((c) => {
-                const n = activeGame.review!.summary[c];
-                return (
-                  <div key={c} className="legend-item" title={CLASS_META[c].description}>
-                    <span className="chip" style={{
-                      background: CLASS_META[c].bg, color: CLASS_META[c].color, borderColor: CLASS_META[c].border,
+              <div className="flex flex-col gap-1">
+                {MOVE_CLASS_ORDER.map((c) => (
+                  <div key={c} className="flex items-center gap-2 text-xs">
+                    <span className="w-6 h-6 flex items-center justify-center text-[10px] rounded" style={{
+                      background: CLASS_META[c].bg, color: CLASS_META[c].color, border: '1px solid ' + CLASS_META[c].border
                     }}>{CLASS_META[c].symbol}</span>
-                    <span>{CLASS_META[c].label}</span>
-                    <span style={{ marginLeft: 'auto', color: 'var(--text-dim)' }}>{n || 0}</span>
+                    <span className="flex-1">{CLASS_META[c].label}</span>
+                    <span className="opacity-60">{activeGame.review!.summary[c] || 0}</span>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-        <div className="card">
-          <div className="section-title">Auto-save</div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginBottom: 8 }}>
-            <input
-              type="checkbox"
-              checked={!!settings.autoRecordGames}
-              onChange={(e) => updateSetting({ autoRecordGames: e.target.checked })}
-            />
-            Save every finished Chess.com game to this device
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
-            <input
-              type="checkbox"
-              checked={!!settings.autoReview}
-              onChange={(e) => updateSetting({ autoReview: e.target.checked })}
-            />
-            Auto-start analysis after each game
-          </label>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.45 }}>
-            Games are stored locally in your browser (IndexedDB) and never leave your device
-            unless you choose to export them. Analysis runs entirely inside the extension.
+        <div className="card bg-base-200 shadow-sm">
+          <div className="card-body p-3 gap-2">
+            <h2 className="card-title text-sm">Auto-save</h2>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={!!settings.autoRecordGames}
+                onChange={(e) => updateSetting({ autoRecordGames: e.target.checked })}/>
+              <span className="text-xs">Record finished games</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={!!settings.autoReview}
+                onChange={(e) => updateSetting({ autoReview: e.target.checked })}/>
+              <span className="text-xs">Auto-analyze after each game</span>
+            </label>
+            <div className="text-[11px] opacity-60">Games stay in your browser; analysis runs locally.</div>
           </div>
         </div>
 
-        <div className="card">
-          <div className="section-title">About the feedback</div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-            Classifications follow Chess.com-style thresholds based on the change in engine
-            evaluation (<em>centipawn loss</em>). A brilliant move is a sound sacrifice
-            that keeps a winning advantage. A blunder concedes three pawns or more — or
-            misses / allows mate. Treat labels as learning hints, not verdicts.
-          </div>
-        </div>
+        <div className="text-center text-[10px] opacity-40 pb-2">by codewiththiha</div>
       </aside>
     </div>
   );

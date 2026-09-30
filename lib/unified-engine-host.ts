@@ -1,6 +1,6 @@
 import { UciParser } from './uci-parser';
 import { EngineRegistry } from './engine-registry';
-import { mapEloToStockfishParams, getMaiaTuning, getPatriciaTuning } from './engine-tuning';
+import { mapEloToStockfishParams, getMaiaTuning, getBallMaeGyiTuning } from './engine-tuning';
 import { evaluateHumanPolicy, predictRanked } from './maia-policy';
 import { Chess } from 'chess.js';
 import type { EngineEvaluation, EngineCandidate, MoveLine } from './types';
@@ -14,11 +14,11 @@ export interface EngineRunOptions {
   hashMb?: number;
   senderTabId?: number;
   maxNodes?: number;
-  patriciaPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
-  patriciaLimitStrength?: boolean;
-  patriciaElo?: number;
-  patriciaPerformance?: 'responsive' | 'balanced' | 'deep';
-  patriciaManualDepth?: boolean;
+  ballmaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  ballmaegyiLimitStrength?: boolean;
+  ballmaegyiElo?: number;
+  ballmaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
+  ballmaegyiManualDepth?: boolean;
 }
 
 export interface IEngineRunner {
@@ -355,11 +355,11 @@ class MaiaRunner implements IEngineRunner {
 }
 
 // --------------------------------------------------------------------------
-// 3. Patricia WASM Engine Runner (Aggressive & Human Mode)
+// 3. BallMaeGyi WASM Engine Runner (Aggressive & Human Mode)
 // --------------------------------------------------------------------------
-class PatriciaRunner implements IEngineRunner {
-  public readonly id = 'patricia';
-  public readonly name = 'Patricia 5.1 (Aggressive & Human)';
+class BallMaeGyiRunner implements IEngineRunner {
+  public readonly id = 'ballmaegyi';
+  public readonly name = 'BallMaeGyi 5.1 (Aggressive & Human)';
 
   private worker: Worker | null = null;
   private standbyWorker: Worker | null = null;
@@ -389,7 +389,7 @@ class PatriciaRunner implements IEngineRunner {
   }
 
   /**
-   * Spawn a new Patricia worker and return it once UCI initialization is done.
+   * Spawn a new BallMaeGyi worker and return it once UCI initialization is done.
    * The dual-worker strategy keeps a warm standby so we never block the UI
    * waiting for WASM to recompile after an interrupted search.
    */
@@ -407,10 +407,10 @@ class PatriciaRunner implements IEngineRunner {
       };
 
       try {
-        const workerUrl = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
+        const workerUrl = chrome.runtime.getURL('engine/ballmaegyi/ballmaegyi-worker.js');
         worker = new Worker(workerUrl);
       } catch (error) {
-        console.error(`[PatriciaRunner] ${label} spawn failed:`, error);
+        console.error(`[BallMaeGyiRunner] ${label} spawn failed:`, error);
         done(null, false);
         return;
       }
@@ -419,7 +419,7 @@ class PatriciaRunner implements IEngineRunner {
         if (worker) {
           try { worker.terminate(); } catch (_) {}
         }
-        console.warn(`[PatriciaRunner] ${label} init timed out`);
+        console.warn(`[BallMaeGyiRunner] ${label} init timed out`);
         done(null, false);
       }, timeoutMs);
 
@@ -434,7 +434,7 @@ class PatriciaRunner implements IEngineRunner {
       };
 
       worker.onerror = (error) => {
-        console.error(`[PatriciaRunner] ${label} failed:`, error);
+        console.error(`[BallMaeGyiRunner] ${label} failed:`, error);
         if (worker) {
           try { worker.terminate(); } catch (_) {}
         }
@@ -479,7 +479,7 @@ class PatriciaRunner implements IEngineRunner {
         this.initializationFailed = false;
         this.isReady = false;
         this.isSearching = false;
-        this.onStatus('loading', 'Initializing Patricia WASM...');
+        this.onStatus('loading', 'Initializing BallMaeGyi WASM...');
         this.currentSkillLevel = -1;
 
         this.spawnWorker('primary').then(({ worker, ok }) => {
@@ -487,7 +487,7 @@ class PatriciaRunner implements IEngineRunner {
             this.initializationFailed = true;
             this.isReady = false;
             this.worker = null;
-            this.onStatus('error', 'Patricia worker did not complete UCI initialization');
+            this.onStatus('error', 'BallMaeGyi worker did not complete UCI initialization');
             resolve();
             return;
           }
@@ -501,14 +501,14 @@ class PatriciaRunner implements IEngineRunner {
             if (line === 'uciok' || line === 'readyok') {
               this.isReady = true;
               this.isSearching = false;
-              this.onStatus('ready', 'Patricia 5.1 Ready');
+              this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
               return;
             }
             this.handleLine(line);
           };
 
           this.worker.onerror = (error) => {
-            console.error('[PatriciaRunner] Worker failed:', error);
+            console.error('[BallMaeGyiRunner] Worker failed:', error);
             this.initializationFailed = true;
             this.isReady = false;
             this.isSearching = false;
@@ -517,10 +517,10 @@ class PatriciaRunner implements IEngineRunner {
               this.worker?.terminate();
             } catch (_) {}
             this.worker = null;
-            this.onStatus('error', 'Patricia worker failed');
+            this.onStatus('error', 'BallMaeGyi worker failed');
           };
 
-          this.onStatus('ready', 'Patricia 5.1 Ready');
+          this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
           resolve();
 
           // Kick off a standby warm-up AFTER primary is ready so we don't compete
@@ -534,11 +534,11 @@ class PatriciaRunner implements IEngineRunner {
           }
         });
       } catch (error) {
-        console.error('[PatriciaRunner] Initialization failed:', error);
+        console.error('[BallMaeGyiRunner] Initialization failed:', error);
         this.initializationFailed = true;
         this.isReady = false;
         this.pendingAnalysis = null;
-        this.onStatus('error', 'Failed to launch Patricia worker');
+        this.onStatus('error', 'Failed to launch BallMaeGyi worker');
         resolve();
       }
     });
@@ -565,13 +565,13 @@ class PatriciaRunner implements IEngineRunner {
         if (line === 'uciok' || line === 'readyok') {
           this.isReady = true;
           this.isSearching = false;
-          this.onStatus('ready', 'Patricia 5.1 Ready');
+          this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
           return;
         }
         this.handleLine(line);
       };
       this.worker.onerror = (error) => {
-        console.error('[PatriciaRunner] Standby worker failed:', error);
+        console.error('[BallMaeGyiRunner] Standby worker failed:', error);
         this.initializationFailed = true;
         this.isReady = false;
         this.isSearching = false;
@@ -579,7 +579,7 @@ class PatriciaRunner implements IEngineRunner {
           this.worker?.terminate();
         } catch (_) {}
         this.worker = null;
-        this.onStatus('error', 'Patricia worker failed');
+        this.onStatus('error', 'BallMaeGyi worker failed');
       };
       // Trigger warm of the next standby in the background
       this.warmStandby();
@@ -592,7 +592,7 @@ class PatriciaRunner implements IEngineRunner {
     if (line === 'uciok' || line === 'readyok') {
       this.isReady = true;
       this.isSearching = false;
-      this.onStatus('ready', 'Patricia 5.1 Ready');
+      this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
       return;
     }
 
@@ -633,7 +633,7 @@ class PatriciaRunner implements IEngineRunner {
           : null;
 
       const evalData: EngineEvaluation = {
-        engineInstanceId: 'patricia',
+        engineInstanceId: 'ballmaegyi',
         analysisId: this.currentAnalysisId,
         positionKey: this.currentPositionKey,
         fen: this.currentFen,
@@ -655,7 +655,7 @@ class PatriciaRunner implements IEngineRunner {
       this.onEval(evalData, this.senderTabId);
 
       if (!partialEval.isCalculating) {
-        this.onStatus('ready', 'Patricia Ready', this.senderTabId);
+        this.onStatus('ready', 'BallMaeGyi Ready', this.senderTabId);
       }
     }
   }
@@ -667,7 +667,7 @@ class PatriciaRunner implements IEngineRunner {
     this.senderTabId = options.senderTabId;
 
     // INSTANT INTERRUPT OF STALE SYNCHRONOUS SEARCH:
-    // Patricia is single-threaded WASM; postMessage('stop') queues behind the
+    // BallMaeGyi is single-threaded WASM; postMessage('stop') queues behind the
     // running search. Instead we swap to a pre-warmed standby worker for 0ms
     // handoff. If no standby is warm yet, fall back to terminate + re-init.
     if (this.isSearching) {
@@ -709,15 +709,15 @@ class PatriciaRunner implements IEngineRunner {
       this.currentMultiPv = targetMultiPv;
     }
 
-    // Configure Patricia Human / Aggressive Tuning
-    const tuning = getPatriciaTuning({
-      patriciaPersonality: options.patriciaPersonality,
-      patriciaLimitStrength: options.patriciaLimitStrength,
-      patriciaElo: options.patriciaElo ?? options.targetElo,
+    // Configure BallMaeGyi Human / Aggressive Tuning
+    const tuning = getBallMaeGyiTuning({
+      ballmaegyiPersonality: options.ballmaegyiPersonality,
+      ballmaegyiLimitStrength: options.ballmaegyiLimitStrength,
+      ballmaegyiElo: options.ballmaegyiElo ?? options.targetElo,
       depth: options.depth,
       multiPv: options.multiPv,
-      patriciaManualDepth: options.patriciaManualDepth,
-      patriciaPerformance: options.patriciaPerformance,
+      ballmaegyiManualDepth: options.ballmaegyiManualDepth,
+      ballmaegyiPerformance: options.ballmaegyiPerformance,
     } as any);
 
     this.worker.postMessage(`setoption name Personality value ${tuning.personality}`);
@@ -758,7 +758,7 @@ class PatriciaRunner implements IEngineRunner {
     } else if (this.worker) {
       this.worker.postMessage('stop');
     }
-    this.onStatus('ready', 'Patricia Ready', this.senderTabId);
+    this.onStatus('ready', 'BallMaeGyi Ready', this.senderTabId);
   }
 
   public destroy() {
@@ -945,8 +945,8 @@ class UnifiedEngineHost {
 
     this.currentEngineId = engineId;
 
-    if (engineId === 'patricia') {
-      this.activeRunner = new PatriciaRunner(
+    if (engineId === 'ballmaegyi') {
+      this.activeRunner = new BallMaeGyiRunner(
         (ev, tabId) => this.broadcastEvaluation(ev, tabId),
         (st, msg, tabId) => this.broadcastStatus(st, msg, tabId)
       );
@@ -1002,11 +1002,11 @@ class UnifiedEngineHost {
             multiPv: message.multiPv || 1,
             limitStrength: message.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: message.targetElo ?? this.lastOptions.targetElo,
-            patriciaPersonality: message.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
-            patriciaLimitStrength: message.patriciaLimitStrength ?? this.lastOptions.patriciaLimitStrength,
-            patriciaElo: message.patriciaElo ?? this.lastOptions.patriciaElo,
-            patriciaPerformance: message.patriciaPerformance ?? this.lastOptions.patriciaPerformance,
-            patriciaManualDepth: message.patriciaManualDepth ?? this.lastOptions.patriciaManualDepth,
+            ballmaegyiPersonality: message.ballmaegyiPersonality ?? this.lastOptions.ballmaegyiPersonality,
+            ballmaegyiLimitStrength: message.ballmaegyiLimitStrength ?? this.lastOptions.ballmaegyiLimitStrength,
+            ballmaegyiElo: message.ballmaegyiElo ?? this.lastOptions.ballmaegyiElo,
+            ballmaegyiPerformance: message.ballmaegyiPerformance ?? this.lastOptions.ballmaegyiPerformance,
+            ballmaegyiManualDepth: message.ballmaegyiManualDepth ?? this.lastOptions.ballmaegyiManualDepth,
             threads: message.threads,
             hashMb: message.hashMb,
             senderTabId: message.senderTabId || sender?.tab?.id,
@@ -1047,11 +1047,11 @@ class UnifiedEngineHost {
             multiPv: s.multiPv ?? this.lastOptions.multiPv,
             limitStrength: s.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: s.targetElo ?? this.lastOptions.targetElo,
-            patriciaPersonality: s.patriciaPersonality ?? this.lastOptions.patriciaPersonality,
-            patriciaLimitStrength: s.patriciaLimitStrength ?? this.lastOptions.patriciaLimitStrength,
-            patriciaElo: s.patriciaElo ?? this.lastOptions.patriciaElo,
-            patriciaPerformance: s.patriciaPerformance ?? this.lastOptions.patriciaPerformance,
-            patriciaManualDepth: s.patriciaManualDepth ?? this.lastOptions.patriciaManualDepth,
+            ballmaegyiPersonality: s.ballmaegyiPersonality ?? this.lastOptions.ballmaegyiPersonality,
+            ballmaegyiLimitStrength: s.ballmaegyiLimitStrength ?? this.lastOptions.ballmaegyiLimitStrength,
+            ballmaegyiElo: s.ballmaegyiElo ?? this.lastOptions.ballmaegyiElo,
+            ballmaegyiPerformance: s.ballmaegyiPerformance ?? this.lastOptions.ballmaegyiPerformance,
+            ballmaegyiManualDepth: s.ballmaegyiManualDepth ?? this.lastOptions.ballmaegyiManualDepth,
             threads: s.threads ?? this.lastOptions.threads,
             hashMb: s.hashMb ?? this.lastOptions.hashMb,
           };

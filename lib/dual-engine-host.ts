@@ -9,7 +9,7 @@
  */
 import { UciParser } from './uci-parser';
 import type { EngineCandidate, EngineEvaluation, MoveLine } from './types';
-import { getPatriciaTuning } from './engine-tuning';
+import { getBallMaeGyiTuning } from './engine-tuning';
 import { getStockfishTuning, mapEloToStockfishParams } from './engine-tuning';
 
 export interface AnalysisProgress {
@@ -47,8 +47,8 @@ class SingleRunner {
   async init(): Promise<void> {
     return new Promise((resolve, reject) => {
       let url: string;
-      if (this.engineId === 'patricia') {
-        url = chrome.runtime.getURL('engine/patricia/patricia-worker.js');
+      if (this.engineId === 'ballmaegyi') {
+        url = chrome.runtime.getURL('engine/ballmaegyi/ballmaegyi-worker.js');
       } else {
         url = chrome.runtime.getURL('engine/stockfish.js');
       }
@@ -128,7 +128,7 @@ class SingleRunner {
       this.worker.postMessage('stop');
       this.worker.postMessage(`setoption name MultiPV value ${multiPv}`);
 
-      if (this.engineId === 'patricia') {
+      if (this.engineId === 'ballmaegyi') {
         // Deep analysis always uses full strength for review
         this.worker.postMessage('setoption name Personality value full_strength');
         this.worker.postMessage('setoption name UCI_LimitStrength value false');
@@ -159,7 +159,7 @@ export async function runDeepReview(params: {
   gameId: string;
   initialFen: string;
   moves: { san: string; uci: string }[];
-  engineId: 'stockfish' | 'patricia';
+  engineId: 'stockfish' | 'ballmaegyi';
   depth: number;
   multiPv?: number;
   onProgress?: ProgressCallback;

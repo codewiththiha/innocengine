@@ -14,8 +14,8 @@ export const BUILTIN_STOCKFISH: CustomEngineMeta = {
 };
 
 export const BUILTIN_PATRICIA: CustomEngineMeta = {
-  id: 'patricia',
-  name: 'Patricia 5.1 (Aggressive & Human)',
+  id: 'ballmaegyi',
+  name: 'BallMaeGyi 5.1 (Aggressive & Human)',
   author: 'Adam Kulju',
   sizeBytes: 5029036,
   dateAdded: 0,
@@ -112,7 +112,7 @@ export class EngineRegistry {
   }
 
   public static async getEngineWasmBytes(id: string): Promise<ArrayBuffer | null> {
-    if (id === 'stockfish' || id === 'patricia' || id === 'maia3' || id === 'maia2') return null;
+    if (id === 'stockfish' || id === 'ballmaegyi' || id === 'maia3' || id === 'maia2') return null;
 
     try {
       const db = await openDb();
@@ -137,7 +137,7 @@ export class EngineRegistry {
   }
 
   public static async deleteCustomEngine(id: string): Promise<void> {
-    if (id === 'stockfish' || id === 'patricia' || id === 'maia3' || id === 'maia2') return;
+    if (id === 'stockfish' || id === 'ballmaegyi' || id === 'maia3' || id === 'maia2') return;
 
     const db = await openDb();
     return new Promise((resolve, reject) => {

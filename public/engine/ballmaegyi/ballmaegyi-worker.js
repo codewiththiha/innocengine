@@ -1,4 +1,4 @@
-// Patricia's single-threaded WASM adapter with UCI strength and style controls.
+// BallMaeGyi's single-threaded WASM adapter with UCI strength and style controls.
 
 const SKILL_LEVELS = [
   500, 800, 1000, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
@@ -254,10 +254,10 @@ function handleBestMove(rawBestMoveLine) {
 
 async function initEngine() {
   try {
-    importScripts('patricia-single.js');
+    importScripts('ballmaegyi-single.js');
 
     const scriptUrl = self.location.href;
-    engineInstance = await Patricia({
+    engineInstance = await BallMaeGyi({
       mainScriptUrlOrBlob: scriptUrl,
       locateFile: (file) => new URL(file, scriptUrl).href,
     });
@@ -302,8 +302,8 @@ async function initEngine() {
       handleCommand(command);
     }
   } catch (error) {
-    console.error('[PatriciaWorker] Initialization failed:', error);
-    postOutput('info string Patricia initialization failed');
+    console.error('[BallMaeGyiWorker] Initialization failed:', error);
+    postOutput('info string BallMaeGyi initialization failed');
   }
 }
 
@@ -398,7 +398,7 @@ function handleCommand(rawCommand) {
         ? Math.min(requestedMovetime, bounds.movetime + 200)
         : bounds.movetime;
 
-      // Patricia resets MultiPV during its human search path, so restore it per search.
+      // BallMaeGyi resets MultiPV during its human search path, so restore it per search.
       syncEngineMultiPv();
       engineInstance.postMessage(`go depth ${depth} movetime ${movetime}`);
       return;
@@ -411,7 +411,7 @@ function handleCommand(rawCommand) {
 
     engineInstance.postMessage(command);
   } catch (error) {
-    console.warn('[PatriciaWorker] Command failed:', command, error);
+    console.warn('[BallMaeGyiWorker] Command failed:', command, error);
   }
 }
 

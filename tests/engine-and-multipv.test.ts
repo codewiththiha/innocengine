@@ -641,52 +641,52 @@ console.log('\n9. Testing Maia stalemate prevention when holding decisive advant
 }
 
 // --------------------------------------------------------------------------
-// 10. Patricia 5.1 Aggressive & Human Tuning Tests
+// 10. BallMaeGyi 5.1 Aggressive & Human Tuning Tests
 // --------------------------------------------------------------------------
-console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and personality modes...');
+console.log('\n10. Testing BallMaeGyi 5.1 parameter mapping, Elo calibration, and personality modes...');
 {
-  const { mapEloToPatriciaSkill, getPatriciaTuning, PATRICIA_SKILL_LEVELS } = await import(
+  const { mapEloToBallMaeGyiSkill, getBallMaeGyiTuning, BALLMAEGYI_SKILL_LEVELS } = await import(
     '../lib/engine-tuning'
   );
 
   // Discrete skill levels span 500 to 3000 Elo (20 levels)
-  assert.strictEqual(PATRICIA_SKILL_LEVELS.length, 20);
-  assert.strictEqual(PATRICIA_SKILL_LEVELS[0], 500);
-  assert.strictEqual(PATRICIA_SKILL_LEVELS[19], 3000);
+  assert.strictEqual(BALLMAEGYI_SKILL_LEVELS.length, 20);
+  assert.strictEqual(BALLMAEGYI_SKILL_LEVELS[0], 500);
+  assert.strictEqual(BALLMAEGYI_SKILL_LEVELS[19], 3000);
 
   // Exact mappings
-  const p500 = mapEloToPatriciaSkill(500);
+  const p500 = mapEloToBallMaeGyiSkill(500);
   assert.strictEqual(p500.skillLevel, 1, '500 Elo should map to Skill Level 1');
 
-  const p1500 = mapEloToPatriciaSkill(1500);
+  const p1500 = mapEloToBallMaeGyiSkill(1500);
   assert.strictEqual(p1500.skillLevel, 7, '1500 Elo should map to Skill Level 7');
 
-  const p2500 = mapEloToPatriciaSkill(2500);
+  const p2500 = mapEloToBallMaeGyiSkill(2500);
   assert.strictEqual(p2500.skillLevel, 17, '2500 Elo should map to Skill Level 17');
   assert.strictEqual(p2500.cpLoss, 20, '2500 Elo should have 20 cp_loss target');
 
-  const p3000 = mapEloToPatriciaSkill(3000);
+  const p3000 = mapEloToBallMaeGyiSkill(3000);
   assert.strictEqual(p3000.skillLevel, 20, '3000 Elo should map to Skill Level 20');
   assert.strictEqual(p3000.cpLoss, 0, '3000 Elo should have 0 cp_loss target');
 
   // Full Strength (Skill Level 21)
-  const fullTuning = getPatriciaTuning({
+  const fullTuning = getBallMaeGyiTuning({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'full_strength',
-    patriciaLimitStrength: false,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'full_strength',
+    ballmaegyiLimitStrength: false,
   });
   assert.strictEqual(fullTuning.isHuman, false);
   assert.strictEqual(fullTuning.skillLevel, 21, 'Full strength must set Skill_Level 21');
   assert.strictEqual(fullTuning.targetElo, 3500);
 
   // Human Mode at 2500 Elo (with fast responsive recommended depth 8–11 ply)
-  const human2500Tuning = getPatriciaTuning({
+  const human2500Tuning = getBallMaeGyiTuning({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'human',
-    patriciaLimitStrength: true,
-    patriciaElo: 2500,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'human',
+    ballmaegyiLimitStrength: true,
+    ballmaegyiElo: 2500,
   });
   assert.strictEqual(human2500Tuning.isHuman, true);
   assert.strictEqual(human2500Tuning.skillLevel, 17);
@@ -696,62 +696,62 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   // Aggressive Personality Description
   const aggDesc = getEngineStrengthDescription({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'aggressive',
-    patriciaLimitStrength: false,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'aggressive',
+    ballmaegyiLimitStrength: false,
   });
   assert(aggDesc.detail.includes('EAS 430,000'), 'Should highlight EAS 430,000 aggression score');
 
   // Human Mode Description
   const humanDesc = getEngineStrengthDescription({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'human',
-    patriciaLimitStrength: true,
-    patriciaElo: 2500,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'human',
+    ballmaegyiLimitStrength: true,
+    ballmaegyiElo: 2500,
   });
   assert(humanDesc.badge.includes('2500'), 'Badge should show 2500 Elo');
   assert(humanDesc.detail.includes('Skill Level 17'), 'Detail should show Skill Level 17');
 
   // Test low Elo depth throttling (500-600 Elo -> depth 2 novice horizon)
-  const low500Tuning = getPatriciaTuning({
+  const low500Tuning = getBallMaeGyiTuning({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'human',
-    patriciaElo: 500,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'human',
+    ballmaegyiElo: 500,
     depth: 16, // User depth slider was set to 16, must be overridden by recommended depth 2
   });
   assert.strictEqual(low500Tuning.isHuman, true);
   assert.strictEqual(low500Tuning.skillLevel, 1, '500 Elo should map to Skill Level 1');
   assert.strictEqual(low500Tuning.recommendedDepth, 2, '500 Elo depth must be locked to 2 ply and override manual 16 ply');
 
-  const low600Tuning = getPatriciaTuning({
+  const low600Tuning = getBallMaeGyiTuning({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'human',
-    patriciaElo: 600,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'human',
+    ballmaegyiElo: 600,
   });
   assert.strictEqual(low600Tuning.isHuman, true);
   assert.strictEqual(low600Tuning.skillLevel, 1, '600 Elo should map to Skill Level 1');
   assert.strictEqual(low600Tuning.recommendedDepth, 2, '600 Elo depth must be throttled to 2 ply');
 
-  // Verify opening policy minEngineDepth for Patricia is 2 (never overrides depth 2 engine moves)
-  assert.strictEqual(DEFAULT_SETTINGS.opening.enginePolicy?.patricia?.minEngineDepth, 2, 'Patricia minEngineDepth must be 2');
+  // Verify opening policy minEngineDepth for BallMaeGyi is 2 (never overrides depth 2 engine moves)
+  assert.strictEqual(DEFAULT_SETTINGS.opening.enginePolicy?.ballmaegyi?.minEngineDepth, 2, 'BallMaeGyi minEngineDepth must be 2');
 
-  const mid800Tuning = getPatriciaTuning({
+  const mid800Tuning = getBallMaeGyiTuning({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'human',
-    patriciaElo: 800,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'human',
+    ballmaegyiElo: 800,
   });
   assert.strictEqual(mid800Tuning.recommendedDepth, 3, '800 Elo depth must be throttled to 3 ply');
 
   // Test intermediate Elo depth scaling (1500 Elo -> depth 6)
-  const mid1500Tuning = getPatriciaTuning({
+  const mid1500Tuning = getBallMaeGyiTuning({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'aggressive',
-    patriciaElo: 1500,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'aggressive',
+    ballmaegyiElo: 1500,
   });
   assert.strictEqual(mid1500Tuning.isHuman, true);
   assert.strictEqual(mid1500Tuning.skillLevel, 7, '1500 Elo should map to Skill Level 7');
@@ -760,9 +760,9 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   // Solid Personality Description
   const solidDesc = getEngineStrengthDescription({
     ...DEFAULT_SETTINGS,
-    activeEngineId: 'patricia',
-    patriciaPersonality: 'solid',
-    patriciaElo: 2000,
+    activeEngineId: 'ballmaegyi',
+    ballmaegyiPersonality: 'solid',
+    ballmaegyiElo: 2000,
   });
   assert(solidDesc.detail.includes('Solid Positional'), 'Should highlight Solid Positional style');
 
@@ -784,30 +784,30 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
   );
 
   // Test smooth continuous Elo shifting without jumping from 500 directly to 800
-  const p600 = mapEloToPatriciaSkill(600);
+  const p600 = mapEloToBallMaeGyiSkill(600);
   assert.strictEqual(p600.clampedElo, 600, '600 Elo must be preserved continuously');
   assert.strictEqual(p600.skillLevel, 1, '600 Elo maps to Skill Level 1');
 
-  const p700 = mapEloToPatriciaSkill(700);
+  const p700 = mapEloToBallMaeGyiSkill(700);
   assert.strictEqual(p700.clampedElo, 700, '700 Elo must be preserved continuously');
   assert.strictEqual(p700.skillLevel, 2, '700 Elo is closest to Skill Level 2 (800)');
 
-  const p800 = mapEloToPatriciaSkill(800);
+  const p800 = mapEloToBallMaeGyiSkill(800);
   assert.strictEqual(p800.clampedElo, 800, '800 Elo must be preserved continuously');
   assert.strictEqual(p800.skillLevel, 2, '800 Elo maps to Skill Level 2');
 
-  const p900 = mapEloToPatriciaSkill(900);
+  const p900 = mapEloToBallMaeGyiSkill(900);
   assert.strictEqual(p900.clampedElo, 900, '900 Elo must be preserved continuously');
   assert.strictEqual(p900.skillLevel, 2, '900 Elo maps to Skill Level 2');
 
-  // Test HighlightController does NOT drop Patricia depth 3 evaluations (500 Elo fix)
+  // Test HighlightController does NOT drop BallMaeGyi depth 3 evaluations (500 Elo fix)
   const { HighlightController } = await import('../lib/highlight-controller');
   let renderedSnapshot: any = null;
   const controller = new HighlightController(
     {
       ...DEFAULT_SETTINGS,
-      activeEngineId: 'patricia',
-      patriciaElo: 500,
+      activeEngineId: 'ballmaegyi',
+      ballmaegyiElo: 500,
       showHighlights: true,
       highlightPlayerMoves: true,
       opening: { enabled: false, repertoireId: 'auto', mode: 'off', maxPlies: 0 },
@@ -819,7 +819,7 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
 
   controller.setBoardState({
     fen: 'r1bqk1nr/pppp1ppp/2n5/4p3/1bB1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4',
-    positionKey: 'test-pos-patricia',
+    positionKey: 'test-pos-ballmaegyi',
     turn: 'w',
     isFlipped: false,
     playerColor: 'w',
@@ -830,11 +830,11 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
     ]),
   });
 
-  // Emulate Patricia 500 Elo evaluation emitting depth 2 lines
+  // Emulate BallMaeGyi 500 Elo evaluation emitting depth 2 lines
   controller.handleEvaluation({
-    engineInstanceId: 'patricia',
+    engineInstanceId: 'ballmaegyi',
     analysisId: 1,
-    positionKey: 'test-pos-patricia',
+    positionKey: 'test-pos-ballmaegyi',
     fen: 'r1bqk1nr/pppp1ppp/2n5/4p3/1bB1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4',
     depth: 2,
     scoreCp: 50,
@@ -858,11 +858,11 @@ console.log('\n10. Testing Patricia 5.1 parameter mapping, Elo calibration, and 
     timestamp: Date.now(),
   });
 
-  assert(renderedSnapshot !== null, 'HighlightController must render evaluation at depth 2 for Patricia');
+  assert(renderedSnapshot !== null, 'HighlightController must render evaluation at depth 2 for BallMaeGyi');
   assert.strictEqual(renderedSnapshot.candidates.length, 1, 'Candidate must be preserved at depth 2');
   assert.strictEqual(`${renderedSnapshot.candidates[0].from}${renderedSnapshot.candidates[0].to}`, 'c2c3');
 
-  console.log('   ✓ Patricia 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');
+  console.log('   ✓ BallMaeGyi 5.1 Skill_Level calibration, Elo mapping, and personality profiles verified');
 }
 
 // --------------------------------------------------------------------------
@@ -935,7 +935,7 @@ console.log('\n12. Testing HighlightController board defense against stale move 
 
   // An old/delayed evaluation arrives suggesting e2e4 (from the previous position when e2 was a pawn)
   const staleEvaluation: EngineEvaluation = {
-    engineInstanceId: 'patricia',
+    engineInstanceId: 'ballmaegyi',
     analysisId: 99,
     positionKey: 'pos_after_e4',
     fen: '4k3/8/8/8/4P3/8/8/4K3 b - - 0 1',
@@ -1055,12 +1055,12 @@ console.log('\n15. Testing Engine Capability Matrix gating and capsFor fallback.
   assert.strictEqual(sfCaps.hasLimitStrength, true, 'Stockfish supports LimitStrength');
   assert.strictEqual(sfCaps.hasPersonality, false);
 
-  // Patricia capabilities
-  const patCaps = capsFor('patricia');
-  assert.strictEqual(patCaps.hasDepth, true, 'Patricia supports search depth');
-  assert.strictEqual(patCaps.hasHash, true, 'Patricia supports Hash');
-  assert.strictEqual(patCaps.hasThreads, false, 'Patricia runs single-threaded in MV3');
-  assert.strictEqual(patCaps.hasPersonality, true, 'Patricia supports playstyle personality');
+  // BallMaeGyi capabilities
+  const patCaps = capsFor('ballmaegyi');
+  assert.strictEqual(patCaps.hasDepth, true, 'BallMaeGyi supports search depth');
+  assert.strictEqual(patCaps.hasHash, true, 'BallMaeGyi supports Hash');
+  assert.strictEqual(patCaps.hasThreads, false, 'BallMaeGyi runs single-threaded in MV3');
+  assert.strictEqual(patCaps.hasPersonality, true, 'BallMaeGyi supports playstyle personality');
 
   // Maia-3 & Maia-2 capabilities
   const m3Caps = capsFor('maia3');

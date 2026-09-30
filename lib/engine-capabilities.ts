@@ -18,9 +18,9 @@ export const ENGINE_CAPABILITIES: Record<string, EngineCapabilities> = {
     eloStep: 25,
     options: {},
   },
-  patricia: {
-    id: 'patricia',
-    name: 'Patricia 5.1 (Aggressive & Human)',
+  ballmaegyi: {
+    id: 'ballmaegyi',
+    name: 'BallMaeGyi 5.1 (Aggressive & Human)',
     author: 'Adam Kulju',
     hasElo: true,
     hasLimitStrength: true,

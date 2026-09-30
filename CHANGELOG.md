@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.0 - 2026-09-30
+
+### Rebrand & UI refresh
+
+- Renamed **Patricia → BallMaeGyi** everywhere (engine IDs, filenames, worker glue,
+  labels, manifest web-accessible resources). Existing engine settings are
+  auto-migrated by the new engine id.
+- Popup and review UI rebuilt on **Tailwind CSS + daisyUI 4** (dark theme):
+  tabs, selects, sliders, toggles, progress bars, buttons and stats now use
+  daisyUI components. Removed the "Ready / Thinking" status badge, the
+  glassmorphism chrome, the verbose engine-blurb paragraphs and the
+  "by Adam Kulju" / "romantic aggressive" expositions.
+- Dropped the **custom WASM import** path; only the built-in engines are offered
+  (Stockfish 17, BallMaeGyi 5.1, Maia-2, Maia-3). The IndexedDB engine store
+  and file-input UI are removed.
+- Manifest name updated to "Chess Engine Overlay by codewiththiha"; byline
+  updated across popup header and review page footer.
+- Review page: removed "human-first" / "about the feedback" / "engine is
+  separate…" explainer blocks, "You stay in control" AI badge, and the
+  "Engine results are suggestions, not truth" subtitle. Controls now use
+  daisyUI stat cards, form-control labels, range sliders, checkboxes, and
+  a native `<progress>` element for review progress.
+- Game library items are compact daisyUI cards with per-game delete buttons.
+
 ## 1.2.1 - 2026-09-30
 
 ### Fixed
@@ -29,7 +53,7 @@
   - List of all finished games auto-recorded from Chess.com (persisted to IndexedDB,
     never leaves the device).
   - Deep per-move engine analysis using a **separate review engine** (Stockfish 17 or
-    Patricia 5.1, depth 12–24, 2–5 MultiPV lines) independent from your live
+    BallMaeGyi 5.1, depth 12–24, 2–5 MultiPV lines) independent from your live
     highlight engine, so re-analysing a game never disrupts in-play hints.
   - Chess.com-style move classification with colored glyphs and plain-English
     explanations: Brilliant (!!), Great (!), Best (★), Book (B), Good (✓),
@@ -73,11 +97,11 @@
 
 ### Added
 
-- **Manual depth override for Patricia**: a new toggle unlocks the calculation-depth
+- **Manual depth override for BallMaeGyi**: a new toggle unlocks the calculation-depth
   slider in Aggressive / Human-Like / Solid modes so you can force a custom ply count
   instead of the Elo-calibrated default. Turning the override off snaps depth back
   to the auto-calibrated value.
-- **Performance / responsiveness profile** for Patricia (Instant / Balanced / Deep)
+- **Performance / responsiveness profile** for BallMaeGyi (Instant / Balanced / Deep)
   that scales depth caps and move-time budgets. Instant mode is tuned for near-
   immediate highlight feedback.
 - **22 new openings & gambits** in the catalog: Göring, Ponziani, Cochrane, Traxler,
@@ -87,15 +111,15 @@
 
 ### Fixed
 
-- **Patricia highlight lag at plies 12–14 in Aggressive/Human modes** is now
+- **BallMaeGyi highlight lag at plies 12–14 in Aggressive/Human modes** is now
   effectively instant:
   - Progressive iterative-deepening info is streamed to the UI in handicapped
     modes (previously suppressed until `bestmove`, causing the visible delay).
-  - A pre-warmed standby Patricia worker eliminates the WASM-reload gap on every
+  - A pre-warmed standby BallMaeGyi worker eliminates the WASM-reload gap on every
     new position — the busy worker is atomically swapped instead of being killed
     and reinitialized.
   - Stability window tightened from 180 ms to 60 ms (~3 animation frames).
-  - Host-supplied `movetime` budgets are now honored by the Patricia worker.
+  - Host-supplied `movetime` budgets are now honored by the BallMaeGyi worker.
 
 ## 1.1.2 - 2026-09-28
 
@@ -127,10 +151,10 @@
 
 ### Fixed
 
-- Keep Patricia's handicapped search lines internal until its selected move is final.
+- Keep BallMaeGyi's handicapped search lines internal until its selected move is final.
 - Ignore stale shallow MultiPV lines, preserve mate scores, and prevent sampling an immediate forced loss.
 - Restore the requested MultiPV setting in full-strength mode and keep five internal candidates only for handicapped searches.
-- Report Patricia initialization failures instead of treating a failed or timed-out worker as ready.
+- Report BallMaeGyi initialization failures instead of treating a failed or timed-out worker as ready.
 
 ### Release
 
