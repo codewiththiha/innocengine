@@ -103,10 +103,25 @@ export default function App() {
     return { from: uci.substring(0, 2) as Square, to: uci.substring(2, 4) as Square };
   }, [ply, nav]);
 
-  // --- Settings & game loading ---
+  // Settings & game loading
   useEffect(() => {
     getSettings().then(setSettings);
     refreshGames();
+
+    // Auto-refresh when new games are saved (content script posts GAME_SAVED).
+    const onMsg = (msg: any) => {
+      if (msg?.target === 'review' && msg?.type === 'GAME_SAVED') {
+        refreshGames();
+      }
+    };
+    try {
+      chrome?.runtime?.onMessage?.addListener?.(onMsg);
+    } catch (_) {}
+    const interval = setInterval(refreshGames, 2500);
+    return () => {
+      try { chrome?.runtime?.onMessage?.removeListener?.(onMsg); } catch (_) {}
+      clearInterval(interval);
+    };
   }, []);
 
   const refreshGames = useCallback(async () => {

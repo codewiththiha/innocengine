@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.1 - 2026-09-30
+
+### Fixed
+
+- **Game recorder reliability**: finished games now appear in the Review page.
+  - Added a global game-over watcher (DOM body observer + 750 ms polling) so the
+    Chess.com end-of-game modal triggers persistence even if the board element
+    doesn't fire a clear "inactive" mutation.
+  - When the board element is replaced (new game, navigation), the in-progress
+    recorder is flushed so previous games aren't lost on transition.
+  - Loading a URL that already shows a finished game immediately saves that
+    game instead of waiting for another mutation.
+  - Minimum-ply guard raised to 2 (so trivial single-move pages don't create
+    ghost records), and an idempotent `lastSavedKey` prevents duplicate records
+    of the same finished game.
+  - Result detection reads Chess.com's game-over header (Won / Lost / Draw)
+    instead of always recording "unknown".
+  - After a successful save, the content script sends a `GAME_SAVED` message so
+    the open Review tab refreshes automatically (plus a 2.5 s fallback poll).
+
 ## 1.2.0 - 2026-09-30
 
 ### Added

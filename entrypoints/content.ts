@@ -27,6 +27,9 @@ export default defineContentScript({
     let isHiddenByPrivacyHotkey: boolean = false;
     let disposed = false;
     let gameRecorder: GameRecorder | null = null;
+    let gameOverPollTimer: ReturnType<typeof setInterval> | null = null;
+    let seenMoveCountAtGameStart = 0;
+    let lastObservedMoveCount = 0;
 
     async function init() {
       const settings = await getSettings();
@@ -98,6 +101,51 @@ export default defineContentScript({
 
       setupPrivacyHotkey();
       startBoardScanner();
+      startGameOverWatcher();
+    }
+
+    /**
+     * Defense-in-depth game-over watcher. Chess.com's game-over dialog can be
+     * added to the DOM without triggering a board-class mutation that our
+     * board observer catches, so we also poll (cheaply) and listen for
+     * body subtree mutations that add the modal.
+     */
+    function startGameOverWatcher() {
+      const check = () => {
+        if (disposed || !currentBoard || !gameRecorder) return;
+        if (!gameRecorder.isActive()) return;
+        if (BoardParser.isGameActive(currentBoard)) return;
+        const state = BoardParser.extractBoardState(currentBoard);
+        if (state && state.moveHistory && state.moveHistory.length >= 2) {
+          const auth = GameStateAdapter.extractGameState(currentBoard, state.turn, state);
+          const fen = auth?.fen || state.fen;
+          gameRecorder.onGameOver(currentBoard, state.moveHistory, fen).catch(() => {});
+        }
+      };
+
+      if (gameOverPollTimer) clearInterval(gameOverPollTimer);
+      gameOverPollTimer = setInterval(check, 750);
+
+      // Also listen globally for the game-over modal being inserted.
+      const bodyObs = new MutationObserver((muts) => {
+        for (const m of muts) {
+          for (const n of Array.from(m.addedNodes)) {
+            const el = n as HTMLElement;
+            if (el?.nodeType !== 1) continue;
+            const isModal =
+              el.classList?.contains?.('game-over-modal-shell-container') ||
+              el.classList?.contains?.('game-over-modal-component') ||
+              el.classList?.contains?.('game-over-dialog-component') ||
+              (typeof el.querySelector === 'function' && el.querySelector?.('.game-over-modal-shell-container, .game-over-modal-component, .game-over-dialog-component'));
+            if (isModal) {
+              // Defer one tick so the DOM move-list is fully populated.
+              setTimeout(check, 50);
+              return;
+            }
+          }
+        }
+      });
+      bodyObs.observe(document.body, { childList: true, subtree: true });
     }
 
     function setupPrivacyHotkey() {
@@ -143,14 +191,20 @@ export default defineContentScript({
 
     function attachToBoard(board: HTMLElement) {
       if (disposed) return;
+
+      // When replacing the current board, flush the previous game if it
+      // actually had moves (protects against missed game-over events).
+      if (currentBoard && gameRecorder && gameRecorder.isActive() && currentSettings.autoRecordGames) {
+        const prevState = BoardParser.extractBoardState(currentBoard);
+        if (prevState && prevState.moveHistory && prevState.moveHistory.length >= 2) {
+          const auth = GameStateAdapter.extractGameState(currentBoard, prevState.turn, prevState);
+          gameRecorder.flush(currentBoard, prevState.moveHistory, auth?.fen || prevState.fen).catch(() => {});
+        }
+      }
+
       currentBoard = board;
       lastPositionKey = '';
 
-      // If there was a previous board, game was replaced (navigation or new game)
-      if (gameRecorder && gameRecorder.isActive()) {
-        // no-op — previous game was either completed & saved in handleBoardChange, or
-        // aborted by navigation (we don't save aborted/navigated-away games).
-      }
       if (gameRecorder && currentSettings.autoRecordGames) {
         gameRecorder.start(board);
       }
@@ -176,6 +230,22 @@ export default defineContentScript({
       }
 
       handleBoardChange();
+
+      // If the newly attached board already shows a finished game (e.g. user
+      // loaded a completed-game URL), save it immediately.
+      if (currentSettings.autoRecordGames && gameRecorder) {
+        const state = BoardParser.extractBoardState(board);
+        if (state && !BoardParser.isGameActive(board) && state.moveHistory && state.moveHistory.length >= 2) {
+          const auth = GameStateAdapter.extractGameState(board, state.turn, state);
+          gameRecorder.onGameOver(board, state.moveHistory, auth?.fen || state.fen).catch(() => {});
+        } else if (state && state.moveHistory) {
+          // If the game is already in-progress when we attach (e.g. content
+          // script loaded mid-game), mark start move count so we don't falsely
+          // think we recorded the game at start.
+          seenMoveCountAtGameStart = state.moveHistory.length;
+          lastObservedMoveCount = state.moveHistory.length;
+        }
+      }
 
       boardObserver = new MutationObserver((mutations) => {
         if (disposed) return;
@@ -236,7 +306,7 @@ export default defineContentScript({
       });
     }
 
-    function handleBoardChange() {
+  function handleBoardChange() {
       if (!currentBoard || !overlay || !engineClient || !highlightController) return;
 
       const state: BoardState | null = BoardParser.extractBoardState(currentBoard);
@@ -256,9 +326,15 @@ export default defineContentScript({
 
       highlightController.setBoardState(state);
 
+      // Track move-count growth to detect a game finishing with a stale board
+      const moveCount = state.moveHistory?.length ?? 0;
+      if (moveCount !== lastObservedMoveCount) {
+        lastObservedMoveCount = moveCount;
+      }
+
       if (!state.isGameActive) {
         // Game over — persist if auto-record is enabled and we have a move list.
-        if (gameRecorder && gameRecorder.isActive() && state.moveHistory && state.moveHistory.length > 0) {
+        if (gameRecorder && gameRecorder.isActive() && state.moveHistory && state.moveHistory.length >= 2) {
           gameRecorder.onGameOver(currentBoard!, state.moveHistory, state.fen).catch(() => {});
         }
         return;
@@ -288,6 +364,7 @@ export default defineContentScript({
       highlightController?.destroy();
       overlay?.destroy();
       engineClient?.destroy();
+      if (gameOverPollTimer) { clearInterval(gameOverPollTimer); gameOverPollTimer = null; }
 
       boardScanInterval = null;
       settingsDebounceTimer = null;
