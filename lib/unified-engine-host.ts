@@ -1,9 +1,16 @@
 import { UciParser } from './uci-parser';
 import { EngineRegistry } from './engine-registry';
-import { mapEloToStockfishParams, getMaiaTuning, getBallMaeGyiTuning } from './engine-tuning';
+import { mapEloToStockfishParams, getMaiaTuning, getGwayMaeGyiTuning } from './engine-tuning';
 import { evaluateHumanPolicy, predictRanked } from './maia-policy';
-import { Chess } from 'chess.js';
-import type { EngineEvaluation, EngineCandidate, MoveLine } from './types';
+import {
+  GWAYMAEGYI_MAX_NODES,
+  gwaymaegyiWorkerPath,
+  reportToEvaluation,
+  supportsSimd128,
+  type GwayWorkerRequest,
+  type GwayWorkerResponse,
+} from './gwaymaegyi-protocol';
+import type { EngineEvaluation, EngineCandidate, EngineSettings, MoveLine } from './types';
 
 export interface EngineRunOptions {
   depth: number;
@@ -14,11 +21,11 @@ export interface EngineRunOptions {
   hashMb?: number;
   senderTabId?: number;
   maxNodes?: number;
-  ballmaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
-  ballmaegyiLimitStrength?: boolean;
-  ballmaegyiElo?: number;
-  ballmaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
-  ballmaegyiManualDepth?: boolean;
+  gwaymaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  gwaymaegyiLimitStrength?: boolean;
+  gwaymaegyiElo?: number;
+  gwaymaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
+  gwaymaegyiManualDepth?: boolean;
 }
 
 export interface IEngineRunner {
@@ -355,25 +362,24 @@ class MaiaRunner implements IEngineRunner {
 }
 
 // --------------------------------------------------------------------------
-// 3. BallMaeGyi WASM Engine Runner (Aggressive & Human Mode)
+// 3. GwayMaeGyi Rust WASM Engine Runner (typed worker protocol)
 // --------------------------------------------------------------------------
-class BallMaeGyiRunner implements IEngineRunner {
-  public readonly id = 'ballmaegyi';
-  public readonly name = 'BallMaeGyi 5.1 (Aggressive & Human)';
+class GwayMaeGyiRunner implements IEngineRunner {
+  public readonly id = 'gwaymaegyi';
+  public readonly name = 'GwayMaeGyi (Rust NNUE)';
 
   private worker: Worker | null = null;
-  private standbyWorker: Worker | null = null;
-  private parser: UciParser;
   private isReady: boolean = false;
   private isSearching: boolean = false;
+  private initializationFailed: boolean = false;
+  private activeJobId: string = '';
   private activeSearchAnalysisId: number = 0;
-  private activeSearchPositionKey: string = '';
   private currentFen: string = '';
   private currentAnalysisId: number = 0;
   private currentPositionKey: string = '';
-  private currentMultiPv: number = 1;
-  private currentSkillLevel: number = -1;
-  private initializationFailed: boolean = false;
+  private appliedConfigKey: string = '';
+  private searchStartedAt: number = 0;
+  private armedStart: { analysisId: number; request: GwayWorkerRequest } | null = null;
   private senderTabId?: number;
   private pendingAnalysis: { fen: string; analysisId: number; positionKey: string; options: EngineRunOptions } | null = null;
   private onEval: (evalData: EngineEvaluation, tabId?: number) => void;
@@ -383,280 +389,148 @@ class BallMaeGyiRunner implements IEngineRunner {
     onEval: (evalData: EngineEvaluation, tabId?: number) => void,
     onStatus: (status: 'loading' | 'ready' | 'analyzing' | 'error', msg?: string, tabId?: number) => void
   ) {
-    this.parser = new UciParser();
     this.onEval = onEval;
     this.onStatus = onStatus;
   }
 
-  /**
-   * Spawn a new BallMaeGyi worker and return it once UCI initialization is done.
-   * The dual-worker strategy keeps a warm standby so we never block the UI
-   * waiting for WASM to recompile after an interrupted search.
-   */
-  private spawnWorker(label: string, timeoutMs: number = 6000): Promise<{ worker: Worker | null; ok: boolean }> {
+  public init(): Promise<void> {
     return new Promise((resolve) => {
-      let worker: Worker | null = null;
-      let settled = false;
-      let timeout: ReturnType<typeof setTimeout> | null = null;
+      this.destroyWorker();
+      this.initializationFailed = false;
+      this.isReady = false;
+      this.isSearching = false;
+      this.armedStart = null;
+      this.appliedConfigKey = '';
+      this.onStatus('loading', 'Initializing GwayMaeGyi WASM...');
 
-      const done = (w: Worker | null, ok: boolean) => {
-        if (settled) return;
-        settled = true;
-        if (timeout) clearTimeout(timeout);
-        resolve({ worker: w, ok });
-      };
-
+      let worker: Worker;
       try {
-        const workerUrl = chrome.runtime.getURL('engine/ballmaegyi/ballmaegyi-worker.js');
-        worker = new Worker(workerUrl);
+        worker = new Worker(chrome.runtime.getURL(gwaymaegyiWorkerPath(supportsSimd128())), { type: 'module' });
       } catch (error) {
-        console.error(`[BallMaeGyiRunner] ${label} spawn failed:`, error);
-        done(null, false);
+        console.error('[GwayMaeGyiRunner] Worker spawn failed:', error);
+        this.initializationFailed = true;
+        this.onStatus('error', 'Failed to launch GwayMaeGyi worker');
+        resolve();
         return;
       }
 
-      timeout = setTimeout(() => {
-        if (worker) {
-          try { worker.terminate(); } catch (_) {}
-        }
-        console.warn(`[BallMaeGyiRunner] ${label} init timed out`);
-        done(null, false);
-      }, timeoutMs);
+      const timeout = setTimeout(() => {
+        console.warn('[GwayMaeGyiRunner] Initialization timed out');
+        this.initializationFailed = true;
+        try { worker.terminate(); } catch (_) {}
+        this.onStatus('error', 'GwayMaeGyi WebAssembly initialization timed out');
+        resolve();
+      }, 10000);
 
       worker.onmessage = (event: MessageEvent) => {
-        const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
-        if (line === 'uciok' || line === 'readyok') {
-          // Detach listeners before returning; the caller will re-bind.
-          worker!.onmessage = null;
-          worker!.onerror = null;
-          done(worker, true);
+        const message = event.data as GwayWorkerResponse;
+        if (message.type === 'ready') {
+          clearTimeout(timeout);
+          this.worker = worker;
+          this.bindWorker(worker);
+          this.isReady = true;
+          this.onStatus('ready', 'GwayMaeGyi Ready');
+          resolve();
+          const pending = this.pendingAnalysis;
+          this.pendingAnalysis = null;
+          if (pending) {
+            this.analyze(pending.fen, pending.analysisId, pending.positionKey, pending.options);
+          }
+          return;
+        }
+        if (message.type === 'init-error') {
+          clearTimeout(timeout);
+          console.error('[GwayMaeGyiRunner] Engine init failed:', message.error);
+          this.initializationFailed = true;
+          try { worker.terminate(); } catch (_) {}
+          this.onStatus('error', 'GwayMaeGyi engine failed to initialize');
+          resolve();
         }
       };
 
       worker.onerror = (error) => {
-        console.error(`[BallMaeGyiRunner] ${label} failed:`, error);
-        if (worker) {
-          try { worker.terminate(); } catch (_) {}
-        }
-        done(null, false);
-      };
-
-      worker.postMessage('uci');
-      worker.postMessage('isready');
-      worker.postMessage('setoption name Hash value 32');
-      worker.postMessage(`setoption name MultiPV value ${this.currentMultiPv}`);
-    });
-  }
-
-  /** Kick off a standby worker warm-up in the background (best effort). */
-  private warmStandby() {
-    if (this.standbyWorker) return;
-    this.spawnWorker('standby')
-      .then(({ worker }) => {
-        if (worker) {
-          this.standbyWorker = worker;
-        }
-      })
-      .catch(() => {});
-  }
-
-  public init(): Promise<void> {
-    return new Promise((resolve) => {
-      try {
-        if (this.worker) {
-          try {
-            this.worker.terminate();
-          } catch (_) {}
-          this.worker = null;
-        }
-        if (this.standbyWorker) {
-          try {
-            this.standbyWorker.terminate();
-          } catch (_) {}
-          this.standbyWorker = null;
-        }
-
-        this.initializationFailed = false;
-        this.isReady = false;
-        this.isSearching = false;
-        this.onStatus('loading', 'Initializing BallMaeGyi WASM...');
-        this.currentSkillLevel = -1;
-
-        this.spawnWorker('primary').then(({ worker, ok }) => {
-          if (!ok || !worker) {
-            this.initializationFailed = true;
-            this.isReady = false;
-            this.worker = null;
-            this.onStatus('error', 'BallMaeGyi worker did not complete UCI initialization');
-            resolve();
-            return;
-          }
-
-          this.worker = worker;
-          this.isReady = true;
-          this.isSearching = false;
-
-          this.worker.onmessage = (event: MessageEvent) => {
-            const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
-            if (line === 'uciok' || line === 'readyok') {
-              this.isReady = true;
-              this.isSearching = false;
-              this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
-              return;
-            }
-            this.handleLine(line);
-          };
-
-          this.worker.onerror = (error) => {
-            console.error('[BallMaeGyiRunner] Worker failed:', error);
-            this.initializationFailed = true;
-            this.isReady = false;
-            this.isSearching = false;
-            this.pendingAnalysis = null;
-            try {
-              this.worker?.terminate();
-            } catch (_) {}
-            this.worker = null;
-            this.onStatus('error', 'BallMaeGyi worker failed');
-          };
-
-          this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
-          resolve();
-
-          // Kick off a standby warm-up AFTER primary is ready so we don't compete
-          // for the main thread during initial load.
-          this.warmStandby();
-
-          if (this.pendingAnalysis) {
-            const pending = this.pendingAnalysis;
-            this.pendingAnalysis = null;
-            this.analyze(pending.fen, pending.analysisId, pending.positionKey, pending.options);
-          }
-        });
-      } catch (error) {
-        console.error('[BallMaeGyiRunner] Initialization failed:', error);
+        clearTimeout(timeout);
+        console.error('[GwayMaeGyiRunner] Worker failed during init:', error);
         this.initializationFailed = true;
-        this.isReady = false;
-        this.pendingAnalysis = null;
-        this.onStatus('error', 'Failed to launch BallMaeGyi worker');
+        try { worker.terminate(); } catch (_) {}
+        this.onStatus('error', 'GwayMaeGyi worker failed');
         resolve();
-      }
+      };
     });
   }
 
-  /**
-   * Atomically swap to a standby worker (or spawn one if none is ready).
-   * Returns true if the swap succeeded instantly.
-   */
-  private swapToStandby(): boolean {
-    const next = this.standbyWorker;
-    this.standbyWorker = null;
-    if (next) {
-      // Kill old
-      try {
-        this.worker?.terminate();
-      } catch (_) {}
-      this.worker = next;
-      this.isReady = true;
+  private bindWorker(worker: Worker) {
+    worker.onmessage = (event: MessageEvent) => this.handleMessage(event.data as GwayWorkerResponse);
+    worker.onerror = (error) => {
+      console.error('[GwayMaeGyiRunner] Worker failed:', error);
+      this.initializationFailed = true;
+      this.isReady = false;
       this.isSearching = false;
-      this.currentSkillLevel = -1;
-      this.worker.onmessage = (event: MessageEvent) => {
-        const line = typeof event.data === 'string' ? event.data : event.data?.line || '';
-        if (line === 'uciok' || line === 'readyok') {
-          this.isReady = true;
-          this.isSearching = false;
-          this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
+      this.armedStart = null;
+      this.pendingAnalysis = null;
+      this.destroyWorker();
+      this.onStatus('error', 'GwayMaeGyi worker failed');
+    };
+  }
+
+  private handleMessage(message: GwayWorkerResponse) {
+    switch (message.type) {
+      case 'ack': {
+        // The start request is chained on the position ack: the worker validates
+        // the FEN atomically, and searching an old position after a rejected FEN
+        // would highlight moves for the wrong board.
+        const armed = this.armedStart;
+        if (armed && message.id === `pos-${armed.analysisId}` && armed.analysisId === this.currentAnalysisId) {
+          this.armedStart = null;
+          this.activeJobId = armed.request.id as string;
+          this.searchStartedAt = performance.now();
+          this.isSearching = true;
+          this.worker?.postMessage(armed.request);
+          this.onStatus('analyzing', undefined, this.senderTabId);
+        }
+        return;
+      }
+      case 'progress':
+      case 'done': {
+        // The worker suppresses stale callbacks; the job id correlation guards
+        // against an in-flight report of a just-replaced analysis.
+        if (message.id !== this.activeJobId || this.activeSearchAnalysisId !== this.currentAnalysisId) {
           return;
         }
-        this.handleLine(line);
-      };
-      this.worker.onerror = (error) => {
-        console.error('[BallMaeGyiRunner] Standby worker failed:', error);
-        this.initializationFailed = true;
-        this.isReady = false;
-        this.isSearching = false;
-        try {
-          this.worker?.terminate();
-        } catch (_) {}
-        this.worker = null;
-        this.onStatus('error', 'BallMaeGyi worker failed');
-      };
-      // Trigger warm of the next standby in the background
-      this.warmStandby();
-      return true;
-    }
-    return false;
-  }
-
-  private handleLine(line: string) {
-    if (line === 'uciok' || line === 'readyok') {
-      this.isReady = true;
-      this.isSearching = false;
-      this.onStatus('ready', 'BallMaeGyi 5.1 Ready');
-      return;
-    }
-
-    if (line.startsWith('bestmove')) {
-      this.isSearching = false;
-    }
-
-    // STRICT STALENESS FILTER:
-    // If this line was emitted from an older analysis or a different position key,
-    // immediately drop it! This prevents previous-move suggestions from rendering on a new position.
-    if (this.activeSearchAnalysisId !== this.currentAnalysisId) {
-      return;
-    }
-
-    const partialEval = this.parser.parseLine(line);
-    if (partialEval && partialEval.bestMove) {
-      if (!partialEval.isCalculating && (!partialEval.candidates || partialEval.candidates.length === 0)) {
+        const elapsedMs = Math.max(0, performance.now() - this.searchStartedAt);
+        const evaluation = reportToEvaluation(
+          message.report,
+          this.currentFen,
+          this.currentAnalysisId,
+          this.currentPositionKey,
+          elapsedMs
+        );
+        this.onEval(evaluation, this.senderTabId);
+        if (message.type === 'done') {
+          this.isSearching = false;
+          this.onStatus('ready', 'GwayMaeGyi Ready', this.senderTabId);
+        }
         return;
       }
-
-      // Ensure the evaluated positionKey matches the active position
-      if (partialEval.positionKey && partialEval.positionKey !== this.currentPositionKey) {
+      case 'error': {
+        const armed = this.armedStart;
+        if (armed && message.id === `pos-${armed.analysisId}`) {
+          this.armedStart = null;
+          this.isSearching = false;
+          this.onStatus('error', 'GwayMaeGyi rejected the board position', this.senderTabId);
+          return;
+        }
+        if (message.id && message.id === this.activeJobId) {
+          this.isSearching = false;
+          this.onStatus('error', message.error, this.senderTabId);
+          return;
+        }
+        // Invalid input leaves engine state intact; log and keep the worker usable.
+        console.warn('[GwayMaeGyiRunner] Worker rejected request:', message.id, message.error);
         return;
       }
-
-      const isBlack = (partialEval.fen || this.currentFen).split(' ')[1] === 'b';
-      const whiteCp =
-        partialEval.scoreCp !== null && partialEval.scoreCp !== undefined
-          ? isBlack
-            ? -partialEval.scoreCp
-            : partialEval.scoreCp
-          : null;
-      const whiteMate =
-        partialEval.scoreMate !== null && partialEval.scoreMate !== undefined
-          ? isBlack
-            ? -partialEval.scoreMate
-            : partialEval.scoreMate
-          : null;
-
-      const evalData: EngineEvaluation = {
-        engineInstanceId: 'ballmaegyi',
-        analysisId: this.currentAnalysisId,
-        positionKey: this.currentPositionKey,
-        fen: this.currentFen,
-        depth: partialEval.depth || 0,
-        scoreCp: partialEval.scoreCp ?? null,
-        scoreMate: partialEval.scoreMate ?? null,
-        whiteScoreCp: whiteCp,
-        whiteScoreMate: whiteMate,
-        bestMove: partialEval.bestMove,
-        multiPvLines: partialEval.multiPvLines || [],
-        candidates: partialEval.candidates || [],
-        nodes: partialEval.nodes,
-        nps: partialEval.nps,
-        timeMs: partialEval.timeMs,
-        isCalculating: partialEval.isCalculating ?? false,
-        timestamp: Date.now(),
-      };
-
-      this.onEval(evalData, this.senderTabId);
-
-      if (!partialEval.isCalculating) {
-        this.onStatus('ready', 'BallMaeGyi Ready', this.senderTabId);
-      }
+      default:
+        return;
     }
   }
 
@@ -666,31 +540,7 @@ class BallMaeGyiRunner implements IEngineRunner {
     this.currentPositionKey = positionKey;
     this.senderTabId = options.senderTabId;
 
-    // INSTANT INTERRUPT OF STALE SYNCHRONOUS SEARCH:
-    // BallMaeGyi is single-threaded WASM; postMessage('stop') queues behind the
-    // running search. Instead we swap to a pre-warmed standby worker for 0ms
-    // handoff. If no standby is warm yet, fall back to terminate + re-init.
-    if (this.isSearching) {
-      if (this.swapToStandby()) {
-        // Successfully swapped; fall through and start the new search.
-      } else if (this.worker) {
-        try {
-          this.worker.onerror = null;
-          this.worker.onmessage = null;
-          this.worker.terminate();
-        } catch (_) {}
-        this.worker = null;
-        this.isReady = false;
-        this.isSearching = false;
-        this.pendingAnalysis = { fen, analysisId, positionKey, options };
-        this.init();
-        return;
-      }
-    }
-
-    if (this.initializationFailed) {
-      return;
-    }
+    if (this.initializationFailed) return;
 
     if (!this.worker || !this.isReady) {
       this.pendingAnalysis = { fen, analysisId, positionKey, options };
@@ -698,92 +548,90 @@ class BallMaeGyiRunner implements IEngineRunner {
     }
 
     this.activeSearchAnalysisId = analysisId;
-    this.activeSearchPositionKey = positionKey;
-    this.isSearching = true;
-    this.parser.reset(fen, analysisId, positionKey);
 
-    // Dynamic MultiPV
-    const targetMultiPv = Math.max(1, Math.min(5, options.multiPv || 1));
-    if (this.currentMultiPv !== targetMultiPv) {
-      this.worker.postMessage(`setoption name MultiPV value ${targetMultiPv}`);
-      this.currentMultiPv = targetMultiPv;
-    }
-
-    // Configure BallMaeGyi Human / Aggressive Tuning
-    const tuning = getBallMaeGyiTuning({
-      ballmaegyiPersonality: options.ballmaegyiPersonality,
-      ballmaegyiLimitStrength: options.ballmaegyiLimitStrength,
-      ballmaegyiElo: options.ballmaegyiElo ?? options.targetElo,
+    const tuning = getGwayMaeGyiTuning({
+      gwaymaegyiPersonality: options.gwaymaegyiPersonality,
+      gwaymaegyiLimitStrength: options.gwaymaegyiLimitStrength,
+      gwaymaegyiElo: options.gwaymaegyiElo ?? options.targetElo,
+      targetElo: options.targetElo,
       depth: options.depth,
       multiPv: options.multiPv,
-      ballmaegyiManualDepth: options.ballmaegyiManualDepth,
-      ballmaegyiPerformance: options.ballmaegyiPerformance,
-    } as any);
+      gwaymaegyiManualDepth: options.gwaymaegyiManualDepth,
+      gwaymaegyiPerformance: options.gwaymaegyiPerformance,
+    } as EngineSettings);
 
-    this.worker.postMessage(`setoption name Personality value ${tuning.personality}`);
-    this.worker.postMessage(`setoption name UCI_LimitStrength value ${tuning.isHuman}`);
-    this.worker.postMessage(`setoption name UCI_Elo value ${tuning.targetElo}`);
-
-    if (this.currentSkillLevel !== tuning.skillLevel) {
-      this.worker.postMessage(`setoption name Skill_Level value ${tuning.skillLevel}`);
-      this.currentSkillLevel = tuning.skillLevel;
+    const hashMiB = Math.max(1, Math.min(64, options.hashMb ?? 32));
+    const configKey = `${tuning.mode}|${tuning.skillLevel}|${tuning.multiPv}|${hashMiB}`;
+    if (configKey !== this.appliedConfigKey) {
+      this.appliedConfigKey = configKey;
+      this.post({
+        id: `cfg-${analysisId}`,
+        type: 'configure',
+        options: {
+          mode: tuning.mode,
+          skillLevel: tuning.skillLevel,
+          multiPv: tuning.multiPv,
+          hashMiB,
+        },
+      });
     }
 
-    const targetDepth = tuning.recommendedDepth;
-    const moveTime = tuning.moveTimeMs;
-
-    this.worker.postMessage(`position fen ${fen}`);
-    this.worker.postMessage(`go depth ${targetDepth} movetime ${moveTime}`);
+    this.post({ id: `pos-${analysisId}`, type: 'position', fen });
+    this.armedStart = {
+      analysisId,
+      request: {
+        id: `go-${analysisId}`,
+        type: 'start',
+        depth: Math.min(64, tuning.recommendedDepth),
+        nodes: GWAYMAEGYI_MAX_NODES,
+        quantum: tuning.quantum,
+        reportIntervalMs: tuning.reportIntervalMs,
+        timeMs: tuning.timeMs,
+      },
+    };
     this.onStatus('analyzing', undefined, this.senderTabId);
   }
 
   public stop() {
     if (this.initializationFailed) return;
-
-    if (this.isSearching) {
-      // Prefer swapping to a warm standby; fall back to terminate+reinit.
-      if (!this.swapToStandby() && this.worker) {
-        try {
-          this.worker.onerror = null;
-          this.worker.onmessage = null;
-          this.worker.terminate();
-        } catch (_) {}
-        this.worker = null;
-        this.isReady = false;
-        this.isSearching = false;
-        this.init();
-      } else {
-        this.isSearching = false;
-      }
-    } else if (this.worker) {
-      this.worker.postMessage('stop');
+    this.armedStart = null;
+    if (this.worker && this.isReady && this.isSearching) {
+      // Cooperative slices make stop cheap: it lands between bounded work slices,
+      // so the terminate + respawn machinery of the old blocking build is gone.
+      this.post({ id: `stop-${this.currentAnalysisId}`, type: 'stop' });
     }
-    this.onStatus('ready', 'BallMaeGyi Ready', this.senderTabId);
+    this.isSearching = false;
+    this.onStatus('ready', 'GwayMaeGyi Ready', this.senderTabId);
   }
 
   public destroy() {
-    if (this.worker) {
-      try {
-        this.worker.onerror = null;
-        this.worker.onmessage = null;
-        this.worker.postMessage('quit');
-        this.worker.terminate();
-      } catch (_) {}
-      this.worker = null;
-    }
-    if (this.standbyWorker) {
-      try {
-        this.standbyWorker.onerror = null;
-        this.standbyWorker.onmessage = null;
-        this.standbyWorker.postMessage('quit');
-        this.standbyWorker.terminate();
-      } catch (_) {}
-      this.standbyWorker = null;
-    }
+    // Termination reclaims peak WASM memory; a graceful dispose handshake only
+    // matters when the worker outlives the engine, which never happens here.
+    this.armedStart = null;
+    this.destroyWorker();
     this.isReady = false;
     this.isSearching = false;
     this.initializationFailed = false;
     this.pendingAnalysis = null;
+  }
+
+  private post(request: GwayWorkerRequest) {
+    try {
+      this.worker?.postMessage(request);
+    } catch (error) {
+      console.warn('[GwayMaeGyiRunner] Failed to post worker request:', request.type, error);
+    }
+  }
+
+  private destroyWorker() {
+    if (this.worker) {
+      try {
+        this.worker.onmessage = null;
+        this.worker.onerror = null;
+        this.worker.terminate();
+      } catch (_) {}
+      this.worker = null;
+    }
   }
 }
 
@@ -903,7 +751,7 @@ class CustomWasmRunner implements IEngineRunner {
 }
 
 // --------------------------------------------------------------------------
-// 4. Unified Engine Host (Manages Lifecycle & Switching)
+// 5. Unified Engine Host (Manages Lifecycle & Switching)
 // --------------------------------------------------------------------------
 class UnifiedEngineHost {
   private activeRunner: IEngineRunner | null = null;
@@ -945,8 +793,8 @@ class UnifiedEngineHost {
 
     this.currentEngineId = engineId;
 
-    if (engineId === 'ballmaegyi') {
-      this.activeRunner = new BallMaeGyiRunner(
+    if (engineId === 'gwaymaegyi') {
+      this.activeRunner = new GwayMaeGyiRunner(
         (ev, tabId) => this.broadcastEvaluation(ev, tabId),
         (st, msg, tabId) => this.broadcastStatus(st, msg, tabId)
       );
@@ -1002,11 +850,11 @@ class UnifiedEngineHost {
             multiPv: message.multiPv || 1,
             limitStrength: message.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: message.targetElo ?? this.lastOptions.targetElo,
-            ballmaegyiPersonality: message.ballmaegyiPersonality ?? this.lastOptions.ballmaegyiPersonality,
-            ballmaegyiLimitStrength: message.ballmaegyiLimitStrength ?? this.lastOptions.ballmaegyiLimitStrength,
-            ballmaegyiElo: message.ballmaegyiElo ?? this.lastOptions.ballmaegyiElo,
-            ballmaegyiPerformance: message.ballmaegyiPerformance ?? this.lastOptions.ballmaegyiPerformance,
-            ballmaegyiManualDepth: message.ballmaegyiManualDepth ?? this.lastOptions.ballmaegyiManualDepth,
+            gwaymaegyiPersonality: message.gwaymaegyiPersonality ?? this.lastOptions.gwaymaegyiPersonality,
+            gwaymaegyiLimitStrength: message.gwaymaegyiLimitStrength ?? this.lastOptions.gwaymaegyiLimitStrength,
+            gwaymaegyiElo: message.gwaymaegyiElo ?? this.lastOptions.gwaymaegyiElo,
+            gwaymaegyiPerformance: message.gwaymaegyiPerformance ?? this.lastOptions.gwaymaegyiPerformance,
+            gwaymaegyiManualDepth: message.gwaymaegyiManualDepth ?? this.lastOptions.gwaymaegyiManualDepth,
             threads: message.threads,
             hashMb: message.hashMb,
             senderTabId: message.senderTabId || sender?.tab?.id,
@@ -1047,11 +895,11 @@ class UnifiedEngineHost {
             multiPv: s.multiPv ?? this.lastOptions.multiPv,
             limitStrength: s.limitStrength ?? this.lastOptions.limitStrength,
             targetElo: s.targetElo ?? this.lastOptions.targetElo,
-            ballmaegyiPersonality: s.ballmaegyiPersonality ?? this.lastOptions.ballmaegyiPersonality,
-            ballmaegyiLimitStrength: s.ballmaegyiLimitStrength ?? this.lastOptions.ballmaegyiLimitStrength,
-            ballmaegyiElo: s.ballmaegyiElo ?? this.lastOptions.ballmaegyiElo,
-            ballmaegyiPerformance: s.ballmaegyiPerformance ?? this.lastOptions.ballmaegyiPerformance,
-            ballmaegyiManualDepth: s.ballmaegyiManualDepth ?? this.lastOptions.ballmaegyiManualDepth,
+            gwaymaegyiPersonality: s.gwaymaegyiPersonality ?? this.lastOptions.gwaymaegyiPersonality,
+            gwaymaegyiLimitStrength: s.gwaymaegyiLimitStrength ?? this.lastOptions.gwaymaegyiLimitStrength,
+            gwaymaegyiElo: s.gwaymaegyiElo ?? this.lastOptions.gwaymaegyiElo,
+            gwaymaegyiPerformance: s.gwaymaegyiPerformance ?? this.lastOptions.gwaymaegyiPerformance,
+            gwaymaegyiManualDepth: s.gwaymaegyiManualDepth ?? this.lastOptions.gwaymaegyiManualDepth,
             threads: s.threads ?? this.lastOptions.threads,
             hashMb: s.hashMb ?? this.lastOptions.hashMb,
           };

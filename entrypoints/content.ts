@@ -51,14 +51,14 @@ export default defineContentScript({
         const multiPvChanged = newSettings.multiPv !== currentSettings.multiPv;
         const depthChanged = newSettings.depth !== currentSettings.depth;
         const engineChanged = newSettings.activeEngineId !== currentSettings.activeEngineId;
-        const patriciaChanged =
-          newSettings.ballmaegyiElo !== currentSettings.ballmaegyiElo ||
-          newSettings.ballmaegyiPersonality !== currentSettings.ballmaegyiPersonality ||
-          newSettings.ballmaegyiLimitStrength !== currentSettings.ballmaegyiLimitStrength;
+        const gwaymaegyiChanged =
+          newSettings.gwaymaegyiElo !== currentSettings.gwaymaegyiElo ||
+          newSettings.gwaymaegyiPersonality !== currentSettings.gwaymaegyiPersonality ||
+          newSettings.gwaymaegyiLimitStrength !== currentSettings.gwaymaegyiLimitStrength;
         const eloChanged =
           newSettings.limitStrength !== currentSettings.limitStrength ||
           newSettings.targetElo !== currentSettings.targetElo ||
-          patriciaChanged;
+          gwaymaegyiChanged;
         const openingChanged =
           JSON.stringify(newSettings.opening) !== JSON.stringify(currentSettings.opening);
         const visualChanged =

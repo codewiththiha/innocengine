@@ -8,8 +8,8 @@ export default defineConfig({
 
     return {
       name: 'Chess Engine Overlay by codewiththiha',
-      description: 'Real-time Stockfish & BallMaeGyi analysis with board highlights and eval bar on Chess.com only.',
-      version: '1.4.0',
+      description: 'Real-time Stockfish & GwayMaeGyi analysis with board highlights and eval bar on Chess.com only.',
+      version: '1.5.0',
       permissions: isFirefox
         ? ['storage', 'activeTab', 'tabs']
         : ['storage', 'activeTab', 'tabs', 'offscreen'],
@@ -30,7 +30,7 @@ export default defineConfig({
             'engine/stockfish.js',
             'engine/stockfish.wasm',
             'engine/stockfish.wasm.js',
-            'engine/ballmaegyi/*',
+            'engine/gwaymaegyi/*',
             'icon/*.png',
           ],
           matches: ['*://*.chess.com/*'],

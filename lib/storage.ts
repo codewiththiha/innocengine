@@ -9,11 +9,11 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   hashMb: 32,
   limitStrength: true,
   targetElo: 2200,
-  ballmaegyiPersonality: 'human',
-  ballmaegyiLimitStrength: true,
-  ballmaegyiElo: 2200,
-  ballmaegyiManualDepth: false,
-  ballmaegyiPerformance: 'responsive',
+  gwaymaegyiPersonality: 'human',
+  gwaymaegyiLimitStrength: true,
+  gwaymaegyiElo: 2200,
+  gwaymaegyiManualDepth: false,
+  gwaymaegyiPerformance: 'responsive',
   showHighlights: true,
   highlightPlayerMoves: true,
   highlightOpponentMoves: false,
@@ -26,7 +26,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
   showNumberCircles: false,
   autoAnalyze: true,
   controlledColor: 'auto',
-  activeEngineId: 'ballmaegyi',
+  activeEngineId: 'gwaymaegyi',
   lastPopupTab: 'engine',
   captureResistantOverlay: false,
   highlightShape: 'square',
@@ -61,7 +61,7 @@ export const DEFAULT_SETTINGS: EngineSettings = {
         allowRisky: false,
         allowMeme: false,
       },
-      ballmaegyi: {
+      gwaymaegyi: {
         mode: 'adaptive',
         maxLossCp: 300,
         minEngineDepth: 2,
@@ -91,8 +91,18 @@ export const DEFAULT_SETTINGS: EngineSettings = {
 };
 
 function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings {
-  // v1.3 rename: 'patricia' engine id → 'ballmaegyi'
-  if ((loaded as any).activeEngineId === 'patricia') loaded.activeEngineId = 'ballmaegyi';
+  // v1.5 engine replacement: patricia/ballmaegyi → gwaymaegyi (id and tuning keys)
+  const legacy = loaded as any;
+  if (legacy.activeEngineId === 'patricia' || legacy.activeEngineId === 'ballmaegyi') {
+    legacy.activeEngineId = 'gwaymaegyi';
+  }
+  for (const key of ['Personality', 'LimitStrength', 'Elo', 'ManualDepth', 'Performance']) {
+    const oldKey = `ballmaegyi${key}`;
+    if (oldKey in legacy) {
+      legacy[`gwaymaegyi${key}`] ??= legacy[oldKey];
+      delete legacy[oldKey];
+    }
+  }
   // v1.4 drop legacy review/recording keys
   delete (loaded as any).reviewEngineId;
   delete (loaded as any).reviewDepth;
@@ -104,6 +114,12 @@ function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings
     strictLine?: boolean;
   };
   delete loadedOpening.strictLine;
+  const loadedPolicy = { ...(loadedOpening.enginePolicy ?? {}) } as Record<string, unknown>;
+  if ('ballmaegyi' in loadedPolicy) {
+    loadedPolicy['gwaymaegyi'] ??= loadedPolicy['ballmaegyi'];
+    delete loadedPolicy['ballmaegyi'];
+  }
+  loadedOpening.enginePolicy = loadedPolicy as EngineSettings['opening']['enginePolicy'];
 
   return {
     ...DEFAULT_SETTINGS,
@@ -118,8 +134,8 @@ function normalizeSettings(loaded: Partial<EngineSettings> = {}): EngineSettings
     highlightShape: loaded.highlightShape ?? DEFAULT_SETTINGS.highlightShape,
     multiPv: loaded.multiPv ?? DEFAULT_SETTINGS.multiPv,
     activeEngineId: loaded.activeEngineId ?? DEFAULT_SETTINGS.activeEngineId,
-    ballmaegyiPersonality: loaded.ballmaegyiPersonality ?? DEFAULT_SETTINGS.ballmaegyiPersonality,
-    ballmaegyiElo: loaded.ballmaegyiElo ?? DEFAULT_SETTINGS.ballmaegyiElo,
+    gwaymaegyiPersonality: loaded.gwaymaegyiPersonality ?? DEFAULT_SETTINGS.gwaymaegyiPersonality,
+    gwaymaegyiElo: loaded.gwaymaegyiElo ?? DEFAULT_SETTINGS.gwaymaegyiElo,
     limitStrength: loaded.limitStrength ?? DEFAULT_SETTINGS.limitStrength,
     targetElo: loaded.targetElo ?? DEFAULT_SETTINGS.targetElo,
     opening: {

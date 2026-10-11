@@ -125,11 +125,11 @@ export class HighlightController {
 
     // Filter out premature 1-ply blunders (depth < 4) during initial alpha-beta expansion.
     // Note: Maia models operate via 1-node policy without alpha-beta search.
-    // Low-Elo BallMaeGyi operates at intentional novice depths (depth 3 for 500-700 Elo) and is also exempt.
+    // Low-Elo GwayMaeGyi operates at intentional novice depths (depth 3 for 500-700 Elo) and is also exempt.
     const primaryCandidate = displayCandidates[0];
     const isLowDepthEngine =
       evaluation.engineInstanceId?.startsWith('maia') ||
-      evaluation.engineInstanceId === 'ballmaegyi';
+      evaluation.engineInstanceId === 'gwaymaegyi';
     if (evaluation.depth < 4 && !primaryCandidate?.isBookMove && !isLowDepthEngine) {
       return;
     }
@@ -354,7 +354,7 @@ export class HighlightController {
 
     const opening = this.settings.opening;
     const enginePolicy = opening?.enginePolicy?.[this.settings.activeEngineId] ?? {};
-    const minEngineDepth = enginePolicy.minEngineDepth ?? (this.settings.activeEngineId === 'ballmaegyi' ? 2 : opening?.safety?.minEngineDepth ?? 8);
+    const minEngineDepth = enginePolicy.minEngineDepth ?? (this.settings.activeEngineId === 'gwaymaegyi' ? 2 : opening?.safety?.minEngineDepth ?? 8);
     const topEngineCandidate = engineCandidates[0];
     if (!topEngineCandidate) return true;
 

@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.5.0 - 2026-10-11
+
+### Engine replacement: BallMaeGyi (Patricia) → GwayMaeGyi (Rust NNUE)
+
+- The built-in house engine is now **GwayMaeGyi**, the safe Rust chess engine
+  from <https://github.com/codewiththiha/gwaymaegyi> (NNUE evaluation with
+  three embedded models, iterative PVS search, Chess960 support). It replaces
+  the retired BallMaeGyi 5.1 (Patricia) Emscripten build as a strictly better,
+  actively developed successor.
+- Verbatim upstream WASM packages ship for both backends — `simd128` (feature
+  detected at runtime) and `portable` fallback — under
+  `public/engine/gwaymaegyi/`, with MIT/engine and NNUE weight licenses plus a
+  `SOURCE.md` provenance record. The old `public/engine/ballmaegyi/` assets
+  (~10 MB) are deleted.
+- The engine runner now speaks the engine's strongly typed JSON worker
+  protocol instead of UCI text lines. Searches run as cooperative bounded
+  slices in a single worker, so move interrupts, retuning and stops land
+  between slices instantly — the old warm-standby dual-worker and
+  terminate/respawn machinery is deleted.
+- Search starts only after the worker atomically validates and acks the FEN,
+  so a rejected position can never analyze the wrong board. Style-picked
+  human/aggressive best moves remain authoritative for on-board highlights,
+  mirroring UCI `bestmove` semantics.
+- Personalities map onto engine modes (Aggressive/Human-Like/Solid→balanced
+  modes, Full Strength → skill 21) with the same nominal 500–3000 skill table
+  upstream ships. UI now marks Elo sliders as nominal, uncalibrated presets
+  per upstream guidance.
+- Legacy settings auto-migrate: `patricia`/`ballmaegyi` engine ids and the
+  `ballmaegyi*` tuning keys (including opening engine policy) become their
+  `gwaymaegyi` equivalents without data loss.
+- Stockfish, Maia-2/Maia-3 and custom WASM engines are unchanged.
+
 ## 1.4.0 - 2026-09-30
 
 ### Removed

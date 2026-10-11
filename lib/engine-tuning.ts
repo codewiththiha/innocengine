@@ -13,74 +13,81 @@ export interface MaiaTuning {
   maxNodes: number; // Force 1 node search (zero-search human policy)
 }
 
-export const BALLMAEGYI_SKILL_LEVELS = [
+// Nominal skill table, identical to upstream gwaymaegyi SkillLevel::NOMINAL_ELO.
+// These labels are engine controls, not calibrated playing ratings.
+export const GWAYMAEGYI_SKILL_LEVELS = [
   500, 800, 1000, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
   1900, 2000, 2100, 2200, 2300, 2400, 2500, 2650, 2800, 3000,
 ];
 
-export interface BallMaeGyiTuning {
-  isHuman: boolean;
-  skillLevel: number; // 1..20 for human mode, 21 for full strength
+export interface GwayMaeGyiTuning {
+  mode: 'balanced' | 'aggressive' | 'human-like' | 'analysis';
+  isLimited: boolean;
+  skillLevel: number; // 1..20 limited play, 21 (full strength) otherwise
   targetElo: number;
   recommendedDepth: number;
   personality: 'aggressive' | 'human' | 'full_strength' | 'solid';
   multiPv: number;
-  cpLoss: number;
-  useProgressiveInfo: boolean;
-  moveTimeMs: number;
+  timeMs: number; // hard worker deadline; the engine adapts a soft stop inside it
+  quantum: number; // work units per cooperative slice
+  reportIntervalMs: number;
 }
 
-export function mapEloToBallMaeGyiSkill(targetElo: number): {
+export function mapEloToGwayMaeGyiSkill(targetElo: number): {
   skillLevel: number;
   clampedElo: number;
-  cpLoss: number;
 } {
   const clampedElo = Math.max(500, Math.min(3000, targetElo));
   let closestIdx = 0;
   let minDiff = Infinity;
-  for (let i = 0; i < BALLMAEGYI_SKILL_LEVELS.length; i++) {
-    const diff = Math.abs(BALLMAEGYI_SKILL_LEVELS[i]! - clampedElo);
+  for (let i = 0; i < GWAYMAEGYI_SKILL_LEVELS.length; i++) {
+    const diff = Math.abs(GWAYMAEGYI_SKILL_LEVELS[i]! - clampedElo);
     if (diff < minDiff) {
       minDiff = diff;
       closestIdx = i;
     }
   }
-  const skillLevel = closestIdx + 1; // 1-based (1..20)
-  const cpLoss = Math.max(0, 120 - Math.floor(clampedElo / 25));
-  return { skillLevel, clampedElo, cpLoss };
+  return { skillLevel: closestIdx + 1, clampedElo }; // 1-based (1..20)
 }
 
-export function getBallMaeGyiTuning(settings: EngineSettings): BallMaeGyiTuning {
-  const personality = settings.ballmaegyiPersonality || 'aggressive';
-  const limitStrength = settings.ballmaegyiLimitStrength ?? (personality !== 'full_strength');
-  const rawElo = settings.ballmaegyiElo ?? settings.targetElo ?? 2500;
+export function getGwayMaeGyiTuning(settings: EngineSettings): GwayMaeGyiTuning {
+  const personality = settings.gwaymaegyiPersonality || 'aggressive';
+  const limitStrength = settings.gwaymaegyiLimitStrength ?? (personality !== 'full_strength');
+  const rawElo = settings.gwaymaegyiElo ?? settings.targetElo ?? 2500;
   const multiPv = Math.max(1, Math.min(4, settings.multiPv || 1));
+  const perfMode = settings.gwaymaegyiPerformance || 'responsive';
+  const quantum = perfMode === 'responsive' ? 128 : perfMode === 'balanced' ? 256 : 512;
+  const reportIntervalMs = 50;
+
+  const mode =
+    personality === 'human' ? 'human-like' :
+    personality === 'solid' ? 'balanced' :
+    'aggressive';
 
   if (!limitStrength || personality === 'full_strength') {
-    const perfMode = settings.ballmaegyiPerformance || 'responsive';
     const baseDepth = Math.min(20, Math.max(12, settings.depth || 16));
     const fullDepth =
       perfMode === 'responsive' ? Math.min(16, baseDepth) :
       perfMode === 'balanced' ? Math.min(18, baseDepth) :
       Math.min(22, baseDepth);
     return {
-      isHuman: false,
+      mode,
+      isLimited: false,
       skillLevel: 21,
       targetElo: 3500,
       recommendedDepth: fullDepth,
       personality: 'full_strength',
       multiPv,
-      cpLoss: 0,
-      useProgressiveInfo: true,
-      moveTimeMs: perfMode === 'responsive' ? 350 : perfMode === 'balanced' ? 600 : 1200,
+      timeMs: perfMode === 'responsive' ? 350 : perfMode === 'balanced' ? 600 : 1200,
+      quantum,
+      reportIntervalMs,
     };
   }
 
-  const manualDepth = !!settings.ballmaegyiManualDepth;
-  const perfMode = settings.ballmaegyiPerformance || 'responsive';
+  const manualDepth = !!settings.gwaymaegyiManualDepth;
   const userDepth = settings.depth || 16;
 
-  const { skillLevel, clampedElo, cpLoss } = mapEloToBallMaeGyiSkill(rawElo);
+  const { skillLevel, clampedElo } = mapEloToGwayMaeGyiSkill(rawElo);
 
   // Realistic novice-to-master depth scaling (baseline, "balanced" profile):
   // 500-600 Elo: depth 2 (novice 1-move tactical horizon)
@@ -118,13 +125,9 @@ export function getBallMaeGyiTuning(settings: EngineSettings): BallMaeGyiTuning 
   // Manual override: when user force-enables depth slider, respect their choice.
   const recommendedDepth = manualDepth ? Math.max(2, Math.min(24, userDepth)) : autoDepth;
 
-  // Progressive info streaming is essential for instant highlight feedback.
-  // Always enable for aggro/human modes so early depths show highlights immediately.
-  const useProgressiveInfo = true;
-
-  // Tighten movetime budgets in "responsive" mode so the single-threaded WASM
-  // doesn't block the worker for hundreds of milliseconds past its target depth.
-  const moveTimeMs =
+  // Cooperative slices keep the worker interruptible between slices, so the
+  // deadline only bounds the move budget instead of a blocking search.
+  const timeMs =
     perfMode === 'responsive'
       ? Math.min(220, Math.max(80, recommendedDepth * 22))
       : perfMode === 'balanced'
@@ -132,15 +135,16 @@ export function getBallMaeGyiTuning(settings: EngineSettings): BallMaeGyiTuning 
       : Math.min(900, Math.max(180, recommendedDepth * 60));
 
   return {
-    isHuman: true,
+    mode,
+    isLimited: true,
     skillLevel,
     targetElo: clampedElo,
     recommendedDepth,
     personality,
     multiPv,
-    cpLoss,
-    useProgressiveInfo,
-    moveTimeMs,
+    timeMs,
+    quantum,
+    reportIntervalMs,
   };
 }
 
@@ -241,30 +245,30 @@ export function getEngineStrengthDescription(settings: EngineSettings): {
     };
   }
 
-  if (settings.activeEngineId === 'ballmaegyi') {
-    const ballmaegyi = getBallMaeGyiTuning(settings);
-    if (!ballmaegyi.isHuman || ballmaegyi.personality === 'full_strength') {
+  if (settings.activeEngineId === 'gwaymaegyi') {
+    const gwaymaegyi = getGwayMaeGyiTuning(settings);
+    if (!gwaymaegyi.isLimited || gwaymaegyi.personality === 'full_strength') {
       return {
-        badge: 'BallMaeGyi 5.1 (CCRL ~3500+)',
-        detail: 'Skill Level 21 • Full Strength (EAS 430,000 Aggressive)',
-        subtext: "Adam Kulju's romantic aggressive engine at maximum tactical strength. High draw contempt and ruthless piece sacrifices.",
+        badge: 'GwayMaeGyi (Full Strength)',
+        detail: 'Skill Level 21 • Full Strength (Rust NNUE)',
+        subtext: 'Safe Rust engine with NNUE evaluation at maximum tactical strength. Cooperative WASM search with resumable slices.',
       };
     }
     const modeLabel =
-      ballmaegyi.personality === 'aggressive'
-        ? 'Aggressive (EAS 430k)'
-        : ballmaegyi.personality === 'solid'
+      gwaymaegyi.personality === 'aggressive'
+        ? 'Aggressive'
+        : gwaymaegyi.personality === 'solid'
         ? 'Solid Positional'
         : 'Human-Like';
     return {
-      badge: `BallMaeGyi ${modeLabel.split(' ')[0]} (${ballmaegyi.targetElo})`,
-      detail: `${modeLabel} • Skill Level ${ballmaegyi.skillLevel} / 20 (${ballmaegyi.targetElo} Elo) • Depth ${ballmaegyi.recommendedDepth} ply`,
+      badge: `GwayMaeGyi ${modeLabel.split(' ')[0]} (${gwaymaegyi.targetElo})`,
+      detail: `${modeLabel} • Skill Level ${gwaymaegyi.skillLevel} / 20 (${gwaymaegyi.targetElo} nominal Elo) • Depth ${gwaymaegyi.recommendedDepth} ply`,
       subtext:
-        ballmaegyi.personality === 'aggressive'
-          ? `Tactical sacrifices and king attack with search scaled to ~${ballmaegyi.targetElo} Elo.`
-          : ballmaegyi.personality === 'solid'
-          ? `Positional king safety and classical solid lines calibrated to ~${ballmaegyi.targetElo} Elo.`
-          : `Calibrated human blunder rate with MultiPV error distribution for authentic ~${ballmaegyi.targetElo} Elo play.`,
+        gwaymaegyi.personality === 'aggressive'
+          ? `NNUE-attacked play scaled to ~${gwaymaegyi.targetElo} nominal Elo. Strength labels are uncalibrated.`
+          : gwaymaegyi.personality === 'solid'
+          ? `Balanced positional evaluation at ~${gwaymaegyi.targetElo} nominal Elo. Strength labels are uncalibrated.`
+          : `Human-like error tolerance conditioned on ~${gwaymaegyi.targetElo} nominal Elo. Strength labels are uncalibrated.`,
     };
   }
 

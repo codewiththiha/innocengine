@@ -18,15 +18,15 @@ export const ENGINE_CAPABILITIES: Record<string, EngineCapabilities> = {
     eloStep: 25,
     options: {},
   },
-  ballmaegyi: {
-    id: 'ballmaegyi',
-    name: 'BallMaeGyi 5.1 (Aggressive & Human)',
-    author: 'Adam Kulju',
+  gwaymaegyi: {
+    id: 'gwaymaegyi',
+    name: 'GwayMaeGyi (Rust NNUE)',
+    author: 'codewiththiha',
     hasElo: true,
     hasLimitStrength: true,
     hasSkillLevel: true,
-    hasThreads: false, // Single-threaded WebAssembly in extension
-    hasHash: true,
+    hasThreads: false, // Cooperative single-worker WASM; no shared memory required
+    hasHash: true, // 1..64 MiB browser ceiling
     hasDepth: true,
     hasMultiPv: true,
     hasPersonality: true,

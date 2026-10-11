@@ -1,8 +1,8 @@
 {
   "name": "chess-ai-overlay",
-  "description": "Educational tool for real-time Stockfish engine analysis and move square highlights on Chess.com.",
+  "description": "Educational tool for real-time Stockfish and GwayMaeGyi (Rust NNUE) engine analysis and move square highlights on Chess.com.",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -18,7 +18,7 @@
     "xpi:firefox": "npm run build:firefox && npm run build:firefox:mv3 && mkdir -p releases && (cd .output/firefox-mv2 && zip -r ../../releases/chess-ai-overlay-${npm_package_version}-firefox.xpi .) && (cd .output/firefox-mv3 && zip -r ../../releases/chess-ai-overlay-${npm_package_version}-firefox-mv3.xpi .)",
     "preview": "node preview-server.cjs",
     "compile": "tsc --noEmit",
-    "test": "tsx tests/engine-and-multipv.test.ts && tsx tests/opening-safety.test.ts && tsx tests/ballmaegyi-worker.test.ts",
+    "test": "tsx tests/engine-and-multipv.test.ts && tsx tests/opening-safety.test.ts && tsx tests/gwaymaegyi-engine.test.ts",
     "postinstall": "wxt prepare",
     "release:build": "npm run compile && npm test && npm run build && npm run zip && npm run build:firefox && rm -rf releases && npm run zip:firefox && npm run xpi:firefox"
   },

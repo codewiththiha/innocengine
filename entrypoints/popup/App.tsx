@@ -3,7 +3,7 @@ import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../../lib/storage';
 import { capsFor } from '../../lib/engine-capabilities';
 import { OPENING_CATALOG } from '../../lib/openings/catalog';
 import OpeningBrowser from './components/OpeningBrowser';
-import { getBallMaeGyiTuning, getStockfishTuning, mapEloToBallMaeGyiSkill } from '../../lib/engine-tuning';
+import { getGwayMaeGyiTuning, getStockfishTuning, mapEloToGwayMaeGyiSkill } from '../../lib/engine-tuning';
 import type { EngineSettings, EngineEvaluation, EngineCapabilities, OpeningMode } from '../../lib/types';
 import {
   Activity, RotateCcw, ExternalLink, Eye, Sliders, ShieldAlert,
@@ -17,15 +17,15 @@ const TAB_RESET_KEYS: Record<Tab, (keyof EngineSettings)[]> = {
   board: ['showHighlights', 'highlightPlayerMoves', 'highlightOpponentMoves', 'showArrows',
     'showEvalBar', 'showHud', 'highlighterOpacity', 'showNumberCircles', 'highlightShape'],
   analysis: ['depth', 'multiPv', 'autoAnalyze'],
-  strength: ['limitStrength', 'targetElo', 'ballmaegyiPersonality', 'ballmaegyiElo',
-    'ballmaegyiPerformance', 'ballmaegyiManualDepth'],
+  strength: ['limitStrength', 'targetElo', 'gwaymaegyiPersonality', 'gwaymaegyiElo',
+    'gwaymaegyiPerformance', 'gwaymaegyiManualDepth'],
   opening: ['opening'],
   advanced: ['hashMb', 'threads'],
 };
 
 const BUILTIN_ENGINES = [
   { id: 'stockfish', label: 'Stockfish 17' },
-  { id: 'ballmaegyi', label: 'BallMaeGyi 5.1' },
+  { id: 'gwaymaegyi', label: 'GwayMaeGyi' },
   { id: 'maia3', label: 'Maia-3' },
   { id: 'maia2', label: 'Maia-2' },
 ];
@@ -71,8 +71,8 @@ export default function App() {
   const maxThreads = navigator.hardwareConcurrency || 8;
 
   const resolveDepth = (s: EngineSettings): number => {
-    if (s.activeEngineId === 'ballmaegyi' && !s.ballmaegyiManualDepth && s.ballmaegyiPersonality !== 'full_strength')
-      return getBallMaeGyiTuning(s).recommendedDepth;
+    if (s.activeEngineId === 'gwaymaegyi' && !s.gwaymaegyiManualDepth && s.gwaymaegyiPersonality !== 'full_strength')
+      return getGwayMaeGyiTuning(s).recommendedDepth;
     if (s.activeEngineId === 'stockfish' && s.limitStrength) return getStockfishTuning(s).maxDepth;
     if (s.activeEngineId === 'maia2' || s.activeEngineId === 'maia3') return 1;
     return s.depth || 16;
@@ -82,7 +82,7 @@ export default function App() {
     const next = { ...settings, ...patch };
     const autoDepth = resolveDepth(next);
     const isAuto =
-      (next.activeEngineId === 'ballmaegyi' && !next.ballmaegyiManualDepth && next.ballmaegyiPersonality !== 'full_strength') ||
+      (next.activeEngineId === 'gwaymaegyi' && !next.gwaymaegyiManualDepth && next.gwaymaegyiPersonality !== 'full_strength') ||
       (next.activeEngineId === 'stockfish' && next.limitStrength) ||
       next.activeEngineId === 'maia2' || next.activeEngineId === 'maia3';
     if (isAuto) next.depth = autoDepth;
@@ -111,12 +111,12 @@ export default function App() {
 
   const openPlayground = () => chrome.tabs.create({ url: chrome.runtime.getURL('playground.html') });
 
-  const isBallMaeGyi = settings.activeEngineId === 'ballmaegyi';
+  const isGwayMaeGyi = settings.activeEngineId === 'gwaymaegyi';
   const isStockfish = settings.activeEngineId === 'stockfish';
   const isMaia2 = settings.activeEngineId === 'maia2';
   const isMaia3 = settings.activeEngineId === 'maia3';
   const effectiveDepth = resolveDepth(settings);
-  const isDepthAuto = (isBallMaeGyi && !settings.ballmaegyiManualDepth && settings.ballmaegyiPersonality !== 'full_strength') || (isStockfish && settings.limitStrength) || isMaia2 || isMaia3;
+  const isDepthAuto = (isGwayMaeGyi && !settings.gwaymaegyiManualDepth && settings.gwaymaegyiPersonality !== 'full_strength') || (isStockfish && settings.limitStrength) || isMaia2 || isMaia3;
 
   return (
     <div className="popup-shell flex flex-col bg-base-100 text-base-content" data-theme="dark">
@@ -245,11 +245,11 @@ export default function App() {
               <input type="range" className="range range-primary range-xs" min="1" max="24" step="1" value={effectiveDepth} disabled={isDepthAuto}
                 onChange={(e) => !isDepthAuto && apply({ depth: parseInt(e.target.value,10) })}/>
             </label>
-            {isBallMaeGyi && settings.ballmaegyiPersonality !== 'full_strength' && (
+            {isGwayMaeGyi && settings.gwaymaegyiPersonality !== 'full_strength' && (
               <label className="flex items-center justify-between cursor-pointer">
                 <span className="text-sm">Manual depth</span>
-                <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.ballmaegyiManualDepth}
-                  onChange={(e) => apply({ ballmaegyiManualDepth: e.target.checked })}/>
+                <input type="checkbox" className="toggle toggle-primary toggle-sm" checked={!!settings.gwaymaegyiManualDepth}
+                  onChange={(e) => apply({ gwaymaegyiManualDepth: e.target.checked })}/>
               </label>
             )}
             <label className="form-control w-full">
@@ -265,29 +265,30 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'strength' && isBallMaeGyi && (
+        {tab === 'strength' && isGwayMaeGyi && (
           <div className="flex flex-col gap-3">
             <label className="form-control w-full">
               <div className="label py-1"><span className="label-text">Playstyle</span></div>
-              <select className="select select-bordered select-sm w-full" value={settings.ballmaegyiPersonality || 'human'}
-                onChange={(e) => apply({ ballmaegyiPersonality: e.target.value as any })}>
+              <select className="select select-bordered select-sm w-full" value={settings.gwaymaegyiPersonality || 'human'}
+                onChange={(e) => apply({ gwaymaegyiPersonality: e.target.value as any })}>
                 <option value="aggressive">Aggressive</option>
                 <option value="human">Human-like</option>
                 <option value="full_strength">Full strength</option>
                 <option value="solid">Solid</option>
               </select>
             </label>
-            {settings.ballmaegyiPersonality !== 'full_strength' && (
+            {settings.gwaymaegyiPersonality !== 'full_strength' && (
               <label className="form-control w-full">
-                <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{mapEloToBallMaeGyiSkill(settings.ballmaegyiElo ?? 2200).clampedElo}</span></div>
-                <input type="range" className="range range-primary range-xs" min="500" max="3000" step="100" value={settings.ballmaegyiElo ?? 2200}
-                  onChange={(e) => apply({ ballmaegyiElo: parseInt(e.target.value,10) })}/>
+                <div className="label py-1"><span className="label-text">Target Elo</span><span className="label-text-alt">{mapEloToGwayMaeGyiSkill(settings.gwaymaegyiElo ?? 2200).clampedElo}</span></div>
+                <input type="range" className="range range-primary range-xs" min="500" max="3000" step="100" value={settings.gwaymaegyiElo ?? 2200}
+                  onChange={(e) => apply({ gwaymaegyiElo: parseInt(e.target.value,10) })}/>
+                <div className="label py-0 pt-1"><span className="label-text-alt opacity-50">Nominal skill preset, not a calibrated rating</span></div>
               </label>
             )}
             <label className="form-control w-full">
               <div className="label py-1"><span className="label-text">Responsiveness</span></div>
-              <select className="select select-bordered select-sm w-full" value={settings.ballmaegyiPerformance || 'responsive'}
-                onChange={(e) => apply({ ballmaegyiPerformance: e.target.value as any })}>
+              <select className="select select-bordered select-sm w-full" value={settings.gwaymaegyiPerformance || 'responsive'}
+                onChange={(e) => apply({ gwaymaegyiPerformance: e.target.value as any })}>
                 <option value="responsive">Instant</option>
                 <option value="balanced">Balanced</option>
                 <option value="deep">Deep</option>

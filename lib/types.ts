@@ -3,7 +3,7 @@ import type { OpeningConfig as OpeningSettingsConfig } from './openings/types';
 export type { OpeningConfig, OpeningMode } from './openings/types';
 
 export const APP_NAME = 'Chess Engine Overlay by codewiththiha';
-export const APP_VERSION = '1.4.0';
+export const APP_VERSION = '1.5.0';
 
 export const CHESS_DOMAINS = [
   'chess.com',
@@ -61,11 +61,11 @@ export interface EngineSettings {
   hashMb: number;
   limitStrength: boolean;
   targetElo: number;
-  ballmaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
-  ballmaegyiLimitStrength?: boolean;
-  ballmaegyiElo?: number;
-  ballmaegyiManualDepth?: boolean;
-  ballmaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
+  gwaymaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+  gwaymaegyiLimitStrength?: boolean;
+  gwaymaegyiElo?: number;
+  gwaymaegyiManualDepth?: boolean;
+  gwaymaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
   showHighlights: boolean;
   highlightPlayerMoves: boolean;
   highlightOpponentMoves: boolean;
@@ -177,9 +177,11 @@ export type ExtensionMessage =
       activeEngineId?: string;
       limitStrength?: boolean;
       targetElo?: number;
-      ballmaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
-      ballmaegyiLimitStrength?: boolean;
-      ballmaegyiElo?: number;
+      gwaymaegyiPersonality?: 'aggressive' | 'human' | 'full_strength' | 'solid';
+      gwaymaegyiLimitStrength?: boolean;
+      gwaymaegyiElo?: number;
+      gwaymaegyiPerformance?: 'responsive' | 'balanced' | 'deep';
+      gwaymaegyiManualDepth?: boolean;
       threads?: number;
       hashMb?: number;
       tabId?: number;
