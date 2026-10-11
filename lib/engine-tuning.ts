@@ -127,12 +127,21 @@ export function getGwayMaeGyiTuning(settings: EngineSettings): GwayMaeGyiTuning 
 
   // Cooperative slices keep the worker interruptible between slices, so the
   // deadline only bounds the move budget instead of a blocking search.
-  const timeMs =
-    perfMode === 'responsive'
-      ? Math.min(220, Math.max(80, recommendedDepth * 22))
-      : perfMode === 'balanced'
-      ? Math.min(420, Math.max(120, recommendedDepth * 35))
-      : Math.min(900, Math.max(180, recommendedDepth * 60));
+  //
+  // The budget scales with the nominal Elo: stronger presets must reach far
+  // deeper iterations, and a flat ~220 ms deadline left high-Elo searches
+  // truncated mid-iteration, so 2500/3000 really played weaker than 2200.
+  // Manual-depth users get extra headroom proportional to their ply setting.
+  const eloFactor = (clampedElo - 500) / 2500;
+  const budgetRange: readonly [number, number] =
+    perfMode === 'responsive' ? [140, 480] : perfMode === 'balanced' ? [260, 980] : [380, 2000];
+  const timeMs = Math.round(
+    budgetRange[0] +
+      (budgetRange[1] - budgetRange[0]) * eloFactor +
+      (manualDepth
+        ? recommendedDepth * (perfMode === 'responsive' ? 10 : perfMode === 'balanced' ? 16 : 26)
+        : 0)
+  );
 
   return {
     mode,

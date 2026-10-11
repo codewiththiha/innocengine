@@ -176,6 +176,21 @@ console.log('5. Testing GwayMaeGyi tuning profiles and clamps...');
   assert(responsive.timeMs < balanced.timeMs && balanced.timeMs < deep.timeMs,
     'Deeper profiles must carry larger move budgets');
 
+  // Move budgets scale with nominal Elo: stronger presets reach deeper
+  // iterations and a flat deadline truncated high-Elo searches mid-iteration,
+  // which made 2500/3000 play weaker than 2200.
+  for (const profile of ['responsive', 'balanced', 'deep'] as const) {
+    const low = getGwayMaeGyiTuning({ ...base, gwaymaegyiPerformance: profile, gwaymaegyiElo: 500 });
+    const mid = getGwayMaeGyiTuning({ ...base, gwaymaegyiPerformance: profile, gwaymaegyiElo: 1500 });
+    const high = getGwayMaeGyiTuning({ ...base, gwaymaegyiPerformance: profile, gwaymaegyiElo: 3000 });
+    assert(
+      low.timeMs < high.timeMs && mid.timeMs < high.timeMs && low.timeMs < mid.timeMs,
+      `${profile} budget must grow with nominal Elo (${low.timeMs} < ${mid.timeMs} < ${high.timeMs})`
+    );
+    assert(high.timeMs <= (profile === 'deep' ? 2000 : profile === 'balanced' ? 1000 : 500),
+      `${profile} budget stays inside its UI-flavor ceiling`);
+  }
+
   // Manual depth override wins over the auto Elo table and stays under the WASM 64 cap.
   const manual = getGwayMaeGyiTuning({
     ...base,

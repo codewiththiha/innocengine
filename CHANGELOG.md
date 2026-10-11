@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.1 - 2026-10-12
+
+### GwayMaeGyi: stronger presets actually play stronger
+
+- Fixed a real strength inversion in the Elo slider: above the 2200 default,
+  higher presets visibly played *weaker* than 2200. Two compounding causes:
+  the extension gave every preset the same flat ~220 ms move budget, which
+  truncated deep high-Elo searches mid-iteration; and upstream style windows
+  (opening diversity and sacrifice tolerances) were constant regardless of
+  nominal Elo, while a forced five-line search reordered the top line even
+  when no style choice remained. See upstream commit
+  `377b4e1` (style windows and the principal-variation floor now decay with
+  the nominal Elo target, closing at 3000).
+- Move budgets now scale with the nominal Elo per performance profile
+  (responsive ~140-480 ms, balanced ~260-980 ms, deep ~380-2000 ms), so every
+  slider position completes the search it actually needs.
+- Vendored upstream WASM rebuilt from gwaymaegyi `377b4e1` for both backends
+  (`SOURCE.md` pin updated); upstream test suites, wasm lanes, and the
+  deterministic fixture snapshot all pass unchanged.
+
 ## 1.5.0 - 2026-10-11
 
 ### Engine replacement: BallMaeGyi (Patricia) → GwayMaeGyi (Rust NNUE)
