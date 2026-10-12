@@ -314,4 +314,65 @@ console.log('7. Testing packaged GwayMaeGyi asset integrity...');
   console.log('   ✓ both backends, bindings, licenses, and provenance are packaged');
 }
 
+// --------------------------------------------------------------------------
+// 8. Runner: same-decision progress echoes repaint nothing
+// --------------------------------------------------------------------------
+console.log('8. Testing duplicate progress suppression in the runner...');
+{
+  const { GwayMaeGyiRunner } = await import('../lib/unified-engine-host');
+  const emitted: any[] = [];
+  class MockWorker {
+    public static instances: MockWorker[] = [];
+    public onmessage: ((event: { data: any }) => void) | null = null;
+    public onerror: ((error: unknown) => void) | null = null;
+    public readonly posted: any[] = [];
+    constructor(public readonly url: string) {
+      MockWorker.instances.push(this);
+    }
+    postMessage(message: any) {
+      this.posted.push(message);
+    }
+    terminate() {}
+    emit(message: any) {
+      this.onmessage?.({ data: message });
+    }
+  }
+  (globalThis as any).Worker = MockWorker;
+  (globalThis as any).chrome = { runtime: { getURL: (path: string) => path } };
+
+  const runner = new GwayMaeGyiRunner(
+    (evaluation: any) => emitted.push(evaluation),
+    () => {}
+  );
+  const initPromise = runner.init();
+  const worker = MockWorker.instances[0]!;
+  assert.ok(worker, 'worker must be spawned during init');
+  worker.emit({ type: 'ready' });
+  await initPromise;
+
+  const runOptions = { depth: 16, multiPv: 1, limitStrength: true, targetElo: 2200 };
+  runner.analyze(STARTPOS, 1, 'pos-1', runOptions);
+  worker.emit({ id: 'pos-1', type: 'ack', state: {} });
+  const start = worker.posted.find((message: any) => message.type === 'start');
+  assert.ok(start, 'start request must chain after the atomic position ack');
+
+  const echo = makeReport({ status: 'running', depth: 7, bestMove: 'e2e4', mate: null, scoreCp: 30 });
+  worker.emit({ id: start.id, type: 'progress', report: echo });
+  worker.emit({ id: start.id, type: 'progress', report: makeReport({ status: 'running', depth: 7, bestMove: 'e2e4', mate: null, scoreCp: 30 }) });
+  assert.strictEqual(emitted.length, 1, 'identical progress reports repaint nothing');
+  worker.emit({ id: start.id, type: 'progress', report: makeReport({ status: 'running', depth: 8, bestMove: 'd2d4', mate: null, scoreCp: 33 }) });
+  assert.strictEqual(emitted.length, 2, 'decision changes still flow');
+  worker.emit({ id: start.id, type: 'done', report: makeReport({ finished: true, status: 'depth', depth: 8, bestMove: 'd2d4', mate: null, scoreCp: 33 }) });
+  assert.strictEqual(emitted.length, 3, 'the final done report always lands');
+
+  // A fresh analysis may echo the previous job's decision state and must publish.
+  runner.analyze(STARTPOS, 2, 'pos-2', runOptions);
+  worker.emit({ id: 'pos-2', type: 'ack', state: {} });
+  const start2 = worker.posted.filter((message: any) => message.type === 'start').at(-1);
+  worker.emit({ id: start2.id, type: 'progress', report: makeReport({ status: 'running', depth: 8, bestMove: 'd2d4', mate: null, scoreCp: 33 }) });
+  assert.strictEqual(emitted.length, 4, 'a new analysis resets the duplicate window');
+  runner.destroy();
+  console.log('   ✓ echo reports suppressed; decisions and finals always flow');
+}
+
 console.log('\nAll GwayMaeGyi engine integration checks passed');

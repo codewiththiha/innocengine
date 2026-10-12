@@ -9,7 +9,7 @@ export default defineConfig({
     return {
       name: 'Chess Engine Overlay by codewiththiha',
       description: 'Real-time Stockfish & GwayMaeGyi analysis with board highlights and eval bar on Chess.com only.',
-      version: '1.5.1',
+      version: '1.5.2',
       permissions: isFirefox
         ? ['storage', 'activeTab', 'tabs']
         : ['storage', 'activeTab', 'tabs', 'offscreen'],

@@ -293,6 +293,9 @@ export default function App() {
                 <option value="balanced">Balanced</option>
                 <option value="deep">Deep</option>
               </select>
+              <div className="label py-0 pt-1"><span className="label-text-alt opacity-50">
+                Effort per board update · Instant ~0.1–0.5s, Balanced ~0.3–1s, Deep ~0.4–2s (scales with nominal Elo). Arrows refine as the search deepens.
+              </span></div>
             </label>
           </div>
         )}

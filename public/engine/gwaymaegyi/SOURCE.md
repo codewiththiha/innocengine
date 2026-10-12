@@ -6,7 +6,7 @@ build. These assets are verbatim build outputs of the upstream repository;
 edits belong upstream.
 
 - Upstream: <https://github.com/codewiththiha/gwaymaegyi>
-- Revision: `377b4e116f0134f337b6f115f483f1b2c2667e00`
+- Revision: `8cba6a181265e08bdfab23284fddf36d346c8197` · updated worker-runtime publish semantics (engine search unchanged since 377b4e1).
 - Toolchain: stable Rust (edition 2024), wasm-bindgen CLI 0.2.129
 - Build:
 

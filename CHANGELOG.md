@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.2 - 2026-10-12
+
+### GwayMaeGyi: calm, accurate highlight updates
+
+- Fixed the flickering "arrows keep appearing" behavior: during a long final
+  iteration the worker reposted an *identical* report every ~50 ms, so the
+  overlay repainted the same candidate arrows dozens of times per search.
+  The worker (upstream [8cba6a1](https://github.com/codewiththiha/gwaymaegyi/commit/8cba6a181265e08bdfab23284fddf36d346c8197)) now publishes only finished
+  searches, new iterations, and real decision changes (new best move, mate
+  flag, or a >=10 cp swing), with a slow ~400 ms liveness heartbeat in between.
+- The runner additionally drops same-decision echo reports even from older
+  workers, and the final result always lands immediately.
+- Popup now explains the Instant/Balanced/Deep effort budgets (~0.1-0.5 s /
+  ~0.3-1 s / ~0.4-2 s, scaled by nominal Elo) and that arrows refine as the
+  search deepens.
+- Engine wasm binaries are unchanged from 1.5.1 (search behavior identical);
+  only the worker runtime JS was re-vendored.
+
 ## 1.5.1 - 2026-10-12
 
 ### GwayMaeGyi: stronger presets actually play stronger

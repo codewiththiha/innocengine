@@ -2,7 +2,7 @@
   "name": "chess-ai-overlay",
   "description": "Educational tool for real-time Stockfish and GwayMaeGyi (Rust NNUE) engine analysis and move square highlights on Chess.com.",
   "private": true,
-  "version": "1.5.1",
+  "version": "1.5.2",
   "type": "module",
   "scripts": {
     "dev": "wxt",

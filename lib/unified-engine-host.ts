@@ -379,6 +379,7 @@ class GwayMaeGyiRunner implements IEngineRunner {
   private currentPositionKey: string = '';
   private appliedConfigKey: string = '';
   private searchStartedAt: number = 0;
+  private lastEvalFingerprint: string = '';
   private armedStart: { analysisId: number; request: GwayWorkerRequest } | null = null;
   private senderTabId?: number;
   private pendingAnalysis: { fen: string; analysisId: number; positionKey: string; options: EngineRunOptions } | null = null;
@@ -497,6 +498,15 @@ class GwayMaeGyiRunner implements IEngineRunner {
         if (message.id !== this.activeJobId || this.activeSearchAnalysisId !== this.currentAnalysisId) {
           return;
         }
+        // Suppress same-decision repaints: long final iterations can echo an
+        // unchanged report (liveness heartbeats), and identical arrows must not
+        // re-render. The final 'done' report always goes through.
+        const report = message.report;
+        const fingerprint = `${message.id}|${report.depth}|${report.bestMove}|${report.mate}|${report.scoreCp}`;
+        if (message.type === 'progress' && fingerprint === this.lastEvalFingerprint) {
+          return;
+        }
+        this.lastEvalFingerprint = fingerprint;
         const elapsedMs = Math.max(0, performance.now() - this.searchStartedAt);
         const evaluation = reportToEvaluation(
           message.report,
@@ -539,6 +549,9 @@ class GwayMaeGyiRunner implements IEngineRunner {
     this.currentAnalysisId = analysisId;
     this.currentPositionKey = positionKey;
     this.senderTabId = options.senderTabId;
+    // A fresh analysis must publish its progress even when the first report
+    // echoes the previous job's decision state.
+    this.lastEvalFingerprint = '';
 
     if (this.initializationFailed) return;
 
@@ -941,4 +954,4 @@ class UnifiedEngineHost {
   }
 }
 
-export { UnifiedEngineHost };
+export { UnifiedEngineHost, GwayMaeGyiRunner };
